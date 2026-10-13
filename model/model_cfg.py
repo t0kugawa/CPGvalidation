@@ -1,0 +1,2 @@
+OBJECT_MASS: float= 300.0
+SIM_MS: float = 60000.0
