@@ -1,9 +1,8 @@
 import numpy as np
-import pytest
 
 from persona.registry import Registry
 from persona.agent import Agent
-from persona.personalization import Personalizer, RunLog, MocapTargetDriver
+from persona.personalization import Personalizer, MocapTargetDriver
 from t2xcpg.bs import BrainStem
 from t2xcpg.leg import Leg as CPG_Leg
 from t2xcpg.cpg import L2CPG

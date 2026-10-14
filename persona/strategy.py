@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from typing import Dict, List
 import numpy as np
 
 
@@ -54,8 +54,7 @@ class FisherMatrix:
 
         # Rolling histories
         self.perturbation_history: List[np.ndarray] = []
-        self.advantage_history: List[np.ndarray] = []
-        self.reward_history: List[np.ndarray] = []
+        self.loss_history: List[np.ndarray] = []
         self.phase_history: List[str] = []
 
         self._scales: np.ndarray | None = None
@@ -92,14 +91,12 @@ class FisherMatrix:
             vec[i] = perturbation_dict.get(name, 0.0)
 
         self.perturbation_history.append(vec)
-        self.advantage_history.append(np.asarray(loss_vector, dtype=np.float64))
-        self.reward_history.append(np.asarray(loss_vector, dtype=np.float64))
+        self.loss_history.append(np.asarray(loss_vector, dtype=np.float64))
         self.phase_history.append(phase)
 
         if len(self.perturbation_history) > self.window_size:
             self.perturbation_history = self.perturbation_history[-self.window_size:]
-            self.advantage_history = self.advantage_history[-self.window_size:]
-            self.reward_history = self.reward_history[-self.window_size:]
+            self.loss_history = self.loss_history[-self.window_size:]
             self.phase_history = self.phase_history[-self.window_size:]
 
     def compute_fisher_matrix(self) -> np.ndarray:

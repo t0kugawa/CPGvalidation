@@ -51,13 +51,10 @@ def create_weight_recorder():
 
 
 def copy_syn_model(name: str, params: dict, wr=None):
-    try:
-        p = dict(params)
-        if wr is not None:
-            p["weight_recorder"] = wr
-        nest.CopyModel("stdp_synapse", name, p)
-    except Exception:
-        pass
+    p = dict(params)
+    if wr is not None:
+        p["weight_recorder"] = wr
+    nest.CopyModel("stdp_synapse", name, p)
 
 
 STDP_DEFAULT = {

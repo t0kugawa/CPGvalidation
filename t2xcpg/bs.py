@@ -1,5 +1,4 @@
 import nest
-from typing import Dict, Any
 
 from persona.parameter import PersonaParam
 from persona.population import Population

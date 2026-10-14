@@ -93,6 +93,10 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
     reset_rng_stream(seed)
     nest.ResetKernel()
     nest.SetKernelStatus({"resolution": 1.0, "print_time": False})
+    try:
+        nest.verbosity = nest.VerbosityLevel.ERROR
+    except Exception:
+        pass
 
     reg = Registry()
     bs = BrainStem(registry=reg, n_bs=n_bs, bs_e_hz=50.0, bs_f_hz=50.0)
@@ -137,12 +141,15 @@ def run_personalization(reference_path: str = DEFAULT_REFERENCE,
                         eps_pose: float = 0.08,
                         pose_hold_steps: int = 20,
                         loss_stop: float = 0.05,
-                        loss_window: int = 30) -> dict:
+                        loss_window: int = 30,
+                        verbose: bool = True,
+                        log_every: int = 20) -> dict:
     """
     Full experiment: build the loop, run the two-stage PERSONA optimization,
-    write the validation figure and the run log, and return the acceptance dict.
+    write the validation figure, the CSV/npz logs, and return the acceptance dict.
     """
     output_dir = output_dir or BASE_DIR
+    os.makedirs(output_dir, exist_ok=True)
     sizes = dict(n_rg=8, n_mn=8, n_int=6, n_aff=6, n_bs=8) if small \
         else dict(n_rg=20, n_mn=20, n_int=15, n_aff=20, n_bs=30)
     if small:
@@ -153,8 +160,11 @@ def run_personalization(reference_path: str = DEFAULT_REFERENCE,
         reference_path=reference_path, max_steps=n_steps,
         eps_pose=eps_pose, pose_hold_steps=pose_hold_steps,
         loss_stop=loss_stop, loss_window=loss_window, **sizes)
+    personalizer.verbose = verbose
+    personalizer.log_every = log_every
 
     log = personalizer.run()
+    log.to_csv(os.path.join(output_dir, "run_log.csv"))
     n_pose = sum(1 for s in log.stage if s == "pose")
     n_track = sum(1 for s in log.stage if s == "track")
 
@@ -177,7 +187,8 @@ def run_personalization(reference_path: str = DEFAULT_REFERENCE,
              time_ms=log.time_ms, ankle_model_L=log.ankle_model_L,
              ankle_model_R=log.ankle_model_R, ankle_target_L=log.ankle_target_L,
              ankle_target_R=log.ankle_target_R, loss=log.loss,
-             advantage=log.advantage)
+             advantage=log.advantage, mus_E_L=log.mus_E_L, mus_F_L=log.mus_F_L,
+             cut_L=log.cut_L, ia_rate_E_L=log.ia_rate_E_L, ib_rate_E_L=log.ib_rate_E_L)
 
     return {
         "acceptable": acceptance["acceptable"],
@@ -220,8 +231,10 @@ def _save_combined_figure(log, output_dir: str):
     plt.close(fig)
 
 
-def main(n_steps: int = 200, small: bool = False, output_dir: str | None = None) -> dict:
-    res = run_personalization(n_steps=n_steps, small=small, output_dir=output_dir)
+def main(n_steps: int = 200, small: bool = False, output_dir: str | None = None,
+         verbose: bool = True, log_every: int = 20) -> dict:
+    res = run_personalization(n_steps=n_steps, small=small, output_dir=output_dir,
+                              verbose=verbose, log_every=log_every)
     print(f"Steps: {res['n_steps_done']} (pose {res['n_pose']}, track {res['n_track']})")
     print(f"Final loss (last-20 mean): {res['final_loss']:.4f}")
     print(f"Acceptable: {res['acceptable']} | angle coverage: {res['angle_coverage']:.2f}")

@@ -1,5 +1,5 @@
 import nest
-from typing import Dict, Any, List
+from typing import Dict, Any
 import numpy as np
 
 from persona.parameter import PersonaParam
@@ -40,7 +40,7 @@ class Registry:
         for key, values in sampled.items():
             try:
                 nodes.set({key: values})
-            except Exception as e:
+            except Exception:
                 # Some properties in NEST are scalar or have specific setters
                 try:
                     nodes.set({key: float(np.mean(values))})

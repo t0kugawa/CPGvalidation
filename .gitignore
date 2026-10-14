@@ -5,3 +5,10 @@ __pycache__/
 *.pyc
 MUJOCO_LOG.TXT
 validation_results.png
+learning.png
+tracking.png
+inputs.png
+distribution.png
+run.log
+run_log.csv
+run_log.npz

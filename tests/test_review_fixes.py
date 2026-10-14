@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 
 from persona.parameter import PersonaParam
 from persona.strategy import FisherMatrix

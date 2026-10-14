@@ -1,6 +1,5 @@
 from typing import Dict, Any
 import nest
-import numpy as np
 
 from persona.registry import Registry
 from persona.connection import Connection
@@ -8,7 +7,6 @@ from persona.parameter import PersonaParam
 from model.adapter import CPGAdapter, CPGInput, CPGOutput
 from t2xcpg.bs import BrainStem
 from t2xcpg.leg import Leg
-from t2xcpg.utils import get_jitter_delay
 
 
 class L2CPG(CPGAdapter):

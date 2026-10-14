@@ -62,12 +62,31 @@ class RunLog:
     phase_L: List[str] = field(default_factory=list)
     phase_R: List[str] = field(default_factory=list)
     stage: List[str] = field(default_factory=list)
+    mus_E_L: List[float] = field(default_factory=list)
+    mus_F_L: List[float] = field(default_factory=list)
+    mus_E_R: List[float] = field(default_factory=list)
+    mus_F_R: List[float] = field(default_factory=list)
+    cut_L: List[float] = field(default_factory=list)
+    ia_rate_E_L: List[float] = field(default_factory=list)
+    ib_rate_E_L: List[float] = field(default_factory=list)
+
+    _NUMERIC = ("time_ms", "ankle_model_L", "ankle_model_R", "ankle_target_L",
+                "ankle_target_R", "loss", "advantage", "mus_E_L", "mus_F_L",
+                "mus_E_R", "mus_F_R", "cut_L", "ia_rate_E_L", "ib_rate_E_L")
 
     def finalize(self) -> "RunLog":
-        for name in ("time_ms", "ankle_model_L", "ankle_model_R",
-                     "ankle_target_L", "ankle_target_R", "loss", "advantage"):
+        for name in self._NUMERIC:
             setattr(self, name, np.asarray(getattr(self, name), dtype=np.float64))
         return self
+
+    def to_csv(self, path: str) -> None:
+        import csv
+        cols = list(self._NUMERIC) + ["phase_L", "phase_R", "stage"]
+        with open(path, "w", newline="") as fh:
+            w = csv.writer(fh)
+            w.writerow(cols)
+            for i in range(len(self.stage)):
+                w.writerow([getattr(self, c)[i] for c in cols])
 
 
 class Personalizer:
@@ -91,7 +110,9 @@ class Personalizer:
                  pose_hold_steps: int = 20,
                  loss_stop: float = 0.05,
                  loss_window: int = 30,
-                 max_steps: int = 1000):
+                 max_steps: int = 1000,
+                 log_every: int = 20,
+                 verbose: bool = True):
         self.registry = registry
         self.cpg = cpg
         self.rig = rig
@@ -103,6 +124,21 @@ class Personalizer:
         self.loss_stop = float(loss_stop)
         self.loss_window = int(loss_window)
         self.max_steps = int(max_steps)
+        self.log_every = int(log_every)
+        self.verbose = bool(verbose)
+
+    def _log_progress(self, log: RunLog, stage: str):
+        if not self.verbose:
+            return
+        i = len(log.stage) - 1
+        print(
+            f"[{log.time_ms[i]:7.0f} ms] {stage:5s} "
+            f"| L model {log.ankle_model_L[i]:+.3f} tgt {log.ankle_target_L[i]:+.3f} "
+            f"| R model {log.ankle_model_R[i]:+.3f} tgt {log.ankle_target_R[i]:+.3f} "
+            f"| loss {log.loss[i]:.4f} adv {log.advantage[i]:+.4f} "
+            f"| drive E/F {log.mus_E_L[i]:.2f}/{log.mus_F_L[i]:.2f} "
+            f"| CUT {log.cut_L[i]:.0f} Ia {log.ia_rate_E_L[i]:.0f} Ib {log.ib_rate_E_L[i]:.0f}",
+            flush=True)
 
     def run(self) -> RunLog:
         log = RunLog()
@@ -142,6 +178,17 @@ class Personalizer:
             log.phase_L.append(cpg_in.phase_L)
             log.phase_R.append(cpg_in.phase_R)
             log.stage.append(stage)
+            log.mus_E_L.append(cpg_out.mus_E_L)
+            log.mus_F_L.append(cpg_out.mus_F_L)
+            log.mus_E_R.append(cpg_out.mus_E_R)
+            log.mus_F_R.append(cpg_out.mus_F_R)
+            log.cut_L.append(cpg_in.cut_L)
+            log.ia_rate_E_L.append(cpg_in.ia_rate_E_L)
+            log.ib_rate_E_L.append(cpg_in.ib_rate_E_L)
+
+            if self.log_every > 0 and (len(log.stage) % self.log_every == 0
+                                       or len(log.stage) == 1):
+                self._log_progress(log, stage)
 
             if stage == "pose":
                 err = max(abs(cpg_in.ankle_angle_m_L - tgt_L),

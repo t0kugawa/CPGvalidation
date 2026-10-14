@@ -1,5 +1,4 @@
 from math import exp
-import numpy as np
 
 try:
     from model.model_cfg import OBJECT_MASS
