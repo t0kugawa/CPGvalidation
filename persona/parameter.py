@@ -1,5 +1,21 @@
 from dataclasses import dataclass, field
+import itertools
 import numpy as np
+
+_RNG_STREAM = itertools.count(1)
+_RNG_BASE_SEED = 0
+
+
+def reset_rng_stream(base_seed: int = 0) -> None:
+    """Resets the shared spawn stream so a run is reproducible."""
+    global _RNG_STREAM, _RNG_BASE_SEED
+    _RNG_STREAM = itertools.count(1)
+    _RNG_BASE_SEED = int(base_seed)
+
+
+def _new_rng() -> np.random.Generator:
+    spawn = next(_RNG_STREAM)
+    return np.random.default_rng(np.random.SeedSequence(_RNG_BASE_SEED, spawn_key=(spawn,)))
 
 
 @dataclass
@@ -8,13 +24,17 @@ class PersonaParam:
     Biological parameter with two distinct standard deviations:
     - sigma_param: parametric dispersion within the biological neuronal/synaptic population.
     - sigma_ctrl: controlling standard deviation managing exploration vs exploitation.
+
+    Each instance owns an independent RNG stream so different parameters explore
+    independent directions (a shared seed would make every parameter's k-th draw
+    identical and collapse the Fisher to rank 1).
     """
     mean: float
     sigma_param: float = 0.05
     sigma_ctrl: float = 0.1
     min: float = -1e6
     max: float = 1e6
-    rng: np.random.Generator = field(default_factory=lambda: np.random.default_rng(0))
+    rng: np.random.Generator = field(default_factory=_new_rng)
 
     @property
     def sigma(self) -> float:

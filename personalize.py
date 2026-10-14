@@ -12,13 +12,14 @@ import nest
 from persona.registry import Registry
 from persona.agent import Agent
 from persona.personalization import Personalizer, MocapTargetDriver
-from persona.validation import ValidationReport, biological_acceptance
+from persona.validation import ValidationReport
 from t2xcpg.bs import BrainStem
 from t2xcpg.leg import Leg as CPG_Leg
 from t2xcpg.cpg import L2CPG
 from model.leg import Leg as MuJoCo_Leg
-from loader.mocap import MocapLoader
+from loader.mocap import MocapLoader, treadmill_surfacevel
 from loader.stats import StatsLoader, LocomotionMetrics
+from persona.parameter import reset_rng_stream
 
 DT_MS = 10.0
 SIM_REST_ANKLE = 0.3
@@ -36,6 +37,45 @@ def align_to_sim(ankle: np.ndarray, sim_rest: float = SIM_REST_ANKLE) -> np.ndar
     return a - a[0] + sim_rest
 
 
+def fit_to_joint_range(traj: np.ndarray, lo: float = -0.8, hi: float = 1.4) -> np.ndarray:
+    """
+    Linearly maps a trajectory into the joint range [lo, hi] when its
+    excursion exceeds (or is mis-centred within) the achievable range, so the
+    target is physically realisable. Preserves shape (monotone affine map).
+    """
+    a = np.asarray(traj, dtype=np.float64)
+    amin, amax = float(a.min()), float(a.max())
+    if amax - amin <= (hi - lo) and lo <= amin and amax <= hi:
+        return a.copy()
+    span = amax - amin
+    if span < 1e-12:
+        return np.full_like(a, 0.5 * (lo + hi))
+    return lo + (a - amin) * (hi - lo) / span
+
+
+def acceptance_from_log(log,
+                        stats=None,
+                        margin: float = 0.05,
+                        coverage: float = 0.70) -> dict:
+    """
+    Biological acceptance using BOTH ankles and the Stage-2 ("track") window
+    only. angle_coverage is the fraction of tracked steps where both ankles
+    stay within `margin`.
+    """
+    from persona.validation import biological_acceptance
+
+    stage = np.asarray(log.stage)
+    track = stage == "track"
+    if not track.any():
+        track = np.ones(len(stage), dtype=bool)
+    err_L = np.abs(np.asarray(log.ankle_model_L) - np.asarray(log.ankle_target_L))
+    err_R = np.abs(np.asarray(log.ankle_model_R) - np.asarray(log.ankle_target_R))
+    err = np.maximum(err_L, err_R)[track]
+    return biological_acceptance({}, stats, err,
+                                 phase_mask=np.ones(err.shape, dtype=bool),
+                                 margin=margin, coverage=coverage)
+
+
 def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
                        n_rg: int = 20, n_mn: int = 20, n_int: int = 15,
                        n_aff: int = 20, n_bs: int = 30,
@@ -50,6 +90,7 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
     bilateral MuJoCo rig, PERSONA agent, and the mocap-driven target limb.
     """
     np.random.seed(seed)
+    reset_rng_stream(seed)
     nest.ResetKernel()
     nest.SetKernelStatus({"resolution": 1.0, "print_time": False})
 
@@ -63,9 +104,17 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
                      dt_ms=DT_MS)
 
     loader = MocapLoader(reference_path, rest_pose=None, dt_ms=DT_MS)
+    slow, fast = treadmill_surfacevel(loader.meta)
+    belt = fast if loader.meta.condition != "T" else slow
+    rig.set_treadmill_surfacevel(belt)
+    angles = loader.resample()
     driver = MocapTargetDriver(
-        ankle_L=align_to_sim(loader.ankle("L")),
-        ankle_R=align_to_sim(loader.ankle("R")),
+        ankle_L=fit_to_joint_range(align_to_sim(angles["ankle_L"])),
+        ankle_R=fit_to_joint_range(align_to_sim(angles["ankle_R"])),
+        hip_L=fit_to_joint_range(angles["hip_L"], -1.57, 1.05),
+        knee_L=fit_to_joint_range(angles["knee_L"], -1.22, 1.54),
+        hip_R=fit_to_joint_range(angles["hip_R"], -1.57, 1.05),
+        knee_R=fit_to_joint_range(angles["knee_R"], -1.22, 1.54),
         dt_ms=DT_MS,
     )
 
@@ -109,8 +158,6 @@ def run_personalization(reference_path: str = DEFAULT_REFERENCE,
     n_pose = sum(1 for s in log.stage if s == "pose")
     n_track = sum(1 for s in log.stage if s == "track")
 
-    angle_errors = np.abs(np.asarray(log.ankle_model_L) - np.asarray(log.ankle_target_L))
-    phase_mask = np.ones(len(angle_errors), dtype=bool)
     stats = StatsLoader(stats_path) if os.path.exists(stats_path) else None
 
     contact_L = np.asarray([1.0 if p == "stance" else 0.0 for p in log.phase_L])
@@ -119,8 +166,7 @@ def run_personalization(reference_path: str = DEFAULT_REFERENCE,
         np.asarray(log.ankle_model_L), np.asarray(log.ankle_model_R),
         contact_L, contact_R, DT_MS)
 
-    acceptance = biological_acceptance(
-        metrics, stats, angle_errors, phase_mask, margin=0.05, coverage=0.70)
+    acceptance = acceptance_from_log(log, stats, margin=0.05, coverage=0.70)
 
     report = ValidationReport()
     report.plot_tracking(log)
@@ -174,9 +220,14 @@ def _save_combined_figure(log, output_dir: str):
     plt.close(fig)
 
 
-if __name__ == "__main__":
-    res = run_personalization(max_steps=200)
+def main(n_steps: int = 200, small: bool = False, output_dir: str | None = None) -> dict:
+    res = run_personalization(n_steps=n_steps, small=small, output_dir=output_dir)
     print(f"Steps: {res['n_steps_done']} (pose {res['n_pose']}, track {res['n_track']})")
     print(f"Final loss (last-20 mean): {res['final_loss']:.4f}")
     print(f"Acceptable: {res['acceptable']} | angle coverage: {res['angle_coverage']:.2f}")
     print(f"Output: {res['output_dir']}")
+    return res
+
+
+if __name__ == "__main__":
+    main()

@@ -105,6 +105,17 @@ class Leg:
             raise ValueError(f"Sensor '{name}' not found")
         return i
 
+    def _gid(self, name: str) -> int:
+        i = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, name)
+        if i < 0:
+            raise ValueError(f"Geom '{name}' not found")
+        return i
+
+    def set_treadmill_surfacevel(self, x_mps: float):
+        """Sets the treadmill belt x-velocity (m/s) from the trial metadata."""
+        gid = self._gid("treadmill")
+        self.model.geom_surfacevel[gid, 0] = -float(x_mps)
+
     def _activation(self, actuator_id: int) -> float:
         adr = self.model.actuator_actadr[actuator_id]
         if adr >= 0 and adr < len(self.data.act):
@@ -153,23 +164,32 @@ class Leg:
 
     def step(self, cpg_output: CPGOutput,
              target_ankle_L: float | None = None,
-             target_ankle_R: float | None = None) -> CPGInput:
+             target_ankle_R: float | None = None,
+             target_hip_L: float | None = None,
+             target_knee_L: float | None = None,
+             target_hip_R: float | None = None,
+             target_knee_R: float | None = None) -> CPGInput:
         """
         Applies muscle drives, servos non-ankle joints to the target trajectory,
         steps physics for dt_ms, and populates CPGInput for both controlled legs.
+        Hip/knee targets default to the procedural reference when not supplied.
         """
         self.contract_muscles(cpg_output)
 
         t_s = self.time_ms / 1000.0
         hip_ref, knee_ref, ankle_ref = self.get_reference_kinematics(t_s)
+        target_hip = {"L": target_hip_L, "R": target_hip_R}
+        target_knee = {"L": target_knee_L, "R": target_knee_R}
         target_ankle = {"L": target_ankle_L, "R": target_ankle_R}
 
         for s in SIDES:
-            self.data.ctrl[self.act_hip_m[s]] = hip_ref
-            self.data.ctrl[self.act_knee_m[s]] = knee_ref
+            hip_s = hip_ref if target_hip[s] is None else float(target_hip[s])
+            knee_s = knee_ref if target_knee[s] is None else float(target_knee[s])
+            self.data.ctrl[self.act_hip_m[s]] = hip_s
+            self.data.ctrl[self.act_knee_m[s]] = knee_s
 
-            self.data.ctrl[self.act_hip_ref[s]] = hip_ref
-            self.data.ctrl[self.act_knee_ref[s]] = knee_ref
+            self.data.ctrl[self.act_hip_ref[s]] = hip_s
+            self.data.ctrl[self.act_knee_ref[s]] = knee_s
             self.data.ctrl[self.act_ankle_ref[s]] = (
                 ankle_ref if target_ankle[s] is None else float(target_ankle[s])
             )

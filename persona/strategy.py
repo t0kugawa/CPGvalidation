@@ -158,8 +158,13 @@ class FisherMatrix:
         except np.linalg.LinAlgError:
             nat_grad = np.linalg.pinv(F) @ grad_log_pi
 
-        # Apply learning rate
-        delta_vec = self.lr_mu * nat_grad
+        # Map the standardized natural-gradient step back to physical units
+        # losslessly (spec §5.1): F is built on standardized columns, so the
+        # step in standardized coordinates is F^-1 * score; multiplying by the
+        # per-feature scale restores physical units without changing the
+        # relative (standardized) direction.
+        scales = self.feature_scales()
+        delta_vec = self.lr_mu * scales * nat_grad
 
         # Return dict only for controllable parameters
         deltas = {}

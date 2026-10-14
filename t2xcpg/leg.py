@@ -253,13 +253,13 @@ class Leg:
         # Extensor Ia
         self._connect(f"ia_e_in_{leg}", f"m_e_{leg}", weight=18.0, p=0.40)
         self._connect(f"ia_e_in_{leg}", f"ia_e_{leg}", weight=12.0, p=0.40)
-        self._connect(f"ia_e_in_{leg}", f"rg_e_{leg}", weight=14.0, p=0.35,
+        self._connect(f"ia_e_in_{leg}", f"rg_e_{leg}", weight=5.0, p=0.35,
                       is_stdp=True, key=f"ia_rg_e_{leg}")
 
         # Flexor Ia
         self._connect(f"ia_f_in_{leg}", f"m_f_{leg}", weight=18.0, p=0.40)
         self._connect(f"ia_f_in_{leg}", f"ia_f_{leg}", weight=12.0, p=0.40)
-        self._connect(f"ia_f_in_{leg}", f"rg_f_{leg}", weight=14.0, p=0.35,
+        self._connect(f"ia_f_in_{leg}", f"rg_f_{leg}", weight=5.0, p=0.35,
                       is_stdp=True, key=f"ia_rg_f_{leg}")
 
         # --- Ib Golgi Tendon Organ Feedback (Tension protection / autogenic inhibition) ---

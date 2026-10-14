@@ -10,27 +10,44 @@ from model.adapter import CPGInput
 
 class MocapTargetDriver:
     """
-    Serves the target-limb ankle trajectory to the rig. `pose()` returns the
+    Serves the target-limb joint trajectory to the rig. `pose()` returns the
     Stage-1 initial pose; `target(t_ms)` returns the Stage-2 trajectory value
-    (interpolated at the simulation time).
+    (interpolated at the simulation time). Ankle is always tracked; hip/knee
+    are optional (default to the rig's procedural reference when omitted).
     """
-    def __init__(self, ankle_L, ankle_R, dt_ms: float = 10.0, pose=None):
+    def __init__(self, ankle_L, ankle_R, dt_ms: float = 10.0, pose=None,
+                 hip_L=None, knee_L=None, hip_R=None, knee_R=None):
         self.ankle_L = np.asarray(ankle_L, dtype=np.float64)
         self.ankle_R = np.asarray(ankle_R, dtype=np.float64)
         self.dt_ms = float(dt_ms)
+        self.hip_L = None if hip_L is None else np.asarray(hip_L, dtype=np.float64)
+        self.knee_L = None if knee_L is None else np.asarray(knee_L, dtype=np.float64)
+        self.hip_R = None if hip_R is None else np.asarray(hip_R, dtype=np.float64)
+        self.knee_R = None if knee_R is None else np.asarray(knee_R, dtype=np.float64)
         if pose is None:
             self._pose = (float(self.ankle_L[0]), float(self.ankle_R[0]))
         else:
             self._pose = (float(pose[0]), float(pose[1]))
 
+    def _at(self, arr, t_ms):
+        if arr is None:
+            return None
+        i = int(round(float(t_ms) / self.dt_ms))
+        i = min(max(i, 0), len(arr) - 1)
+        return float(arr[i])
+
     def pose(self) -> tuple[float, float]:
         return self._pose
 
-    def target(self, t_ms: float) -> tuple[float, float]:
-        n = len(self.ankle_L)
-        i = int(round(float(t_ms) / self.dt_ms))
-        i = min(max(i, 0), n - 1)
-        return float(self.ankle_L[i]), float(self.ankle_R[i])
+    def target(self, t_ms: float) -> dict:
+        return {
+            "target_ankle_L": self._at(self.ankle_L, t_ms),
+            "target_ankle_R": self._at(self.ankle_R, t_ms),
+            "target_hip_L": self._at(self.hip_L, t_ms),
+            "target_knee_L": self._at(self.knee_L, t_ms),
+            "target_hip_R": self._at(self.hip_R, t_ms),
+            "target_knee_R": self._at(self.knee_R, t_ms),
+        }
 
 
 @dataclass
@@ -95,17 +112,19 @@ class Personalizer:
 
         for _ in range(self.max_steps):
             if stage == "pose":
-                tgt = self.target_driver.pose()
+                tgt_L, tgt_R = self.target_driver.pose()
+                rig_kwargs = {"target_ankle_L": tgt_L, "target_ankle_R": tgt_R}
             else:
-                tgt = self.target_driver.target(self.cpg.current_time_ms)
-            tgt_L, tgt_R = tgt
+                rig_kwargs = self.target_driver.target(self.cpg.current_time_ms)
+                tgt_L = rig_kwargs["target_ankle_L"]
+                tgt_R = rig_kwargs["target_ankle_R"]
 
             actions = self.agent.sample_actions()
             self.registry.apply_explored_parameters(actions)
 
             self.cpg.update(cpg_in)
             cpg_out = self.cpg.step()
-            cpg_in = self.rig.step(cpg_out, target_ankle_L=tgt_L, target_ankle_R=tgt_R)
+            cpg_in = self.rig.step(cpg_out, **rig_kwargs)
 
             res = self.agent.step(
                 output=np.array([cpg_in.ankle_angle_m_L, cpg_in.ankle_angle_m_R]),

@@ -115,6 +115,7 @@ class L2CPG(CPGAdapter):
         """
         Simulates NEST for dt_ms and reads out motor activations.
         """
+        t_before = self.current_time_ms
         nest.Simulate(self.dt_ms)
         self.current_time_ms += self.dt_ms
 
@@ -122,8 +123,10 @@ class L2CPG(CPGAdapter):
         d_e_R, d_f_R = 0.0, 0.0
 
         if "L" in self.legs:
+            self.legs["L"].update_plastic_weights(t_before, self.current_time_ms)
             d_e_L, d_f_L = self.legs["L"].get_muscle_drives(self.dt_ms)
         if "R" in self.legs:
+            self.legs["R"].update_plastic_weights(t_before, self.current_time_ms)
             d_e_R, d_f_R = self.legs["R"].get_muscle_drives(self.dt_ms)
 
         out = CPGOutput(
