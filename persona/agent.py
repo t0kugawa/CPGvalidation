@@ -120,8 +120,15 @@ class Agent:
         error_vec = self.compute_vector_error(smoothed_out, tgt)
         loss = float(np.mean(error_vec))
 
+        # Normalize phase: str broadcasts to one key per output component;
+        # a sequence is keyed per component (per-leg phase).
+        if isinstance(phase, str):
+            phase_key = phase
+        else:
+            phase_key = tuple(phase)
+
         # Component-wise advantage with phase-separated moving-average baselines
-        advantage_vec = self.strategy.compute_advantage(error_vec, phase=phase)
+        advantage_vec = self.strategy.compute_advantage(error_vec, phase=phase_key)
 
         # Collect perturbations: parameter delta = action - mean
         perturbations: Dict[str, float] = {}
@@ -178,7 +185,7 @@ class Agent:
         self.history["error_vector"].append(error_vec.copy())
         self.history["loss"].append(loss)
         self.history["advantage_vector"].append(advantage_vec.copy())
-        self.history["phase"].append(phase)
+        self.history["phase"].append(phase_key)
         for k, p in self.params.items():
             self.history["means"][k].append(p.mean)
             self.history["sigmas_ctrl"][k].append(p.sigma_ctrl)
@@ -189,6 +196,6 @@ class Agent:
             "error_vector": error_vec,
             "loss": loss,
             "advantage_vector": advantage_vec,
-            "phase": phase,
+            "phase": phase_key,
             "delta_means": delta_means
         }
