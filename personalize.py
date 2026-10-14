@@ -12,11 +12,13 @@ import nest
 from persona.registry import Registry
 from persona.agent import Agent
 from persona.personalization import Personalizer, MocapTargetDriver
+from persona.validation import ValidationReport, biological_acceptance
 from t2xcpg.bs import BrainStem
 from t2xcpg.leg import Leg as CPG_Leg
 from t2xcpg.cpg import L2CPG
 from model.leg import Leg as MuJoCo_Leg
-from loader.mocap import MocapLoader, treadmill_surfacevel
+from loader.mocap import MocapLoader
+from loader.stats import StatsLoader, LocomotionMetrics
 
 DT_MS = 10.0
 SIM_REST_ANKLE = 0.3
@@ -78,12 +80,103 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
     return personalizer, loader
 
 
-if __name__ == "__main__":
-    personalizer, loader = build_personalizer(max_steps=200)
-    print(f"Trial: {loader.meta}")
-    print("Starting two-stage personalization...")
+def run_personalization(reference_path: str = DEFAULT_REFERENCE,
+                        stats_path: str = DEFAULT_STATS,
+                        output_dir: str | None = None,
+                        n_steps: int = 1000,
+                        small: bool = False,
+                        eps_pose: float = 0.08,
+                        pose_hold_steps: int = 20,
+                        loss_stop: float = 0.05,
+                        loss_window: int = 30) -> dict:
+    """
+    Full experiment: build the loop, run the two-stage PERSONA optimization,
+    write the validation figure and the run log, and return the acceptance dict.
+    """
+    output_dir = output_dir or BASE_DIR
+    sizes = dict(n_rg=8, n_mn=8, n_int=6, n_aff=6, n_bs=8) if small \
+        else dict(n_rg=20, n_mn=20, n_int=15, n_aff=20, n_bs=30)
+    if small:
+        pose_hold_steps = min(pose_hold_steps, 3)
+        loss_window = min(loss_window, 5)
+
+    personalizer, loader = build_personalizer(
+        reference_path=reference_path, max_steps=n_steps,
+        eps_pose=eps_pose, pose_hold_steps=pose_hold_steps,
+        loss_stop=loss_stop, loss_window=loss_window, **sizes)
+
     log = personalizer.run()
     n_pose = sum(1 for s in log.stage if s == "pose")
     n_track = sum(1 for s in log.stage if s == "track")
-    print(f"Steps: {len(log.time_ms)} (pose {n_pose}, track {n_track})")
-    print(f"Final loss: {float(log.loss[-1]):.4f} | mean last-20: {float(np.mean(log.loss[-20:])):.4f}")
+
+    angle_errors = np.abs(np.asarray(log.ankle_model_L) - np.asarray(log.ankle_target_L))
+    phase_mask = np.ones(len(angle_errors), dtype=bool)
+    stats = StatsLoader(stats_path) if os.path.exists(stats_path) else None
+
+    contact_L = np.asarray([1.0 if p == "stance" else 0.0 for p in log.phase_L])
+    contact_R = np.asarray([1.0 if p == "stance" else 0.0 for p in log.phase_R])
+    metrics = LocomotionMetrics.from_run(
+        np.asarray(log.ankle_model_L), np.asarray(log.ankle_model_R),
+        contact_L, contact_R, DT_MS)
+
+    acceptance = biological_acceptance(
+        metrics, stats, angle_errors, phase_mask, margin=0.05, coverage=0.70)
+
+    report = ValidationReport()
+    report.plot_tracking(log)
+    report.plot_learning(log)
+    report.save_all(output_dir)
+    _save_combined_figure(log, output_dir)
+    np.savez(os.path.join(output_dir, "run_log.npz"),
+             time_ms=log.time_ms, ankle_model_L=log.ankle_model_L,
+             ankle_model_R=log.ankle_model_R, ankle_target_L=log.ankle_target_L,
+             ankle_target_R=log.ankle_target_R, loss=log.loss,
+             advantage=log.advantage)
+
+    return {
+        "acceptable": acceptance["acceptable"],
+        "global_in_distribution": acceptance["global_in_distribution"],
+        "angle_coverage": acceptance["angle_coverage"],
+        "final_loss": float(np.mean(log.loss[-20:])) if len(log.loss) else float("nan"),
+        "n_steps_done": int(len(log.time_ms)),
+        "n_pose": n_pose,
+        "n_track": n_track,
+        "metrics": metrics,
+        "output_dir": output_dir,
+    }
+
+
+def _save_combined_figure(log, output_dir: str):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig, axes = plt.subplots(3, 1, figsize=(13, 10), sharex=True)
+    t = np.asarray(log.time_ms) / 1000.0
+    axes[0].plot(t, log.ankle_target_L, "k--", label="target L")
+    axes[0].plot(t, log.ankle_model_L, "r-", label="model L")
+    axes[0].plot(t, log.ankle_target_R, "b--", label="target R")
+    axes[0].plot(t, log.ankle_model_R, "g-", label="model R")
+    axes[0].set_ylabel("ankle [rad]")
+    axes[0].legend(fontsize=8)
+    axes[0].grid(alpha=0.3)
+    axes[1].plot(t, log.loss, color="tab:brown")
+    axes[1].set_ylabel("loss")
+    axes[1].grid(alpha=0.3)
+    axes[2].plot(t, log.advantage, color="tab:blue")
+    axes[2].axhline(0.0, color="k", ls=":", alpha=0.6)
+    axes[2].set_ylabel("advantage")
+    axes[2].set_xlabel("time [s]")
+    axes[2].grid(alpha=0.3)
+    fig.tight_layout()
+    os.makedirs(output_dir, exist_ok=True)
+    fig.savefig(os.path.join(output_dir, "validation_results.png"), dpi=150)
+    plt.close(fig)
+
+
+if __name__ == "__main__":
+    res = run_personalization(max_steps=200)
+    print(f"Steps: {res['n_steps_done']} (pose {res['n_pose']}, track {res['n_track']})")
+    print(f"Final loss (last-20 mean): {res['final_loss']:.4f}")
+    print(f"Acceptable: {res['acceptable']} | angle coverage: {res['angle_coverage']:.2f}")
+    print(f"Output: {res['output_dir']}")
