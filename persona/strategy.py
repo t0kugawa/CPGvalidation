@@ -58,6 +58,8 @@ class FisherMatrix:
         self.reward_history: List[np.ndarray] = []
         self.phase_history: List[str] = []
 
+        self._scales: np.ndarray | None = None
+
     def update_feature_names(self, noise_names: List[str]):
         """
         Dynamically updates noise producer tags if new ones are observed.
@@ -102,17 +104,32 @@ class FisherMatrix:
 
     def compute_fisher_matrix(self) -> np.ndarray:
         """
-        Calculates the regularized empirical Fisher / covariance matrix:
-        F = (X^T * X) / N + lambda * I
+        Calculates the regularized empirical correlation matrix of all features
+        (parameters + noise). Columns are standardized to unit variance so
+        heterogeneous units (Hz, pA, probabilities, rad) enter on equal footing.
+        """
+        return self.compute_correlation_matrix()
+
+    def feature_scales(self) -> np.ndarray:
+        return np.asarray(self._scales, dtype=np.float64)
+
+    def compute_correlation_matrix(self) -> np.ndarray:
+        """
+        F = (1 - lambda) * Corr + lambda * I, where Corr is the empirical
+        correlation of the feature-perturbation history. Unit diagonal and
+        strictly positive definite.
         """
         if len(self.perturbation_history) < 3:
+            self._scales = np.ones(self.n_total, dtype=np.float64)
             return np.eye(self.n_total, dtype=np.float64)
 
         X = np.array(self.perturbation_history, dtype=np.float64)
-        # Center around column mean to obtain proper sample covariance / correlation
-        X_centered = X - np.mean(X, axis=0, keepdims=True)
-        cov = (X_centered.T @ X_centered) / max(1, len(X) - 1)
-        F = cov + self.lambda_reg * np.eye(self.n_total, dtype=np.float64)
+        mean = np.mean(X, axis=0, keepdims=True)
+        std = np.std(X, axis=0, keepdims=True)
+        self._scales = np.maximum(std.ravel(), 1e-12)
+        Xs = (X - mean) / self._scales
+        corr = (Xs.T @ Xs) / max(1, len(X))
+        F = (1.0 - self.lambda_reg) * corr + self.lambda_reg * np.eye(self.n_total)
         return F
 
     def compute_natural_gradient_step(self,
@@ -133,7 +150,9 @@ class FisherMatrix:
                 s_ctrl = max(1e-6, sigma_ctrl_dict[name])
                 grad_log_pi[i] = (diff / (s_ctrl ** 2)) * adv_scalar
 
-        F = self.compute_fisher_matrix()
+        # TODO(fisher): recursive / Sherman-Morrison inverse or a pruned
+        # feature subspace (see spec §5.1 well-posedness).
+        F = self.compute_correlation_matrix()
         try:
             nat_grad = np.linalg.solve(F, grad_log_pi)
         except np.linalg.LinAlgError:
