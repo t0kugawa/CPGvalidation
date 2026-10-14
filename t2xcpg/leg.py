@@ -29,13 +29,15 @@ class Leg:
                  n_rg: int = 20,
                  n_mn: int = 20,
                  n_int: int = 15,
-                 n_aff: int = 20):
+                 n_aff: int = 20,
+                 p_scale: float = 1.0):
         self.leg = leg_name
         self.registry = registry
         self.n_rg = n_rg
         self.n_mn = n_mn
         self.n_int = n_int
         self.n_aff = n_aff
+        self.p_scale = float(p_scale)
 
         # Create Noise Recorder for this leg
         self.noise_recorder = NoiseRecorder(f"noise_{leg_name}")
@@ -167,6 +169,7 @@ class Leg:
     def _connect(self, src: str, tgt: str, weight: float, p: float = 0.5,
                  is_stdp: bool = False, delay: float | None = None) -> Any:
         d = get_jitter_delay() if delay is None else delay
+        p = p * self.p_scale
         w_param = self._param("weight", weight, sigma_param=abs(weight) * 0.05,
                               sigma_ctrl=abs(weight) * 0.1,
                               min_val=-150.0 if weight < 0 else 0.0,
