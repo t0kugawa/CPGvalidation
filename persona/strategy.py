@@ -6,31 +6,22 @@ import numpy as np
 @dataclass
 class PhaseBaselines:
     alpha: float = 0.95
-    stance_baseline: np.ndarray | None = None
-    swing_baseline: np.ndarray | None = None
+    _baselines: Dict[object, np.ndarray] = field(default_factory=dict)
 
-    def get_baseline(self, phase: str, dim: int) -> np.ndarray:
-        if phase == "swing":
-            if self.swing_baseline is None or len(self.swing_baseline) != dim:
-                self.swing_baseline = np.zeros(dim, dtype=np.float64)
-            return self.swing_baseline
-        else:
-            if self.stance_baseline is None or len(self.stance_baseline) != dim:
-                self.stance_baseline = np.zeros(dim, dtype=np.float64)
-            return self.stance_baseline
+    def get_baseline(self, phase_key: object, dim: int) -> np.ndarray:
+        b = self._baselines.get(phase_key)
+        if b is None or len(b) != dim:
+            b = np.zeros(dim, dtype=np.float64)
+            self._baselines[phase_key] = b
+        return b
 
-    def update(self, phase: str, reward_vector: np.ndarray):
-        r = np.asarray(reward_vector, dtype=np.float64)
-        if phase == "swing":
-            if self.swing_baseline is None or len(self.swing_baseline) != len(r):
-                self.swing_baseline = r.copy()
-            else:
-                self.swing_baseline = self.alpha * self.swing_baseline + (1.0 - self.alpha) * r
+    def update(self, phase_key: object, loss_vector: np.ndarray):
+        v = np.asarray(loss_vector, dtype=np.float64)
+        b = self._baselines.get(phase_key)
+        if b is None or len(b) != len(v):
+            self._baselines[phase_key] = v.copy()
         else:
-            if self.stance_baseline is None or len(self.stance_baseline) != len(r):
-                self.stance_baseline = r.copy()
-            else:
-                self.stance_baseline = self.alpha * self.stance_baseline + (1.0 - self.alpha) * r
+            self._baselines[phase_key] = self.alpha * b + (1.0 - self.alpha) * v
 
 
 class FisherMatrix:
@@ -77,18 +68,19 @@ class FisherMatrix:
         self.all_names = self.param_names + self.noise_names
         self.n_total = len(self.all_names)
 
-    def compute_advantage(self, reward_vector: np.ndarray, phase: str) -> np.ndarray:
-        r = np.asarray(reward_vector, dtype=np.float64)
-        base = self.baselines.get_baseline(phase, len(r))
-        advantage = r - base
-        self.baselines.update(phase, r)
+    def compute_advantage(self, loss_vector: np.ndarray, phase: object) -> np.ndarray:
+        loss = np.asarray(loss_vector, dtype=np.float64)
+        base = self.baselines.get_baseline(phase, len(loss))
+        # TODO(advantage): component-wise vector advantage (see spec §5.1) —
+        # currently baseline − loss for the scalarized loss.
+        advantage = base - loss
+        self.baselines.update(phase, loss)
         return advantage
 
     def record_step(self,
                     perturbation_dict: Dict[str, float],
-                    advantage_vector: np.ndarray,
-                    reward_vector: np.ndarray,
-                    phase: str):
+                    loss_vector: np.ndarray,
+                    phase: object):
         # Ensure all features exist in feature list
         noise_keys = [k for k in perturbation_dict.keys() if k.startswith("noise_")]
         self.update_feature_names(noise_keys)
@@ -98,8 +90,8 @@ class FisherMatrix:
             vec[i] = perturbation_dict.get(name, 0.0)
 
         self.perturbation_history.append(vec)
-        self.advantage_history.append(np.asarray(advantage_vector, dtype=np.float64))
-        self.reward_history.append(np.asarray(reward_vector, dtype=np.float64))
+        self.advantage_history.append(np.asarray(loss_vector, dtype=np.float64))
+        self.reward_history.append(np.asarray(loss_vector, dtype=np.float64))
         self.phase_history.append(phase)
 
         if len(self.perturbation_history) > self.window_size:

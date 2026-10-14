@@ -54,7 +54,7 @@ class Agent:
         self.history = {
             "steps": [],
             "error_vector": [],
-            "reward_vector": [],
+            "loss": [],
             "advantage_vector": [],
             "phase": [],
             "means": {k: [] for k in param_names},
@@ -114,12 +114,14 @@ class Agent:
         smoothed_out = self.preprocess_signal(output, zero_shift=zero_shift)
         tgt = np.asarray(target, dtype=np.float64)
 
-        # Vector error and reward
+        # Vector error and scalarized loss
+        # TODO(advantage): component-wise vector error/advantage (spec §5.1);
+        # currently the loss is scalar (mean of the error vector).
         error_vec = self.compute_vector_error(smoothed_out, tgt)
-        reward_vec = -error_vec
+        loss = float(np.mean(error_vec))
 
-        # Component-wise advantage with phase-separated moving average baselines
-        advantage_vec = self.strategy.compute_advantage(reward_vec, phase=phase)
+        # Component-wise advantage with phase-separated moving-average baselines
+        advantage_vec = self.strategy.compute_advantage(error_vec, phase=phase)
 
         # Collect perturbations: parameter delta = action - mean
         perturbations: Dict[str, float] = {}
@@ -136,8 +138,7 @@ class Agent:
         # Record step in Fisher Matrix strategy
         self.strategy.record_step(
             perturbation_dict=perturbations,
-            advantage_vector=advantage_vec,
-            reward_vector=reward_vec,
+            loss_vector=error_vec,
             phase=phase
         )
 
@@ -175,7 +176,7 @@ class Agent:
         # Logging
         self.history["steps"].append(self.current_step)
         self.history["error_vector"].append(error_vec.copy())
-        self.history["reward_vector"].append(reward_vec.copy())
+        self.history["loss"].append(loss)
         self.history["advantage_vector"].append(advantage_vec.copy())
         self.history["phase"].append(phase)
         for k, p in self.params.items():
@@ -186,7 +187,7 @@ class Agent:
         return {
             "step": self.current_step,
             "error_vector": error_vec,
-            "reward_vector": reward_vec,
+            "loss": loss,
             "advantage_vector": advantage_vec,
             "phase": phase,
             "delta_means": delta_means
