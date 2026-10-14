@@ -1,1 +1,7 @@
 data/
+.superpowers/
+.idea/
+__pycache__/
+*.pyc
+MUJOCO_LOG.TXT
+validation_results.png

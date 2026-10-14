@@ -1,187 +1,299 @@
+from typing import Dict, Any, Tuple
 import nest
-from t2xcpg.utils import poisson_to_parrot, create_izhi_population, create_spike_recorder, create_stdp_synapse, \
-    get_jitter_delay
+import numpy as np
+
+from persona.parameter import PersonaParam
+from persona.population import Population
+from persona.connection import Connection
+from persona.noise_recorder import NoiseRecorder
+from persona.registry import Registry
+from t2xcpg.utils import get_jitter_delay, create_spike_recorder, create_stdp_synapse
 
 
-class Leg:  # L/R
-    def __init__(self, leg: str, n_rg_e: int = 10, n_rg_f: int = 10,
-                 n_motor_e: int = 10, n_motor_f: int = 10,
-                 n_mus_e: int = 10, n_mus_f: int = 10,
-                 n_ia_in_e: int = 10, n_in_e: int = 20,
-                 n_in_f: int = 10, n_cut: int = 10, n_ia_e: int = 10, n_ia_f: int = 10,
-                 n_ia_int_e: int = 20, n_ia_int_f: int = 20,
-                 # --- вероятности (приведены к основному файлу) ---
-                 p_stdp: float = 0.5,          # P_IN_STDP
-                 p_rg2m: float = 0.5,          # P_IN_STDP (в основном RG->M идёт с P_IN_STDP)
-                 p_rg2mus: float = 0.8,        # P_M2MUS
-                 p_rg_rec: float = 0.12,       # P_RG_REC
-                 p_ia2rg: float = 0.4,         # IA2RG_P (статические Ia->int пути)
-                 p_rg_recip_e: float = 0.15,   # P_RG_RECIP_E
-                 p_rg_recip_f: float = 0.30,   # P_RG_RECIP_F
-                 p_ia2in: float = 0.25,        # P_IA2IN
-                 p_cut2ine: float = 0.30,      # P_CUT2INE
-                 p_ia2rg_stdp: float = 0.4,    # P_IA2RG_STDP
-                 ia_base_hz: float = 10.0,     # IA_BASE_HZ
-                 cut_rate_off_hz: float = 0.0, # CUT_RATE_OFF_HZ
-                 # --- веса (приведены к основному файлу) ---
-                 w_0in: float = 22.0,          # W0_IN
-                 w0_rm: float = 30.0,          # W0_RM
-                 w_m2mus: float = 1.0,         # W_M2MUS
-                 w_rg_rec_e: float = 4.0,      # W_RG_REC_E
-                 w_rg_rec_f: float = 5.5,      # W_RG_REC_F
-                 w_ia2rg: float = 12.0,        # IA2RG_W
-                 w_rg2inf: float = 18.0,       # W_RG2INF
-                 w_inf2rge: float = -48.0,     # W_INF2RGE (Zhang asym, было -28)
-                 w_rg2ine: float = 12.0,       # W_RG2INE
-                 w_ine2rgf: float = -8.0,      # W_INE2RGF (Zhang asym, было -28)
-                 # --- доп. параметры Ia-путей (по образу основного файла) ---
-                 w_ia2in: float = 6.0,         # W_IA2IN (было 10)
-                 w_ia_in2int: float = 6.0,     # W_IA_IN2INT (было 10)
-                 w_ia_int2ant: float = -10.0,  # W_IA_INT2ANT (было -20)
-                 w_cut2ine: float = 6.0,       # W_CUT2INE (было 12)
-                 w_init_ia: float = 5.0,       # W_INIT_IA (стартовый вес для STDP Ia->RG)
-                 w_flex_aff2rgf: float = 6.0,  # W_FLEX_AFF2RGF (для swing-афферента)
-                 stdp_ia_rg: bool = False):
-        self.leg = leg
+class Leg:
+    """
+    CPG Leg network matching Diagram 2.
+    Implements:
+    - Rhythm generators (RGE, RGF) with reciprocal inhibition (InE, InF).
+    - Motor neurons (M-E, M-F) and Muscle outputs (mE, mF).
+    - Renshaw cells (R-E, R-F) mediating recurrent and Ia-inhibitory feedback.
+    - Ia afferent stretch pathways (Ia-E, Ia-F) exciting homonymous MN/RG and reciprocal interneurons.
+    - Ib afferent tension pathways inhibiting homonymous MNs against excessive strain.
+    - Cutaneous (CUT) afferents reinforcing stance phase.
+    - Commissural relay interneurons (V2a, V0v, V0d, V3-F, In1).
+    All neuronal and synaptic parameters are registered via PERSONA Registry.
+    """
+    def __init__(self,
+                 leg_name: str,
+                 registry: Registry,
+                 n_rg: int = 20,
+                 n_mn: int = 20,
+                 n_int: int = 15,
+                 n_aff: int = 20):
+        self.leg = leg_name
+        self.registry = registry
+        self.n_rg = n_rg
+        self.n_mn = n_mn
+        self.n_int = n_int
+        self.n_aff = n_aff
 
-        self.rg_e = create_izhi_population(n_rg_e)
-        self.rg_f = create_izhi_population(n_rg_f)
-        self.in_e = create_izhi_population(n_in_e)
-        self.in_f = create_izhi_population(n_in_f)
-        self.m_e = create_izhi_population(n_motor_e)
-        self.m_f = create_izhi_population(n_motor_f)
-        self.ia_int_e = create_izhi_population(n_ia_int_e)
-        self.ia_int_f = create_izhi_population(n_ia_int_f)   # FIX: было повторное создание ia_int_e
-        self.ia_e, self.ia_in_e = poisson_to_parrot(n_ia_e, n_ia_in_e, ia_base_hz)  # TODO muscle input
-        self.ia_f, self.ia_in_f = poisson_to_parrot(n_ia_f, n_ia_in_e, ia_base_hz)  # FIX: n_ia_in_e, было n_in_f
-        self.cut_pg, self.cut_in = poisson_to_parrot(n_cut, n_cut, cut_rate_off_hz)
-        self.mus_e = nest.Create("parrot_neuron", n_mus_e)
-        self.mus_f = nest.Create("parrot_neuron", n_mus_f)
+        # Create Noise Recorder for this leg
+        self.noise_recorder = NoiseRecorder(f"noise_{leg_name}")
+        self.registry.register_noise_recorder(self.noise_recorder)
 
-        # cut -> rg_e (STDP)
-        nest.Connect(self.cut_in, self.rg_e, conn_spec={"rule": "pairwise_bernoulli", "p": p_stdp},
-                     syn_spec={"synapse_model": create_stdp_synapse("default", f"cut_rge_{self.leg}")})
+        # 1. Build Neuronal Populations
+        self._build_populations()
 
-        # rg_f -> m_f
-        nest.Connect(self.rg_f, self.m_f,
-                     conn_spec={"rule": "pairwise_bernoulli", "p": p_rg2m},
-                     syn_spec={"synapse_model": "static_synapse", "weight": w0_rm,
-                               "delay": get_jitter_delay()})
+        # 2. Build Synaptic Connections
+        self._build_connections()
 
-        # rg_e -> m_e
-        nest.Connect(self.rg_e, self.m_e,
-                     conn_spec={"rule": "pairwise_bernoulli", "p": p_rg2m},
-                     syn_spec={"synapse_model": "static_synapse", "weight": w0_rm,
-                               "delay": get_jitter_delay()})
+        # 3. Readout Recorders
+        self.rec_muse = create_spike_recorder(self.mus_e)
+        self.rec_musf = create_spike_recorder(self.mus_f)
+        self.rec_rge = create_spike_recorder(self.rg_e)
+        self.rec_rgf = create_spike_recorder(self.rg_f)
 
-        # m_e -> mus_e
-        nest.Connect(self.m_e, self.mus_e,
-                     conn_spec={"rule": "pairwise_bernoulli", "p": p_rg2mus},
-                     syn_spec={"synapse_model": "static_synapse", "weight": w_m2mus,
-                               "delay": get_jitter_delay()})
+    def _param(self, name: str, mean: float, sigma_param: float = 0.05,
+               sigma_ctrl: float = 0.1, min_val: float = -100.0, max_val: float = 100.0) -> PersonaParam:
+        return PersonaParam(
+            mean=mean,
+            sigma_param=sigma_param,
+            sigma_ctrl=sigma_ctrl,
+            min=min_val,
+            max=max_val
+        )
 
-        # m_f -> mus_f
-        nest.Connect(self.m_f, self.mus_f,
-                     conn_spec={"rule": "pairwise_bernoulli", "p": p_rg2mus},
-                     syn_spec={"synapse_model": "static_synapse", "weight": w_m2mus,
-                               "delay": get_jitter_delay()})
+    def _build_populations(self):
+        # Izhikevich parameters default: regular bursting/spiking
+        izhi_p = {
+            "a": self._param("a", 0.02, 0.002, 0.005, 0.001, 0.1),
+            "b": self._param("b", 0.20, 0.02, 0.04, 0.05, 0.5),
+            "c": self._param("c", -65.0, 2.0, 5.0, -80.0, -50.0),
+            "d": self._param("d", 8.0, 1.0, 2.0, 0.0, 20.0),
+        }
 
-        # rg_e -> rg_e (recursive)
-        nest.Connect(self.rg_e, self.rg_e,
-                     conn_spec={"rule": "pairwise_bernoulli", "p": p_rg_rec},
-                     syn_spec={"synapse_model": "static_synapse", "weight": w_rg_rec_e,
-                               "delay": get_jitter_delay()})
+        # Rhythm Generators
+        self.rg_e = self.registry.create_population(
+            Population(model="izhikevich", n=self.n_rg, params=izhi_p, name=f"rg_e_{self.leg}")
+        )
+        self.rg_f = self.registry.create_population(
+            Population(model="izhikevich", n=self.n_rg, params=izhi_p, name=f"rg_f_{self.leg}")
+        )
 
-        # rg_f -> rg_f (recursive)
-        nest.Connect(self.rg_f, self.rg_f,
-                     conn_spec={"rule": "pairwise_bernoulli", "p": p_rg_rec},
-                     syn_spec={"synapse_model": "static_synapse", "weight": w_rg_rec_f,
-                               "delay": get_jitter_delay()})
+        # Motor Neurons
+        self.m_e = self.registry.create_population(
+            Population(model="izhikevich", n=self.n_mn, params=izhi_p, name=f"m_e_{self.leg}")
+        )
+        self.m_f = self.registry.create_population(
+            Population(model="izhikevich", n=self.n_mn, params=izhi_p, name=f"m_f_{self.leg}")
+        )
 
-        # --- Ia-пути (по образу основного файла), пока закомментированы ---
-        # # ia_in_e -> rg_e (STDP, MOD_IA_RG_STDP)
-        # if stdp_ia_rg:
-        #     nest.Connect(self.ia_in_e, self.rg_e,
-        #                  conn_spec={"rule": "pairwise_bernoulli", "p": p_ia2rg_stdp},
-        #                  syn_spec={"synapse_model": create_stdp_synapse("ia", f"ia_rge_{self.leg}"),
-        #                            "weight": w_init_ia, "delay": get_jitter_delay()})
-        # # ia_in_f -> rg_f (STDP, MOD_IA_RG_STDP)
-        # if stdp_ia_rg:
-        #     nest.Connect(self.ia_in_f, self.rg_f,
-        #                  conn_spec={"rule": "pairwise_bernoulli", "p": p_ia2rg_stdp},
-        #                  syn_spec={"synapse_model": create_stdp_synapse("ia", f"ia_rgf_{self.leg}"),
-        #                            "weight": w_init_ia, "delay": get_jitter_delay()})
-        #
-        # # ia_in_e -> in_e (MOD_IA_LOOP)
-        # nest.Connect(self.ia_in_e, self.in_e,
-        #              conn_spec={"rule": "pairwise_bernoulli", "p": p_ia2in},
-        #              syn_spec={"synapse_model": "static_synapse", "weight": w_ia2in,
-        #                        "delay": get_jitter_delay()})
-        # # ia_in_f -> in_f (MOD_IA_LOOP)
-        # nest.Connect(self.ia_in_f, self.in_f,
-        #              conn_spec={"rule": "pairwise_bernoulli", "p": p_ia2in},
-        #              syn_spec={"synapse_model": "static_synapse", "weight": w_ia2in,
-        #                        "delay": get_jitter_delay()})
-        #
-        # # ia_in_e -> ia_int_e (Ia extensor -> inhibitory interneuron)
-        # nest.Connect(self.ia_in_e, self.ia_int_e,
-        #              conn_spec={"rule": "pairwise_bernoulli", "p": p_ia2rg},
-        #              syn_spec={"synapse_model": "static_synapse", "weight": w_ia_in2int,
-        #                        "delay": get_jitter_delay()})
-        # # ia_int_e -> m_f (Ia extensor inhibits flexor motor pool)
-        # nest.Connect(self.ia_int_e, self.m_f,
-        #              conn_spec={"rule": "pairwise_bernoulli", "p": p_ia2rg},
-        #              syn_spec={"synapse_model": "static_synapse", "weight": w_ia_int2ant,
-        #                        "delay": get_jitter_delay()})
-        #
-        # # ia_in_f -> ia_int_f (Ia flexor -> inhibitory interneuron)
-        # nest.Connect(self.ia_in_f, self.ia_int_f,
-        #              conn_spec={"rule": "pairwise_bernoulli", "p": p_ia2rg},
-        #              syn_spec={"synapse_model": "static_synapse", "weight": w_ia_in2int,
-        #                        "delay": get_jitter_delay()})
-        # # ia_int_f -> m_e (Ia flexor inhibits extensor motor pool)
-        # nest.Connect(self.ia_int_f, self.m_e,
-        #              conn_spec={"rule": "pairwise_bernoulli", "p": p_ia2rg},
-        #              syn_spec={"synapse_model": "static_synapse", "weight": w_ia_int2ant,
-        #                        "delay": get_jitter_delay()})
+        # Renshaw Cells (R-E, R-F)
+        self.r_e = self.registry.create_population(
+            Population(model="izhikevich", n=self.n_int, params=izhi_p, name=f"r_e_{self.leg}")
+        )
+        self.r_f = self.registry.create_population(
+            Population(model="izhikevich", n=self.n_int, params=izhi_p, name=f"r_f_{self.leg}")
+        )
 
-        # rg_f -> in_f (strong drive of the extensor-suppressing interneuron)
-        nest.Connect(self.rg_f, self.in_f, conn_spec={"rule": "pairwise_bernoulli", "p": p_rg_recip_f},
-                     syn_spec={"synapse_model": "static_synapse", "weight": w_rg2inf, "delay": get_jitter_delay()})
+        # Ia Inhibitory Interneurons (Ia-E, Ia-F)
+        self.ia_e = self.registry.create_population(
+            Population(model="izhikevich", n=self.n_int, params=izhi_p, name=f"ia_e_{self.leg}")
+        )
+        self.ia_f = self.registry.create_population(
+            Population(model="izhikevich", n=self.n_int, params=izhi_p, name=f"ia_f_{self.leg}")
+        )
 
-        # in_f -> rg_e (STRONG inhibition: F dominates and silences E)
-        nest.Connect(self.in_f, self.rg_e, conn_spec={"rule": "pairwise_bernoulli", "p": p_rg_recip_f},
-                     syn_spec={"synapse_model": "static_synapse", "weight": w_inf2rge, "delay": get_jitter_delay()})
+        # Reciprocal Interneurons (InE, InF, In1)
+        self.in_e = self.registry.create_population(
+            Population(model="izhikevich", n=self.n_int, params=izhi_p, name=f"in_e_{self.leg}")
+        )
+        self.in_f = self.registry.create_population(
+            Population(model="izhikevich", n=self.n_int, params=izhi_p, name=f"in_f_{self.leg}")
+        )
+        self.in1 = self.registry.create_population(
+            Population(model="izhikevich", n=self.n_int, params=izhi_p, name=f"in1_{self.leg}")
+        )
 
-        # rg_e -> in_e (drives the flexor-suppressing interneuron)
-        nest.Connect(self.rg_e, self.in_e, conn_spec={"rule": "pairwise_bernoulli", "p": p_rg_recip_e},
-                     syn_spec={"synapse_model": "static_synapse", "weight": w_rg2ine, "delay": get_jitter_delay()})
+        # Commissural Nuclei (V2a, V0v, V0d, V3-F)
+        self.v2a = self.registry.create_population(
+            Population(model="izhikevich", n=self.n_int, params=izhi_p, name=f"v2a_{self.leg}")
+        )
+        self.v0v = self.registry.create_population(
+            Population(model="izhikevich", n=self.n_int, params=izhi_p, name=f"v0v_{self.leg}")
+        )
+        self.v0d = self.registry.create_population(
+            Population(model="izhikevich", n=self.n_int, params=izhi_p, name=f"v0d_{self.leg}")
+        )
+        self.v3_f = self.registry.create_population(
+            Population(model="izhikevich", n=self.n_int, params=izhi_p, name=f"v3_f_{self.leg}")
+        )
 
-        # in_e -> rg_f (WEAK inhibition: preserves F's intrinsic rhythm)
-        nest.Connect(self.in_e, self.rg_f, conn_spec={"rule": "pairwise_bernoulli", "p": p_rg_recip_e},
-                     syn_spec={"synapse_model": "static_synapse", "weight": w_ine2rgf, "delay": get_jitter_delay()})
+        # Muscles (Parrot readout)
+        self.mus_e = nest.Create("parrot_neuron", self.n_mn)
+        self.mus_f = nest.Create("parrot_neuron", self.n_mn)
+        self.registry.population_nodes[f"mus_e_{self.leg}"] = self.mus_e
+        self.registry.population_nodes[f"mus_f_{self.leg}"] = self.mus_f
 
-        # cut -> in_e (MOD_CUT_REFLEX: cutaneous afferents reinforce stance-phase extensor reflex)
-        nest.Connect(self.cut_in, self.in_e, conn_spec={"rule": "pairwise_bernoulli", "p": p_cut2ine},
-                     syn_spec={"synapse_model": "static_synapse", "weight": w_cut2ine,
-                               "delay": get_jitter_delay()})
+        # Sensory Feedback Generators (Poisson -> Parrot)
+        # 1. CUT (cutaneous)
+        self.cut_pg = nest.Create("poisson_generator", self.n_aff, params={"rate": 0.0})
+        self.cut_in = nest.Create("parrot_neuron", self.n_aff)
+        nest.Connect(self.cut_pg, self.cut_in, conn_spec={"rule": "one_to_one"})
+        self.registry.population_nodes[f"cut_in_{self.leg}"] = self.cut_in
 
-    def mus_is_spiked(self, current_time):
-        e_spiked = False
-        if len(self.rec_muse.events['times']) > 0:
-            last_spike = self.rec_muse.events['times'][-1]
-            if abs(last_spike - current_time) < 1e-6:
-                e_spiked = True
+        # 2. Ia Afferents (stretch length & velocity)
+        self.ia_e_pg = nest.Create("poisson_generator", self.n_aff, params={"rate": 10.0})
+        self.ia_e_in = nest.Create("parrot_neuron", self.n_aff)
+        nest.Connect(self.ia_e_pg, self.ia_e_in, conn_spec={"rule": "one_to_one"})
+        self.registry.population_nodes[f"ia_e_in_{self.leg}"] = self.ia_e_in
 
-        f_spiked = False
-        if len(self.rec_musf.events['times']) > 0:
-            last_spike = self.rec_musf.events['times'][-1]
-            if abs(last_spike - current_time) < 1e-6:
-                f_spiked = True
+        self.ia_f_pg = nest.Create("poisson_generator", self.n_aff, params={"rate": 10.0})
+        self.ia_f_in = nest.Create("parrot_neuron", self.n_aff)
+        nest.Connect(self.ia_f_pg, self.ia_f_in, conn_spec={"rule": "one_to_one"})
+        self.registry.population_nodes[f"ia_f_in_{self.leg}"] = self.ia_f_in
 
-        return e_spiked, f_spiked
+        # 3. Ib Afferents (strain force & activation)
+        self.ib_e_pg = nest.Create("poisson_generator", self.n_aff, params={"rate": 5.0})
+        self.ib_e_in = nest.Create("parrot_neuron", self.n_aff)
+        nest.Connect(self.ib_e_pg, self.ib_e_in, conn_spec={"rule": "one_to_one"})
+        self.registry.population_nodes[f"ib_e_in_{self.leg}"] = self.ib_e_in
 
-    def get_spike_count(self):
-        e_count = len(self.rec_muse.events['times'])
-        f_count = len(self.rec_musf.events['times'])
-        return e_count, f_count
+        self.ib_f_pg = nest.Create("poisson_generator", self.n_aff, params={"rate": 5.0})
+        self.ib_f_in = nest.Create("parrot_neuron", self.n_aff)
+        nest.Connect(self.ib_f_pg, self.ib_f_in, conn_spec={"rule": "one_to_one"})
+        self.registry.population_nodes[f"ib_f_in_{self.leg}"] = self.ib_f_in
+
+    def _connect(self, src: str, tgt: str, weight: float, p: float = 0.5,
+                 is_stdp: bool = False, delay: float | None = None) -> Any:
+        d = get_jitter_delay() if delay is None else delay
+        w_param = self._param("weight", weight, sigma_param=abs(weight) * 0.05,
+                              sigma_ctrl=abs(weight) * 0.1,
+                              min_val=-150.0 if weight < 0 else 0.0,
+                              max_val=0.0 if weight < 0 else 150.0)
+
+        p_param = self._param("p", p, sigma_param=0.02, sigma_ctrl=0.05, min_val=0.01, max_val=1.0)
+
+        extra = {"delay": float(d)}
+        model = "static_synapse"
+        if is_stdp:
+            model = create_stdp_synapse("default", f"{src}_{tgt}")
+
+        cfg = Connection(
+            source=src,
+            target=tgt,
+            model=model,
+            parameters={"weight": w_param},
+            rule="pairwise_bernoulli",
+            p=p_param,
+            noise_recorder_id=self.noise_recorder.name,
+            extra_syn_spec=extra
+        )
+        return self.registry.create_connection(cfg)
+
+    def _build_connections(self):
+        leg = self.leg
+
+        # --- RG Reciprocal Inhibition (RG-E <-> RG-F via InE, InF) ---
+        self._connect(f"rg_e_{leg}", f"in_e_{leg}", weight=12.0, p=0.40)
+        self._connect(f"in_e_{leg}", f"rg_f_{leg}", weight=-24.0, p=0.40)
+        self._connect(f"rg_f_{leg}", f"in_f_{leg}", weight=18.0, p=0.50)
+        self._connect(f"in_f_{leg}", f"rg_e_{leg}", weight=-45.0, p=0.50)
+
+        # --- RG Self-recurrence ---
+        self._connect(f"rg_e_{leg}", f"rg_e_{leg}", weight=4.5, p=0.15)
+        self._connect(f"rg_f_{leg}", f"rg_f_{leg}", weight=5.5, p=0.15)
+
+        # --- RG to Motor Neurons ---
+        self._connect(f"rg_e_{leg}", f"m_e_{leg}", weight=28.0, p=0.50)
+        self._connect(f"rg_f_{leg}", f"m_f_{leg}", weight=28.0, p=0.50)
+
+        # --- Motor Neurons to Muscles ---
+        self._connect(f"m_e_{leg}", f"mus_e_{leg}", weight=1.0, p=0.80)
+        self._connect(f"m_f_{leg}", f"mus_f_{leg}", weight=1.0, p=0.80)
+
+        # --- Renshaw Recurrent Inhibition (M -> R -> M and R -> Ia) ---
+        # Extensor Renshaw
+        self._connect(f"m_e_{leg}", f"r_e_{leg}", weight=15.0, p=0.50)
+        self._connect(f"r_e_{leg}", f"m_e_{leg}", weight=-20.0, p=0.50)
+        self._connect(f"r_e_{leg}", f"ia_e_{leg}", weight=-12.0, p=0.40)
+
+        # Flexor Renshaw
+        self._connect(f"m_f_{leg}", f"r_f_{leg}", weight=15.0, p=0.50)
+        self._connect(f"r_f_{leg}", f"m_f_{leg}", weight=-20.0, p=0.50)
+        self._connect(f"r_f_{leg}", f"ia_f_{leg}", weight=-12.0, p=0.40)
+
+        # --- Ia Reciprocal Inhibition to Antagonist Motor Neurons ---
+        self._connect(f"ia_e_{leg}", f"m_f_{leg}", weight=-25.0, p=0.40)
+        self._connect(f"ia_f_{leg}", f"m_e_{leg}", weight=-25.0, p=0.40)
+
+        # --- Ia Spindle Afferent Feedback (Stretch reflex & RG driving) ---
+        # Extensor Ia
+        self._connect(f"ia_e_in_{leg}", f"m_e_{leg}", weight=18.0, p=0.40)
+        self._connect(f"ia_e_in_{leg}", f"ia_e_{leg}", weight=12.0, p=0.40)
+        self._connect(f"ia_e_in_{leg}", f"rg_e_{leg}", weight=14.0, p=0.35)
+
+        # Flexor Ia
+        self._connect(f"ia_f_in_{leg}", f"m_f_{leg}", weight=18.0, p=0.40)
+        self._connect(f"ia_f_in_{leg}", f"ia_f_{leg}", weight=12.0, p=0.40)
+        self._connect(f"ia_f_in_{leg}", f"rg_f_{leg}", weight=14.0, p=0.35)
+
+        # --- Ib Golgi Tendon Organ Feedback (Tension protection / autogenic inhibition) ---
+        self._connect(f"ib_e_in_{leg}", f"m_e_{leg}", weight=-18.0, p=0.40)
+        self._connect(f"ib_f_in_{leg}", f"m_f_{leg}", weight=-18.0, p=0.40)
+
+        # --- Cutaneous (CUT) Feedback (Stance reinforcement) ---
+        self._connect(f"cut_in_{leg}", f"rg_e_{leg}", weight=22.0, p=0.45, is_stdp=True)
+        self._connect(f"cut_in_{leg}", f"in_e_{leg}", weight=8.0, p=0.30)
+
+        # --- Commissural Projections from RG-F ---
+        self._connect(f"rg_f_{leg}", f"v2a_{leg}", weight=15.0, p=0.45)
+        self._connect(f"v2a_{leg}", f"v0v_{leg}", weight=18.0, p=0.45)
+        self._connect(f"rg_f_{leg}", f"v0d_{leg}", weight=12.0, p=0.40)
+        self._connect(f"rg_f_{leg}", f"v3_f_{leg}", weight=15.0, p=0.40)
+
+        # In1 inhibits ipsilateral RG-F
+        self._connect(f"in1_{leg}", f"rg_f_{leg}", weight=-20.0, p=0.40)
+
+    def update_sensory_feedback(self, cut_hz: float,
+                                ia_e_hz: float, ia_f_hz: float,
+                                ib_e_hz: float, ib_f_hz: float,
+                                current_time_ms: float = 0.0):
+        """
+        Updates Poisson generator rates based on live MuJoCo sensory inputs.
+        Records noise fluctuations in the NoiseRecorder.
+        """
+        self.cut_pg.set({"rate": float(max(0.0, cut_hz))})
+        self.ia_e_pg.set({"rate": float(max(0.0, ia_e_hz))})
+        self.ia_f_pg.set({"rate": float(max(0.0, ia_f_hz))})
+        self.ib_e_pg.set({"rate": float(max(0.0, ib_e_hz))})
+        self.ib_f_pg.set({"rate": float(max(0.0, ib_f_hz))})
+
+        self.noise_recorder.observe("cut", current_time_ms, "rate", float(cut_hz))
+        self.noise_recorder.observe("ia_e", current_time_ms, "rate", float(ia_e_hz))
+        self.noise_recorder.observe("ia_f", current_time_ms, "rate", float(ia_f_hz))
+        self.noise_recorder.observe("ib_e", current_time_ms, "rate", float(ib_e_hz))
+        self.noise_recorder.observe("ib_f", current_time_ms, "rate", float(ib_f_hz))
+
+    def get_muscle_drives(self, dt_ms: float) -> Tuple[float, float]:
+        """
+        Calculates normalized muscle activation levels [0.0, 1.0] from spike events during the step.
+        """
+        ev_e = self.rec_muse.get("events")["times"]
+        ev_f = self.rec_musf.get("events")["times"]
+
+        # Number of spikes in the last dt_ms
+        n_e = len(ev_e)
+        n_f = len(ev_f)
+
+        # Clear recorder memory to keep interval localized
+        self.rec_muse.set({"n_events": 0})
+        self.rec_musf.set({"n_events": 0})
+
+        # Convert spikes/step to normalized motor drive
+        # Scale: ~10 spikes per neuron per 10ms corresponds to full saturation
+        max_spikes = max(1.0, float(self.n_mn * (dt_ms / 5.0)))
+        drive_e = float(np.clip(n_e / max_spikes, 0.0, 1.0))
+        drive_f = float(np.clip(n_f / max_spikes, 0.0, 1.0))
+
+        return drive_e, drive_f

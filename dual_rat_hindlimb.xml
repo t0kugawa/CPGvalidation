@@ -157,10 +157,8 @@
                 fpmax="0.5"
                 fvmax="1.2"
                 timeconst="0.001 0.001"
-                dampratio="1.0"
-                diameter="0.008"
                 ctrlrange="0 1"
-                actuatorfrcrange="-10 10"/>
+                forcerange="-10 10"/>
 
         <muscle name="ta_m" tendon="ta_tendon_m"
                 lengthrange="0.022 0.040"
@@ -171,18 +169,16 @@
                 fpmax="0.5"
                 fvmax="1.2"
                 timeconst="0.001 0.001"
-                dampratio="1.0"
-                diameter="0.007"
                 ctrlrange="0 1"
-                actuatorfrcrange="-10 10"/>
+                forcerange="-10 10"/>
 
         <position name="toe_m_ctrl" joint="toe_m_jnt" kp="2.0" kv="0.02" ctrlrange="-0.3 0.8"/>
 
         <!-- Reference limb actuators -->
-        <position name="hip_ref_ctrl" joint="hip_ref" kp="50.0" kv="0.3" ctrlrange="-1.57 1.05"/>
-        <position name="knee_ref_ctrl" joint="knee_ref" kp="50.0" kv="0.3" ctrlrange="-1.22 1.54"/>
-        <position name="ankle_ref_ctrl" joint="ankle_ref" kp="20.0" kv="0.15" ctrlrange="-0.8 1.4"/>
-        <position name="toe_ref_ctrl" joint="toe_ref_jnt" kp="2.0" kv="0.02" ctrlrange="-0.3 0.8"/>
+        <position name="hip_ref_ctrl" joint="hip_ref" kp="1.0" kv="0.02" ctrlrange="-1.57 1.05"/>
+        <position name="knee_ref_ctrl" joint="knee_ref" kp="1.0" kv="0.02" ctrlrange="-1.22 1.54"/>
+        <position name="ankle_ref_ctrl" joint="ankle_ref" kp="0.5" kv="0.01" ctrlrange="-0.8 1.4"/>
+        <position name="toe_ref_ctrl" joint="toe_ref_jnt" kp="0.1" kv="0.005" ctrlrange="-0.3 0.8"/>
     </actuator>
 
 

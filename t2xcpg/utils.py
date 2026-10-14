@@ -1,7 +1,12 @@
 from typing import Any
-
 import nest
-from cfg import *
+import numpy as np
+
+try:
+    from t2xcpg.cfg import DT_MS
+except ImportError:
+    DT_MS = 10.0
+
 
 INIT_IZHI_PARAMS = {
     "a": 0.02,
@@ -14,22 +19,25 @@ INIT_IZHI_PARAMS = {
 
 DELAY_SCALE: float = 1.0
 
+
 def clamp(x: float, lo: float, hi: float) -> float:
     return float(max(lo, min(hi, x)))
 
 
 def poisson_to_parrot(poisson_n: int, parrot_n: int, hz: float) -> Any:
-    assert poisson_n == parrot_n, f"one_to_one connection requires equal poisson_n (provided {poisson_n}) and parrot_n (provided {parrot_n})"
-
+    assert poisson_n == parrot_n, f"one_to_one connection requires equal poisson_n ({poisson_n}) and parrot_n ({parrot_n})"
     poisson = nest.Create("poisson_generator", poisson_n)
     parrot = nest.Create("parrot_neuron", parrot_n)
     nest.Connect(poisson, parrot, conn_spec={"rule": "one_to_one"})
-    nest.SetStatus(poisson, {"rate": hz})
+    poisson.set({"rate": float(max(0.0, hz))})
     return poisson, parrot
 
 
-def create_izhi_population(size: int, params=INIT_IZHI_PARAMS) -> Any:
-    return nest.Create("izhikevich", size, params=params)
+def create_izhi_population(size: int, params=None) -> Any:
+    p = dict(INIT_IZHI_PARAMS)
+    if params:
+        p.update(params)
+    return nest.Create("izhikevich", size, params=p)
 
 
 def create_spike_recorder(target):
@@ -42,11 +50,14 @@ def create_weight_recorder():
     return nest.Create("weight_recorder")
 
 
-def copy_syn_model(name, params, wr):
-    if wr is not None:
-        nest.CopyModel("stdp_synapse", name, {**params, "weight_recorder": wr})
-    else:
-        nest.CopyModel("stdp_synapse", name, params)
+def copy_syn_model(name: str, params: dict, wr=None):
+    try:
+        p = dict(params)
+        if wr is not None:
+            p["weight_recorder"] = wr
+        nest.CopyModel("stdp_synapse", name, p)
+    except Exception:
+        pass
 
 
 STDP_DEFAULT = {
@@ -76,36 +87,32 @@ STDP_BS = {
     "Wmax": 30.0,
 }
 
-def create_stdp_synapse(type: str, postfix: str):
-    match type:
+
+def create_stdp_synapse(syn_type: str, postfix: str):
+    name = f"stdp_{syn_type}_{postfix}"
+    match syn_type:
         case "default":
-            name = f"stdp_default_{postfix}"
             copy_syn_model(name, STDP_DEFAULT, create_weight_recorder())
             return name
         case "ia":
-            name = f"stdp_ia_{postfix}"
-            copy_syn_model(f"stdp_ia_{postfix}", STDP_IA, create_weight_recorder())
+            copy_syn_model(name, STDP_IA, create_weight_recorder())
             return name
         case "bs":
-            name = f"stdp_bs_{postfix}"
             copy_syn_model(name, STDP_BS, create_weight_recorder())
             return name
-
-
+        case _:
+            copy_syn_model(name, STDP_DEFAULT, create_weight_recorder())
+            return name
 
 
 SYN_MS: float = 1.0
 LENGTH_M: float = 0.005
 VELOCITY_MPS: float = 5.45
 
-def get_jitter_delay(jitter_ms: float=0.2) -> float:
+
+def get_jitter_delay(jitter_ms: float = 0.2) -> float:
     delay = SYN_MS + (LENGTH_M / VELOCITY_MPS) * 1000.0
-    jm = float(max(0.0, jitter_ms))
-    if jm > 0.0:
-        delay += nest.random.normal(mean=0.0, std=jm)
-
-    delay = float(max(float(delay), float(max(1e-9, DT_MS))))
-    return delay
-
-
-
+    if jitter_ms > 0.0:
+        delay += float(np.random.normal(0.0, jitter_ms))
+    # Must be at least 1.0 ms in NEST
+    return float(max(1.0, delay))

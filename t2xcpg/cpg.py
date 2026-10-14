@@ -1,104 +1,145 @@
+from typing import Dict, Any
 import nest
 import numpy as np
 
+from persona.registry import Registry
+from persona.connection import Connection
+from persona.parameter import PersonaParam
+from model.adapter import CPGAdapter, CPGInput, CPGOutput
 from t2xcpg.bs import BrainStem
 from t2xcpg.leg import Leg
+from t2xcpg.utils import get_jitter_delay
 
-class L2CPG:
-    def __init__(self, bs: BrainStem, legs: dict[str, Leg], p_con: float = 0.5,
-                 p_comm: float = 0.08, base_drive_p: float = 0.08, base_drive_w: float = 18.0,
-                 w_comm_f_inh: float = -10.0, w_comm_e_inh: float = -8.0,
-                 p_comm_f: float = 0.08, p_comm_e: float = 0.06,
-                 enable_commissural: bool = True,
-                 dt_ms: float = 10.0, window_ms: float = 1.0):
 
-        self.dt_ms = dt_ms
-        for leg_key, leg in legs.items():
-            # bs_in_e -> rg_e (tonic extensor drive)
-            nest.Connect(bs.bs_in_e, leg.rg_e,
-                         conn_spec={"rule": "pairwise_bernoulli", "p": p_con},
-                         syn_spec={"synapse_model": "static_synapse", "weight": base_drive_w, "delay": DELAY_MS})
-            # bs_in_f -> rg_f (tonic flexor drive)
-            nest.Connect(bs.bs_in_f, leg.rg_f,
-                         conn_spec={"rule": "pairwise_bernoulli", "p": p_con},
-                         syn_spec={"synapse_model": "static_synapse", "weight": base_drive_w, "delay": DELAY_MS})
-
-            # base_in -> rg_e (background drive)
-            nest.Connect(bs.base_in, leg.rg_e,
-                         conn_spec={"rule": "pairwise_bernoulli", "p": base_drive_p},
-                         syn_spec={"synapse_model": "static_synapse", "weight": base_drive_w, "delay": DELAY_MS})
-            # base_in -> rg_f (background drive)
-            nest.Connect(bs.base_in, leg.rg_f,
-                         conn_spec={"rule": "pairwise_bernoulli", "p": base_drive_p},
-                         syn_spec={"synapse_model": "static_synapse", "weight": base_drive_w, "delay": DELAY_MS})
-
-        if enable_commissural and len(legs) == 2:
-            LL = legs["L"]
-            RR = legs["R"]
-
-            # rg_f(L) -> rg_f(R)
-            nest.Connect(LL.rg_f, RR.rg_f, conn_spec={"rule": "pairwise_bernoulli", "p": p_comm_f},
-                         syn_spec={"synapse_model": "static_synapse", "weight": w_comm_f_inh, "delay": DELAY_COMM_MS})
-            # rg_f(R) -> rg_f(L)
-            nest.Connect(RR.rg_f, LL.rg_f, conn_spec={"rule": "pairwise_bernoulli", "p": p_comm_f},
-                         syn_spec={"synapse_model": "static_synapse", "weight": w_comm_f_inh, "delay": DELAY_COMM_MS})
-
-            # rg_e(L) -> rg_e(R)
-            nest.Connect(LL.rg_e, RR.rg_e, conn_spec={"rule": "pairwise_bernoulli", "p": p_comm_e},
-                         syn_spec={"synapse_model": "static_synapse", "weight": w_comm_e_inh, "delay": DELAY_COMM_MS})
-            # rg_e(R) -> rg_e(L)
-            nest.Connect(RR.rg_e, LL.rg_e, conn_spec={"rule": "pairwise_bernoulli", "p": p_comm_e},
-                         syn_spec={"synapse_model": "static_synapse", "weight": w_comm_e_inh, "delay": DELAY_COMM_MS})
-
-        self.legs = legs
+class L2CPG(CPGAdapter):
+    """
+    Two-limb spinal CPG network (Left and Right hindlimbs) with full commissural
+    pathways matching Diagram 2, driven by Brainstem projections and modulated by
+    sensory afferent feedback (CUT, Ia, Ib).
+    Implements CPGAdapter to seamlessly interface with the MuJoCo biomechanical model.
+    """
+    def __init__(self,
+                 registry: Registry,
+                 bs: BrainStem,
+                 legs: Dict[str, Leg],
+                 dt_ms: float = 10.0,
+                 p_comm: float = 0.40):
+        self.registry = registry
         self.bs = bs
-
-        self.multimeters = {}
-        for leg_key, leg in self.legs.items():
-            mm_e = nest.Create("multimeter", params={
-                "record_from": ["V_m"],
-                "interval": self.dt_ms,
-                "record_to": "memory"
-            })
-            mm_f = nest.Create("multimeter", params={
-                "record_from": ["V_m"],
-                "interval": self.dt_ms,
-                "record_to": "memory"
-            })
-
-            nest.Connect(mm_e, leg.m_e, conn_spec={"rule": "all_to_all"})
-            nest.Connect(mm_f, leg.m_f, conn_spec={"rule": "all_to_all"})
-
-            self.multimeters[leg_key] = {'e': mm_e, 'f': mm_f}
-
-        self.current_time_ms = 0.0
+        self.legs = legs
         self.dt_ms = dt_ms
-        self.dt_s = dt_ms / 1000.0
-        self.window_ms = window_ms
-        self.window_steps = int(window_ms / dt_ms)
+        self.current_time_ms = 0.0
 
-    def step(self):
+        # Build Brainstem drives and Commissural Cross-Connections
+        self._build_bs_connections()
+        self._build_commissural_connections(p_comm=p_comm)
+
+    def _param(self, name: str, mean: float, sigma_param: float = 0.05,
+               sigma_ctrl: float = 0.1, min_val: float = -100.0, max_val: float = 100.0) -> PersonaParam:
+        return PersonaParam(
+            mean=mean,
+            sigma_param=sigma_param,
+            sigma_ctrl=sigma_ctrl,
+            min=min_val,
+            max=max_val
+        )
+
+    def _connect(self, src: str, tgt: str, weight: float, p: float = 0.40, delay: float = 3.0) -> Any:
+        w_param = self._param("weight", weight, sigma_param=abs(weight) * 0.05,
+                              sigma_ctrl=abs(weight) * 0.1,
+                              min_val=-100.0 if weight < 0 else 0.0,
+                              max_val=0.0 if weight < 0 else 100.0)
+        p_param = self._param("p", p, sigma_param=0.02, sigma_ctrl=0.05, min_val=0.01, max_val=1.0)
+
+        cfg = Connection(
+            source=src,
+            target=tgt,
+            model="static_synapse",
+            parameters={"weight": w_param},
+            rule="pairwise_bernoulli",
+            p=p_param,
+            extra_syn_spec={"delay": float(delay)}
+        )
+        return self.registry.create_connection(cfg)
+
+    def _build_bs_connections(self):
+        """
+        Connects Brainstem to Extensor (RGE) and Flexor (RGF) generators of all legs.
+        """
+        for leg_key, leg in self.legs.items():
+            self._connect("BS_in_e", f"rg_e_{leg_key}", weight=18.0, p=0.45)
+            self._connect("BS_in_f", f"rg_f_{leg_key}", weight=18.0, p=0.45)
+
+    def _build_commissural_connections(self, p_comm: float = 0.40):
+        """
+        Implements bilateral commissural coordination between left and right limb:
+        1. V0v (L/R) -> In1 (R/L) -> RGF (R/L) [contra-lateral inhibition of flexor]
+        2. V0d (L/R) -> RGF (R/L) [direct contra-lateral inhibition]
+        3. V3-F (L/R) -> RGF (R/L) [contra-lateral excitation of flexor]
+        """
+        if "L" in self.legs and "R" in self.legs:
+            # L -> R
+            self._connect("v0v_L", "in1_R", weight=18.0, p=p_comm, delay=3.0)
+            self._connect("v0d_L", "rg_f_R", weight=-22.0, p=p_comm, delay=3.0)
+            self._connect("v3_f_L", "rg_f_R", weight=16.0, p=p_comm, delay=3.0)
+
+            # R -> L
+            self._connect("v0v_R", "in1_L", weight=18.0, p=p_comm, delay=3.0)
+            self._connect("v0d_R", "rg_f_L", weight=-22.0, p=p_comm, delay=3.0)
+            self._connect("v3_f_R", "rg_f_L", weight=16.0, p=p_comm, delay=3.0)
+
+    def update(self, cpg_in: CPGInput):
+        """
+        Routes live sensory inputs from MuJoCo (CUT, Ia, Ib) to the CPG generators.
+        """
+        if "L" in self.legs:
+            self.legs["L"].update_sensory_feedback(
+                cut_hz=cpg_in.cut_L,
+                ia_e_hz=cpg_in.ia_rate_E_L,
+                ia_f_hz=cpg_in.ia_rate_F_L,
+                ib_e_hz=cpg_in.ib_rate_E_L,
+                ib_f_hz=cpg_in.ib_rate_F_L,
+                current_time_ms=self.current_time_ms
+            )
+        if "R" in self.legs:
+            self.legs["R"].update_sensory_feedback(
+                cut_hz=cpg_in.cut_R,
+                ia_e_hz=cpg_in.ia_rate_E_R,
+                ia_f_hz=cpg_in.ia_rate_F_R,
+                ib_e_hz=cpg_in.ib_rate_E_R,
+                ib_f_hz=cpg_in.ib_rate_F_R,
+                current_time_ms=self.current_time_ms
+            )
+
+    def step(self) -> CPGOutput:
+        """
+        Simulates NEST for dt_ms and reads out motor activations.
+        """
         nest.Simulate(self.dt_ms)
         self.current_time_ms += self.dt_ms
 
-        results = {leg_key: {"F": 0.0, "E": 0.0} for leg_key in self.legs.keys()}
+        d_e_L, d_f_L = 0.0, 0.0
+        d_e_R, d_f_R = 0.0, 0.0
 
-        for leg_key in self.legs.keys():
-            mm_e = self.multimeters[leg_key]['e']
-            mm_f = self.multimeters[leg_key]['f']
+        if "L" in self.legs:
+            d_e_L, d_f_L = self.legs["L"].get_muscle_drives(self.dt_ms)
+        if "R" in self.legs:
+            d_e_R, d_f_R = self.legs["R"].get_muscle_drives(self.dt_ms)
 
-            events_e = mm_e.get("events")
-            events_f = mm_f.get("events")
+        out = CPGOutput(
+            mus_E_L=d_e_L,
+            mus_F_L=d_f_L,
+            mus_E_R=d_e_R,
+            mus_F_R=d_f_R,
+            t_ms=self.current_time_ms
+        )
+        return out
 
-            v_m_e = events_e["V_m"]
-            v_m_f = events_f["V_m"]
+    def build_cpg(self):
+        pass
 
-            if len(v_m_e) > 0:
-                results[leg_key]['E'] = max(0.0, (np.mean(v_m_e) + 70.0) / 100.0) * 100.0
-            if len(v_m_f) > 0:
-                results[leg_key]['F'] = max(0.0, (np.mean(v_m_f) + 70.0) / 100.0) * 100.0
-
-            mm_e.set({"n_events": 0})
-            mm_f.set({"n_events": 0})
-
-        return results
+    def get_logs(self) -> Dict[str, Any]:
+        return {
+            "time_ms": self.current_time_ms,
+            "legs": list(self.legs.keys())
+        }
