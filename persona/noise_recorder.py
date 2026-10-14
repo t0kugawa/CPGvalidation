@@ -42,6 +42,10 @@ class NoiseRecorder:
         self._step_deltas[tag] = delta
         return s
 
+    def observe_weight(self, producer_id: str, t: float,
+                       current_weight: float) -> NoiseSample:
+        return self.observe(producer_id, t, "weight", float(current_weight))
+
     def record_direct(self, producer_id: str, t: float, param: str, delta: float) -> NoiseSample:
         s = NoiseSample(producer_id=producer_id, t=t, value=float(delta), param=param)
         self.samples.append(s)
