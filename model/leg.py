@@ -5,17 +5,20 @@ import mujoco
 from model.adapter import CPGOutput, CPGInput
 from model.cut import CUTAfferent, IaAfferent, IbAfferent
 
+SIDES = ("L", "R")
+
 
 class Leg:
     """
-    Rat hindlimb biomechanical simulation in MuJoCo.
-    Simulates:
-    - Model limb actuated by soleus (extensor) and tibialis anterior (flexor) muscles.
-    - Reference limb driven by kinematic trajectory servos for comparative validation.
-    Extracts biological sensory feedback:
+    Bilateral rat hindlimb biomechanical simulation in MuJoCo.
+    Simulates four limbs (controlled L/R actuated by SOL/TA muscles, target
+    L/R driven by kinematic servos) and extracts biological sensory feedback
+    for both controlled legs:
     - CUT afferent (plantar mechanoreceptors)
     - Ia afferent (muscle spindle length and stretch-velocity feedback)
     - Ib afferent (Golgi tendon organ force/tension feedback)
+    Only the ankle is muscle-driven; every other controlled joint is servo-held
+    to the target trajectory so the ankle is the free variable (MVP).
     """
     def __init__(self,
                  mujoco_cfg: str = "dual_rat_hindlimb.xml",
@@ -37,50 +40,45 @@ class Leg:
         self.data = mujoco.MjData(self.model)
         self.physics_dt = self.model.opt.timestep
 
-        # Joint IDs - Model Limb
-        self.j_hip_m = self._jid("hip_m")
-        self.j_knee_m = self._jid("knee_m")
-        self.j_ankle_m = self._jid("ankle_m")
-        self.j_toe_m = self._jid("toe_m_jnt")
+        self.j_hip_m = {s: self._jid(f"hip_m_{s}") for s in SIDES}
+        self.j_knee_m = {s: self._jid(f"knee_m_{s}") for s in SIDES}
+        self.j_ankle_m = {s: self._jid(f"ankle_m_{s}") for s in SIDES}
+        self.j_toe_m = {s: self._jid(f"toe_m_jnt_{s}") for s in SIDES}
 
-        # Joint IDs - Reference Limb
-        self.j_hip_ref = self._jid("hip_ref")
-        self.j_knee_ref = self._jid("knee_ref")
-        self.j_ankle_ref = self._jid("ankle_ref")
-        self.j_toe_ref = self._jid("toe_ref_jnt")
+        self.j_hip_ref = {s: self._jid(f"hip_ref_{s}") for s in SIDES}
+        self.j_knee_ref = {s: self._jid(f"knee_ref_{s}") for s in SIDES}
+        self.j_ankle_ref = {s: self._jid(f"ankle_ref_{s}") for s in SIDES}
+        self.j_toe_ref = {s: self._jid(f"toe_ref_jnt_{s}") for s in SIDES}
 
-        # Actuator IDs - Model Limb Muscles
-        self.act_sol_m = self._aid("sol_m")
-        self.act_ta_m = self._aid("ta_m")
-        self.act_toe_m = self._aid("toe_m_ctrl")
+        self.act_sol_m = {s: self._aid(f"sol_m_{s}") for s in SIDES}
+        self.act_ta_m = {s: self._aid(f"ta_m_{s}") for s in SIDES}
 
-        # Actuator IDs - Reference Limb Servos
-        self.act_hip_ref = self._aid("hip_ref_ctrl")
-        self.act_knee_ref = self._aid("knee_ref_ctrl")
-        self.act_ankle_ref = self._aid("ankle_ref_ctrl")
-        self.act_toe_ref = self._aid("toe_ref_ctrl")
+        self.act_hip_m = {s: self._aid(f"hip_m_ctrl_{s}") for s in SIDES}
+        self.act_knee_m = {s: self._aid(f"knee_m_ctrl_{s}") for s in SIDES}
+        self.act_toe_m = {s: self._aid(f"toe_m_ctrl_{s}") for s in SIDES}
 
-        # Tendon IDs
-        self.ten_sol = self._tid("sol_tendon_m")
-        self.ten_ta = self._tid("ta_tendon_m")
+        self.act_hip_ref = {s: self._aid(f"hip_ref_ctrl_{s}") for s in SIDES}
+        self.act_knee_ref = {s: self._aid(f"knee_ref_ctrl_{s}") for s in SIDES}
+        self.act_ankle_ref = {s: self._aid(f"ankle_ref_ctrl_{s}") for s in SIDES}
+        self.act_toe_ref = {s: self._aid(f"toe_ref_ctrl_{s}") for s in SIDES}
 
-        # Plantar contact sensors (CUT)
-        self.cut_sensor_names = [
-            "cut_heel_0", "cut_heel_1", "cut_heel_2",
-            "cut_mid_0", "cut_mid_1",
-            "cut_fore_0", "cut_fore_1",
-            "cut_toe_0"
-        ]
-        self.cut_sensor_ids = [self._sensid(name) for name in self.cut_sensor_names]
+        self.ten_sol = {s: self._tid(f"sol_tendon_m_{s}") for s in SIDES}
+        self.ten_ta = {s: self._tid(f"ta_tendon_m_{s}") for s in SIDES}
 
-        # Sensory afferent models
-        self.cut_afferent = CUTAfferent(dt_ms=dt_ms, r_peak_hz=120.0)
-        self.ia_sol = IaAfferent(l_0=0.040, k_l=600.0, k_v=120.0, r_base_hz=10.0, r_max_hz=250.0)
-        self.ia_ta = IaAfferent(l_0=0.028, k_l=600.0, k_v=120.0, r_base_hz=10.0, r_max_hz=250.0)
-        self.ib_sol = IbAfferent(k_force=15.0, k_act=40.0, r_base_hz=2.0, r_max_hz=200.0)
-        self.ib_ta = IbAfferent(k_force=15.0, k_act=40.0, r_base_hz=2.0, r_max_hz=200.0)
+        self.cut_sensor_ids = {
+            s: [self._sensid(n) for n in (
+                f"cut_heel_0_{s}", f"cut_heel_1_{s}", f"cut_heel_2_{s}",
+                f"cut_mid_0_{s}", f"cut_mid_1_{s}",
+                f"cut_fore_0_{s}", f"cut_fore_1_{s}", f"cut_toe_0_{s}",
+            )] for s in SIDES
+        }
 
-        # Baseline resting angles
+        self.cut_afferent = {s: CUTAfferent(dt_ms=dt_ms, r_peak_hz=120.0) for s in SIDES}
+        self.ia_sol = {s: IaAfferent(l_0=0.040, k_l=600.0, k_v=120.0, r_base_hz=10.0, r_max_hz=250.0) for s in SIDES}
+        self.ia_ta = {s: IaAfferent(l_0=0.028, k_l=600.0, k_v=120.0, r_base_hz=10.0, r_max_hz=250.0) for s in SIDES}
+        self.ib_sol = {s: IbAfferent(k_force=15.0, k_act=40.0, r_base_hz=2.0, r_max_hz=200.0) for s in SIDES}
+        self.ib_ta = {s: IbAfferent(k_force=15.0, k_act=40.0, r_base_hz=2.0, r_max_hz=200.0) for s in SIDES}
+
         self.reset()
 
     def _jid(self, name: str) -> int:
@@ -107,149 +105,135 @@ class Leg:
             raise ValueError(f"Sensor '{name}' not found")
         return i
 
+    def _activation(self, actuator_id: int) -> float:
+        adr = self.model.actuator_actadr[actuator_id]
+        if adr >= 0 and adr < len(self.data.act):
+            return float(self.data.act[adr])
+        return 0.0
+
     def reset(self):
         mujoco.mj_resetData(self.model, self.data)
         self.time_ms = 0.0
-        self.cut_afferent.reset()
+        for s in SIDES:
+            self.cut_afferent[s].reset()
+            q_hip_m = self.model.jnt_qposadr[self.j_hip_m[s]]
+            q_knee_m = self.model.jnt_qposadr[self.j_knee_m[s]]
+            q_ankle_m = self.model.jnt_qposadr[self.j_ankle_m[s]]
+            q_hip_ref = self.model.jnt_qposadr[self.j_hip_ref[s]]
+            q_knee_ref = self.model.jnt_qposadr[self.j_knee_ref[s]]
+            q_ankle_ref = self.model.jnt_qposadr[self.j_ankle_ref[s]]
 
-        # Set default joint angles: comfortable stance posture
-        q_hip_m = self.model.jnt_qposadr[self.j_hip_m]
-        q_knee_m = self.model.jnt_qposadr[self.j_knee_m]
-        q_ankle_m = self.model.jnt_qposadr[self.j_ankle_m]
+            self.data.qpos[q_hip_m] = -0.2
+            self.data.qpos[q_knee_m] = 0.6
+            self.data.qpos[q_ankle_m] = 0.3
 
-        q_hip_ref = self.model.jnt_qposadr[self.j_hip_ref]
-        q_knee_ref = self.model.jnt_qposadr[self.j_knee_ref]
-        q_ankle_ref = self.model.jnt_qposadr[self.j_ankle_ref]
-
-        self.data.qpos[q_hip_m] = -0.2
-        self.data.qpos[q_knee_m] = 0.6
-        self.data.qpos[q_ankle_m] = 0.3
-
-        self.data.qpos[q_hip_ref] = -0.2
-        self.data.qpos[q_knee_ref] = 0.6
-        self.data.qpos[q_ankle_ref] = 0.3
+            self.data.qpos[q_hip_ref] = -0.2
+            self.data.qpos[q_knee_ref] = 0.6
+            self.data.qpos[q_ankle_ref] = 0.3
 
         mujoco.mj_forward(self.model, self.data)
 
     def get_reference_kinematics(self, t_s: float) -> tuple[float, float, float]:
         """
-        Calculates reference limb target angles (hip, knee, ankle) for walking at frequency ~1.5 Hz.
-        Produces bio-plausible periodic flexion-extension waveforms.
+        Bio-plausible periodic reference joint waveforms (hip, knee, ankle) for
+        walking at ~1.5 Hz. Used when no external target trajectory is supplied.
         """
         freq = 1.5
         phase = 2.0 * np.pi * freq * t_s
-
-        # Typical rat hindlimb joint excursions during locomotion:
-        # Hip: swings back during stance (extension) and forwards during swing (flexion)
         hip_ref = -0.25 + 0.35 * np.cos(phase)
-        # Knee: flexes during early swing and early stance
         knee_ref = 0.65 + 0.30 * np.sin(phase)
-        # Ankle: plantarflexes during stance push-off (higher angle), dorsiflexes in swing (lower angle)
         ankle_ref = 0.40 + 0.45 * np.sin(phase - 0.5)
-
         return hip_ref, knee_ref, ankle_ref
 
     def contract_muscles(self, cpg_output: CPGOutput):
-        sol_act = float(np.clip(cpg_output.mus_E_L, 0.0, 1.0))
-        ta_act = float(np.clip(cpg_output.mus_F_L, 0.0, 1.0))
+        for s, e_key, f_key in (("L", "mus_E_L", "mus_F_L"), ("R", "mus_E_R", "mus_F_R")):
+            self.data.ctrl[self.act_sol_m[s]] = float(np.clip(getattr(cpg_output, e_key), 0.0, 1.0))
+            self.data.ctrl[self.act_ta_m[s]] = float(np.clip(getattr(cpg_output, f_key), 0.0, 1.0))
+            self.data.ctrl[self.act_toe_m[s]] = 0.0
 
-        self.data.ctrl[self.act_sol_m] = sol_act
-        self.data.ctrl[self.act_ta_m] = ta_act
-        self.data.ctrl[self.act_toe_m] = 0.0
-
-    def step(self, cpg_output: CPGOutput, external_ref_ankle: float | None = None) -> CPGInput:
+    def step(self, cpg_output: CPGOutput,
+             target_ankle_L: float | None = None,
+             target_ankle_R: float | None = None) -> CPGInput:
         """
-        Applies muscle drives, drives reference limb, steps physics for dt_ms,
-        and computes sensory afferents (CUT, Ia, Ib) for CPGInput.
+        Applies muscle drives, servos non-ankle joints to the target trajectory,
+        steps physics for dt_ms, and populates CPGInput for both controlled legs.
         """
-        # 1. Apply motor control to muscles
         self.contract_muscles(cpg_output)
 
-        # 2. Drive reference limb kinematics
         t_s = self.time_ms / 1000.0
         hip_ref, knee_ref, ankle_ref = self.get_reference_kinematics(t_s)
-        if external_ref_ankle is not None:
-            ankle_ref = external_ref_ankle
+        target_ankle = {"L": target_ankle_L, "R": target_ankle_R}
 
-        self.data.ctrl[self.act_hip_ref] = hip_ref
-        self.data.ctrl[self.act_knee_ref] = knee_ref
-        self.data.ctrl[self.act_ankle_ref] = ankle_ref
-        self.data.ctrl[self.act_toe_ref] = 0.0
+        for s in SIDES:
+            self.data.ctrl[self.act_hip_m[s]] = hip_ref
+            self.data.ctrl[self.act_knee_m[s]] = knee_ref
 
-        # 3. Step physics simulation for dt_ms
+            self.data.ctrl[self.act_hip_ref[s]] = hip_ref
+            self.data.ctrl[self.act_knee_ref[s]] = knee_ref
+            self.data.ctrl[self.act_ankle_ref[s]] = (
+                ankle_ref if target_ankle[s] is None else float(target_ankle[s])
+            )
+            self.data.ctrl[self.act_toe_ref[s]] = 0.0
+
         n_substeps = max(1, int(round((self.dt_ms / 1000.0) / self.physics_dt)))
         for _ in range(n_substeps):
             mujoco.mj_step(self.model, self.data)
 
         self.time_ms += self.dt_ms
 
-        # 4. Extract Plantar Contact Forces & CUT rate
-        total_contact_force = 0.0
-        for sens_id in self.cut_sensor_ids:
-            adr = self.model.sensor_adr[sens_id]
-            total_contact_force += float(self.data.sensordata[adr])
+        sensory = {}
+        for s in SIDES:
+            total_contact_force = sum(
+                float(self.data.sensordata[self.model.sensor_adr[sid]])
+                for sid in self.cut_sensor_ids[s]
+            )
+            cut_hz = self.cut_afferent[s].get_cut_hz(total_contact_force)
+            phase = "stance" if total_contact_force > 0.005 else "swing"
 
-        cut_hz = self.cut_afferent.get_cut_hz(total_contact_force)
-        phase = "stance" if total_contact_force > 0.005 else "swing"
+            sol_len = float(self.data.ten_length[self.ten_sol[s]])
+            sol_vel = float(self.data.ten_velocity[self.ten_sol[s]])
+            ta_len = float(self.data.ten_length[self.ten_ta[s]])
+            ta_vel = float(self.data.ten_velocity[self.ten_ta[s]])
+            ia_rate_e = self.ia_sol[s].get_ia_hz(sol_len, sol_vel)
+            ia_rate_f = self.ia_ta[s].get_ia_hz(ta_len, ta_vel)
 
-        # 5. Extract Tendon lengths and velocities for Ia afferents
-        sol_len = float(self.data.ten_length[self.ten_sol])
-        sol_vel = float(self.data.ten_velocity[self.ten_sol])
-        ta_len = float(self.data.ten_length[self.ten_ta])
-        ta_vel = float(self.data.ten_velocity[self.ten_ta])
+            sol_force = float(abs(self.data.actuator_force[self.act_sol_m[s]]))
+            ta_force = float(abs(self.data.actuator_force[self.act_ta_m[s]]))
+            sol_act = self._activation(self.act_sol_m[s])
+            ta_act = self._activation(self.act_ta_m[s])
+            ib_rate_e = self.ib_sol[s].get_ib_hz(sol_force, sol_act)
+            ib_rate_f = self.ib_ta[s].get_ib_hz(ta_force, ta_act)
 
-        ia_rate_e = self.ia_sol.get_ia_hz(sol_len, sol_vel)
-        ia_rate_f = self.ia_ta.get_ia_hz(ta_len, ta_vel)
+            q_ankle_m = float(self.data.qpos[self.model.jnt_qposadr[self.j_ankle_m[s]]])
+            q_ankle_ref = float(self.data.qpos[self.model.jnt_qposadr[self.j_ankle_ref[s]]])
+            q_knee_m = float(self.data.qpos[self.model.jnt_qposadr[self.j_knee_m[s]]])
+            q_hip_m = float(self.data.qpos[self.model.jnt_qposadr[self.j_hip_m[s]]])
 
-        # 6. Extract Actuator forces and activations for Ib afferents
-        sol_force = float(abs(self.data.actuator_force[self.act_sol_m]))
-        ta_force = float(abs(self.data.actuator_force[self.act_ta_m]))
-        sol_act = float(self.data.act[self.act_sol_m]) if len(self.data.act) > self.act_sol_m else float(cpg_output.mus_E_L)
-        ta_act = float(self.data.act[self.act_ta_m]) if len(self.data.act) > self.act_ta_m else float(cpg_output.mus_F_L)
+            sensory[s] = dict(
+                cut=cut_hz, phase=phase,
+                sol_len=sol_len, sol_vel=sol_vel, ta_len=ta_len, ta_vel=ta_vel,
+                ia_rate_e=ia_rate_e, ia_rate_f=ia_rate_f,
+                sol_force=sol_force, ta_force=ta_force,
+                sol_act=sol_act, ta_act=ta_act,
+                ib_rate_e=ib_rate_e, ib_rate_f=ib_rate_f,
+                q_ankle_m=q_ankle_m, q_ankle_ref=q_ankle_ref,
+                q_knee_m=q_knee_m, q_hip_m=q_hip_m,
+            )
 
-        ib_rate_e = self.ib_sol.get_ib_hz(sol_force, sol_act)
-        ib_rate_f = self.ib_ta.get_ib_hz(ta_force, ta_act)
-
-        # 7. Extract Joint angles
-        q_ankle_m = float(self.data.qpos[self.model.jnt_qposadr[self.j_ankle_m]])
-        q_ankle_ref = float(self.data.qpos[self.model.jnt_qposadr[self.j_ankle_ref]])
-        q_knee_m = float(self.data.qpos[self.model.jnt_qposadr[self.j_knee_m]])
-        q_hip_m = float(self.data.qpos[self.model.jnt_qposadr[self.j_hip_m]])
-
-        # Package into CPGInput
-        cpg_input = CPGInput(
-            cut_L=cut_hz,
-            cut_R=cut_hz,
-            ia_len_E_L=sol_len,
-            ia_vel_E_L=sol_vel,
-            ia_rate_E_L=ia_rate_e,
-            ia_len_F_L=ta_len,
-            ia_vel_F_L=ta_vel,
-            ia_rate_F_L=ia_rate_f,
-            ia_len_E_R=sol_len,
-            ia_vel_E_R=sol_vel,
-            ia_rate_E_R=ia_rate_e,
-            ia_len_F_R=ta_len,
-            ia_vel_F_R=ta_vel,
-            ia_rate_F_R=ia_rate_f,
-            ib_act_E_L=sol_act,
-            ib_force_E_L=sol_force,
-            ib_rate_E_L=ib_rate_e,
-            ib_act_F_L=ta_act,
-            ib_force_F_L=ta_force,
-            ib_rate_F_L=ib_rate_f,
-            ib_act_E_R=sol_act,
-            ib_force_E_R=sol_force,
-            ib_rate_E_R=ib_rate_e,
-            ib_act_F_R=ta_act,
-            ib_force_F_R=ta_force,
-            ib_rate_F_R=ib_rate_f,
-            phase_L=phase,
-            phase_R="swing" if phase == "stance" else "stance",
-            ankle_angle_m_L=q_ankle_m,
-            ankle_angle_ref_L=q_ankle_ref,
-            knee_angle_m_L=q_knee_m,
-            hip_angle_m_L=q_hip_m
+        L, R = sensory["L"], sensory["R"]
+        return CPGInput(
+            cut_L=L["cut"], cut_R=R["cut"],
+            ia_len_E_L=L["sol_len"], ia_vel_E_L=L["sol_vel"], ia_rate_E_L=L["ia_rate_e"],
+            ia_len_F_L=L["ta_len"], ia_vel_F_L=L["ta_vel"], ia_rate_F_L=L["ia_rate_f"],
+            ia_len_E_R=R["sol_len"], ia_vel_E_R=R["sol_vel"], ia_rate_E_R=R["ia_rate_e"],
+            ia_len_F_R=R["ta_len"], ia_vel_F_R=R["ta_vel"], ia_rate_F_R=R["ia_rate_f"],
+            ib_act_E_L=L["sol_act"], ib_force_E_L=L["sol_force"], ib_rate_E_L=L["ib_rate_e"],
+            ib_act_F_L=L["ta_act"], ib_force_F_L=L["ta_force"], ib_rate_F_L=L["ib_rate_f"],
+            ib_act_E_R=R["sol_act"], ib_force_E_R=R["sol_force"], ib_rate_E_R=R["ib_rate_e"],
+            ib_act_F_R=R["ta_act"], ib_force_F_R=R["ta_force"], ib_rate_F_R=R["ib_rate_f"],
+            phase_L=L["phase"], phase_R=R["phase"],
+            ankle_angle_m_L=L["q_ankle_m"], ankle_angle_ref_L=L["q_ankle_ref"],
+            knee_angle_m_L=L["q_knee_m"], hip_angle_m_L=L["q_hip_m"],
+            ankle_angle_m_R=R["q_ankle_m"], ankle_angle_ref_R=R["q_ankle_ref"],
+            knee_angle_m_R=R["q_knee_m"], hip_angle_m_R=R["q_hip_m"],
         )
-
-        return cpg_input

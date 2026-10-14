@@ -16,7 +16,9 @@ class Model:
         self.dt_ms = dt_ms
         self.leg = Leg(mujoco_cfg=mujoco_cfg, render_fps=render_fps, dt_ms=dt_ms)
 
-    def step(self, external_ref_ankle: float | None = None) -> tuple[CPGInput, CPGOutput]:
+    def step(self,
+             target_ankle_L: float | None = None,
+             target_ankle_R: float | None = None) -> tuple[CPGInput, CPGOutput]:
         """
         Executes one closed-loop cycle:
         1. CPG generates motor neuron output for dt.
@@ -24,7 +26,8 @@ class Model:
         3. CPG is updated with new sensory feedback rates.
         """
         cpg_out = self.cpg.step()
-        cpg_in = self.leg.step(cpg_out, external_ref_ankle=external_ref_ankle)
+        cpg_in = self.leg.step(cpg_out, target_ankle_L=target_ankle_L,
+                               target_ankle_R=target_ankle_R)
         self.cpg.update(cpg_in)
         return cpg_in, cpg_out
 

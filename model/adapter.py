@@ -60,6 +60,11 @@ class CPGInput:
     knee_angle_m_L: float = 0.0
     hip_angle_m_L: float = 0.0
 
+    ankle_angle_m_R: float = 0.0
+    ankle_angle_ref_R: float = 0.0
+    knee_angle_m_R: float = 0.0
+    hip_angle_m_R: float = 0.0
+
 
 @dataclass
 class CPGOutput:
