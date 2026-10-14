@@ -74,10 +74,35 @@ class Registry:
         syn_col = nest.Connect(src_nodes, tgt_nodes, conn_spec=conn_spec, syn_spec=syn_spec)
 
         cfg.synapse_collection = syn_col
-        conn_key = f"{cfg.source}_{cfg.target}"
+        conn_key = cfg.key if cfg.key is not None else f"{cfg.source}_{cfg.target}"
         self.connection_cfgs[conn_key] = cfg
         self.synapse_collections[conn_key] = syn_col
         return syn_col
+
+    def sample_plastic_weight_deltas(self, t_before: float, t_now: float) -> Dict[str, float]:
+        """
+        Mean per-synapse weight change observed by each plastic projection's
+        NEST weight_recorder within the last step, keyed by projection key.
+        """
+        out: Dict[str, float] = {}
+        for key, cfg in self.connection_cfgs.items():
+            wr = cfg.weight_recorder
+            if wr is None:
+                continue
+            try:
+                ev = wr.get("events")
+                weights = np.asarray(ev.get("weights", []), dtype=np.float64)
+                times = np.asarray(ev.get("times", []), dtype=np.float64)
+            except Exception:
+                out[key] = 0.0
+                continue
+            if weights.size == 0:
+                out[key] = 0.0
+                continue
+            mask = times >= float(t_before)
+            window = weights[mask] if mask.any() else weights
+            out[key] = float(np.mean(window) - np.mean(weights))
+        return out
 
     def get(self, name: str) -> nest.NodeCollection:
         if name not in self.population_nodes:

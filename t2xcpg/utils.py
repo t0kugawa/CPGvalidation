@@ -90,24 +90,27 @@ STDP_BS = {
 
 def create_stdp_synapse(syn_type: str, postfix: str):
     name = f"stdp_{syn_type}_{postfix}"
+    wr = create_weight_recorder()
     match syn_type:
         case "default":
-            copy_syn_model(name, STDP_DEFAULT, create_weight_recorder())
-            return name
+            copy_syn_model(name, STDP_DEFAULT, wr)
         case "ia":
-            copy_syn_model(name, STDP_IA, create_weight_recorder())
-            return name
+            copy_syn_model(name, STDP_IA, wr)
         case "bs":
-            copy_syn_model(name, STDP_BS, create_weight_recorder())
-            return name
+            copy_syn_model(name, STDP_BS, wr)
         case _:
-            copy_syn_model(name, STDP_DEFAULT, create_weight_recorder())
-            return name
+            copy_syn_model(name, STDP_DEFAULT, wr)
+    return name, wr
 
 
 SYN_MS: float = 1.0
 LENGTH_M: float = 0.005
 VELOCITY_MPS: float = 5.45
+
+
+# STDP is used on the sensory input pathways (spec D12): CUT -> RGE and Ia -> RG.
+# All other projections are static synapses.
+STDP_POSTFIX = {"cut_rge": "default", "ia_rg": "ia"}
 
 
 def get_jitter_delay(jitter_ms: float = 0.2) -> float:

@@ -7,7 +7,9 @@ from persona.population import Population
 from persona.connection import Connection
 from persona.noise_recorder import NoiseRecorder
 from persona.registry import Registry
-from t2xcpg.utils import get_jitter_delay, create_spike_recorder, create_stdp_synapse
+from t2xcpg.utils import (
+    get_jitter_delay, create_spike_recorder, create_stdp_synapse, STDP_POSTFIX,
+)
 
 
 class Leg:
@@ -38,6 +40,7 @@ class Leg:
         self.n_int = n_int
         self.n_aff = n_aff
         self.p_scale = float(p_scale)
+        self.plastic_projections: list[str] = []
 
         # Create Noise Recorder for this leg
         self.noise_recorder = NoiseRecorder(f"noise_{leg_name}")
@@ -167,7 +170,8 @@ class Leg:
         self.registry.population_nodes[f"ib_f_in_{self.leg}"] = self.ib_f_in
 
     def _connect(self, src: str, tgt: str, weight: float, p: float = 0.5,
-                 is_stdp: bool = False, delay: float | None = None) -> Any:
+                 is_stdp: bool = False, delay: float | None = None,
+                 key: str | None = None) -> Any:
         d = get_jitter_delay() if delay is None else delay
         p = p * self.p_scale
         w_param = self._param("weight", weight, sigma_param=abs(weight) * 0.05,
@@ -179,8 +183,10 @@ class Leg:
 
         extra = {"delay": float(d)}
         model = "static_synapse"
+        wr = None
         if is_stdp:
-            model = create_stdp_synapse("default", f"{src}_{tgt}")
+            syn_type = STDP_POSTFIX.get(key, "default") if key else "default"
+            model, wr = create_stdp_synapse(syn_type, f"{src}_{tgt}")
 
         cfg = Connection(
             source=src,
@@ -190,9 +196,22 @@ class Leg:
             rule="pairwise_bernoulli",
             p=p_param,
             noise_recorder_id=self.noise_recorder.name,
-            extra_syn_spec=extra
+            extra_syn_spec=extra,
+            key=key,
+            weight_recorder=wr
         )
+        if key is not None and key not in self.plastic_projections:
+            self.plastic_projections.append(key)
         return self.registry.create_connection(cfg)
+
+    def update_plastic_weights(self, t_before: float, t_now: float):
+        """
+        Samples STDP weight changes from the weight recorders and records them
+        as ordinary noise features in this leg's NoiseRecorder.
+        """
+        deltas = self.registry.sample_plastic_weight_deltas(t_before, t_now)
+        for key in self.plastic_projections:
+            self.noise_recorder.observe_weight(key, t_now, deltas.get(key, 0.0))
 
     def _build_connections(self):
         leg = self.leg
@@ -234,19 +253,21 @@ class Leg:
         # Extensor Ia
         self._connect(f"ia_e_in_{leg}", f"m_e_{leg}", weight=18.0, p=0.40)
         self._connect(f"ia_e_in_{leg}", f"ia_e_{leg}", weight=12.0, p=0.40)
-        self._connect(f"ia_e_in_{leg}", f"rg_e_{leg}", weight=14.0, p=0.35)
+        self._connect(f"ia_e_in_{leg}", f"rg_e_{leg}", weight=14.0, p=0.35,
+                      is_stdp=True, key=f"ia_rg_e_{leg}")
 
         # Flexor Ia
         self._connect(f"ia_f_in_{leg}", f"m_f_{leg}", weight=18.0, p=0.40)
         self._connect(f"ia_f_in_{leg}", f"ia_f_{leg}", weight=12.0, p=0.40)
-        self._connect(f"ia_f_in_{leg}", f"rg_f_{leg}", weight=14.0, p=0.35)
+        self._connect(f"ia_f_in_{leg}", f"rg_f_{leg}", weight=14.0, p=0.35,
+                      is_stdp=True, key=f"ia_rg_f_{leg}")
 
         # --- Ib Golgi Tendon Organ Feedback (Tension protection / autogenic inhibition) ---
         self._connect(f"ib_e_in_{leg}", f"m_e_{leg}", weight=-18.0, p=0.40)
         self._connect(f"ib_f_in_{leg}", f"m_f_{leg}", weight=-18.0, p=0.40)
 
         # --- Cutaneous (CUT) Feedback (Stance reinforcement) ---
-        self._connect(f"cut_in_{leg}", f"rg_e_{leg}", weight=22.0, p=0.45, is_stdp=True)
+        self._connect(f"cut_in_{leg}", f"rg_e_{leg}", weight=22.0, p=0.45, is_stdp=True, key=f"cut_rge_{leg}")
         self._connect(f"cut_in_{leg}", f"in_e_{leg}", weight=8.0, p=0.30)
 
         # --- Commissural Projections from RG-F ---

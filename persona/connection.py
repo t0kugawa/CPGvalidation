@@ -19,6 +19,8 @@ class Connection:
     noise_recorder_id: str | None = None
     extra_syn_spec: Dict[str, Any] = field(default_factory=dict)
     synapse_collection: Any = None
+    key: str | None = None
+    weight_recorder: Any = None
 
     def get_effective_p(self, explored_p: float | None = None) -> float:
         if explored_p is not None:
