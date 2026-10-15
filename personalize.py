@@ -76,6 +76,18 @@ def acceptance_from_log(log,
                                  margin=margin, coverage=coverage)
 
 
+def reachable(ankle: np.ndarray, lo: float = -0.6, hi: float = 0.30) -> np.ndarray:
+    """
+    Maps a mocap ankle trajectory into a reachable band [lo, hi] (inside the
+    joint limit) so the target is physically trackable. Preserves shape.
+    """
+    a = np.asarray(ankle, dtype=np.float64)
+    amin, amax = float(a.min()), float(a.max())
+    if amax - amin < 1e-9:
+        return np.full_like(a, 0.5 * (lo + hi))
+    return lo + (a - amin) * (hi - lo) / (amax - amin)
+
+
 def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
                        n_rg: int = 20, n_mn: int = 20, n_int: int = 15,
                        n_aff: int = 20, n_bs: int = 30,
@@ -84,7 +96,9 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
                        pose_hold_steps: int = 20,
                        loss_stop: float = 0.05,
                        loss_window: int = 30,
-                       seed: int = 0) -> tuple[Personalizer, MocapLoader]:
+                       seed: int = 0,
+                       w_scale: float = 0.5,
+                       ref_hz: float = 100.0) -> tuple[Personalizer, MocapLoader]:
     """
     Builds the full closed loop: bilateral CPG (via the PERSONA registry),
     bilateral MuJoCo rig, PERSONA agent, and the mocap-driven target limb.
@@ -99,10 +113,13 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
         pass
 
     reg = Registry()
-    bs = BrainStem(registry=reg, n_bs=n_bs, bs_e_hz=50.0, bs_f_hz=50.0)
-    leg_l = CPG_Leg("L", reg, n_rg=n_rg, n_mn=n_mn, n_int=n_int, n_aff=n_aff)
-    leg_r = CPG_Leg("R", reg, n_rg=n_rg, n_mn=n_mn, n_int=n_int, n_aff=n_aff)
-    cpg = L2CPG(registry=reg, bs=bs, legs={"L": leg_l, "R": leg_r}, dt_ms=DT_MS)
+    bs = BrainStem(registry=reg, n_bs=n_bs, bs_e_hz=40.0, bs_f_hz=40.0)
+    leg_l = CPG_Leg("L", reg, n_rg=n_rg, n_mn=n_mn, n_int=n_int, n_aff=n_aff,
+                    w_scale=w_scale, ref_hz=ref_hz)
+    leg_r = CPG_Leg("R", reg, n_rg=n_rg, n_mn=n_mn, n_int=n_int, n_aff=n_aff,
+                    w_scale=w_scale, ref_hz=ref_hz)
+    cpg = L2CPG(registry=reg, bs=bs, legs={"L": leg_l, "R": leg_r}, dt_ms=DT_MS,
+                leading_leg="L", leading_gain=1.5)
 
     rig = MuJoCo_Leg(mujoco_cfg=os.path.join(BASE_DIR, "dual_rat_hindlimb.xml"),
                      dt_ms=DT_MS)
@@ -112,14 +129,26 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
     belt = fast if loader.meta.condition != "T" else slow
     rig.set_treadmill_surfacevel(belt)
     angles = loader.resample()
+    tgt = {
+        "ankle_L": reachable(align_to_sim(angles["ankle_L"]), -0.6, 0.30),
+        "ankle_R": reachable(align_to_sim(angles["ankle_R"]), -0.6, 0.30),
+        "hip_L": fit_to_joint_range(angles["hip_L"], -1.57, 1.05),
+        "knee_L": fit_to_joint_range(angles["knee_L"], -1.22, 1.54),
+        "hip_R": fit_to_joint_range(angles["hip_R"], -1.57, 1.05),
+        "knee_R": fit_to_joint_range(angles["knee_R"], -1.22, 1.54),
+    }
+    # Option 2a: start both limbs at the target's first pose so the ankle
+    # angles match at t=0 (the target is then reachable and moving).
+    rig.reset(pose={
+        "L": {"hip": float(tgt["hip_L"][0]), "knee": float(tgt["knee_L"][0]),
+              "ankle": float(tgt["ankle_L"][0])},
+        "R": {"hip": float(tgt["hip_R"][0]), "knee": float(tgt["knee_R"][0]),
+              "ankle": float(tgt["ankle_R"][0])},
+    })
     driver = MocapTargetDriver(
-        ankle_L=fit_to_joint_range(align_to_sim(angles["ankle_L"])),
-        ankle_R=fit_to_joint_range(align_to_sim(angles["ankle_R"])),
-        hip_L=fit_to_joint_range(angles["hip_L"], -1.57, 1.05),
-        knee_L=fit_to_joint_range(angles["knee_L"], -1.22, 1.54),
-        hip_R=fit_to_joint_range(angles["hip_R"], -1.57, 1.05),
-        knee_R=fit_to_joint_range(angles["knee_R"], -1.22, 1.54),
-        dt_ms=DT_MS,
+        ankle_L=tgt["ankle_L"], ankle_R=tgt["ankle_R"],
+        hip_L=tgt["hip_L"], knee_L=tgt["knee_L"],
+        hip_R=tgt["hip_R"], knee_R=tgt["knee_R"], dt_ms=DT_MS,
     )
 
     agent = Agent(registry=reg, lr_mu=0.03, lr_sigma_ctrl=0.005,

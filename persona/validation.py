@@ -79,6 +79,76 @@ class ValidationReport:
         self.figures["distribution"] = fig
         return fig
 
+    def plot_param_shift(self, agent, top_n: int = 10):
+        """
+        Gaussian before/after for the `top_n` most influential parameters:
+        for each parameter, overlay the initial and final N(mean, sigma_ctrl)
+        distributions so the shift from one distribution to another is visible.
+        """
+        means = agent.history["means"]
+        sigmas = agent.history["sigmas_ctrl"]
+        if not means:
+            return None
+        names = list(means.keys())
+        n_steps = len(next(iter(means.values())))
+        # influence = relative shift + change in spread
+        score = {}
+        for k in names:
+            m = np.asarray(means[k], dtype=float)
+            s0 = np.asarray(sigmas[k], dtype=float)
+            shift = abs(m[-1] - m[0]) / (abs(m[0]) + 1e-6)
+            spread = abs(s0[-1] - s0[0]) / (abs(s0[0]) + 1e-6)
+            score[k] = shift + spread
+        top = sorted(names, key=lambda k: score[k], reverse=True)[:top_n]
+        ncol = 5
+        nrow = int(np.ceil(len(top) / ncol))
+        fig, axes = plt.subplots(nrow, ncol, figsize=(3.2 * ncol, 2.6 * nrow))
+        axes = np.atleast_1d(axes).ravel()
+        for ax, k in zip(axes, top):
+            m = np.asarray(means[k], dtype=float)
+            s = np.asarray(sigmas[k], dtype=float)
+            for mu, sig, lab, c in ((m[0], s[0], "initial", "#4C72B0"),
+                                    (m[-1], s[-1], "final", "#DD8452")):
+                xs = np.linspace(mu - 4 * abs(sig), mu + 4 * abs(sig), 200)
+                pdf = np.exp(-0.5 * ((xs - mu) / sig) ** 2) / (abs(sig) * np.sqrt(2 * np.pi))
+                ax.plot(xs, pdf, color=c, lw=1.6, label=lab)
+                ax.axvline(mu, color=c, ls="--", lw=1.0)
+            ax.set_title(k.replace("conn_", "").replace("_weight", ""), fontsize=7)
+            ax.set_yticks([])
+            ax.legend(fontsize=6)
+        for ax in axes[len(top):]:
+            ax.axis("off")
+        fig.suptitle(f"Parameter distributions: initial vs final ({len(top)} most changed)",
+                     fontsize=12)
+        fig.tight_layout()
+        self.figures["param_shift"] = fig
+        return fig
+
+    def plot_fisher(self, agent):
+        """Heat-map of the correlation-style Fisher matrix at the end of the run."""
+        F = agent.strategy.compute_correlation_matrix()
+        names = agent.strategy.all_names
+        show = min(len(names), 60)  # keep the heat-map legible
+        # pick the highest-variance (most active) features
+        X = np.asarray(agent.strategy.perturbation_history, dtype=float)
+        if X.size:
+            idx = np.argsort(-X.std(axis=0))[:show]
+        else:
+            idx = np.arange(show)
+        Fsub = F[np.ix_(idx, idx)]
+        labels = [names[i].replace("conn_", "").replace("_weight", "")[:14] for i in idx]
+        fig, ax = plt.subplots(figsize=(10, 9))
+        im = ax.imshow(Fsub, cmap="coolwarm", vmin=-1, vmax=1)
+        ax.set_xticks(range(len(idx)))
+        ax.set_yticks(range(len(idx)))
+        ax.set_xticklabels(labels, rotation=90, fontsize=6)
+        ax.set_yticklabels(labels, fontsize=6)
+        ax.set_title(f"Fisher (correlation) matrix, final — {len(idx)} most active features")
+        fig.colorbar(im, ax=ax, label="correlation")
+        fig.tight_layout()
+        self.figures["fisher"] = fig
+        return fig
+
     def save_all(self, path):
         os.makedirs(path, exist_ok=True)
         for name, fig in self.figures.items():

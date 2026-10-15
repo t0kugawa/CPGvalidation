@@ -113,6 +113,14 @@ class Leg:
             Population(model="izhikevich", n=self.n_int, params=izhi_p, name=f"ia_f_{self.leg}")
         )
 
+        # Alpha inhibitory interneurons (a-E, a-F)
+        self.a_e = self.registry.create_population(
+            Population(model="izhikevich", n=self.n_int, params=izhi_p, name=f"a_e_{self.leg}")
+        )
+        self.a_f = self.registry.create_population(
+            Population(model="izhikevich", n=self.n_int, params=izhi_p, name=f"a_f_{self.leg}")
+        )
+
         # Reciprocal Interneurons (InE, InF, In1)
         self.in_e = self.registry.create_population(
             Population(model="izhikevich", n=self.n_int, params=izhi_p, name=f"in_e_{self.leg}")
@@ -221,68 +229,43 @@ class Leg:
     def _build_connections(self):
         leg = self.leg
 
-        # --- RG Reciprocal Inhibition (RG-E <-> RG-F via InE, InF) ---
-        self._connect(f"rg_e_{leg}", f"in_e_{leg}", weight=12.0, p=0.40)
-        self._connect(f"in_e_{leg}", f"rg_f_{leg}", weight=-24.0, p=0.40)
-        self._connect(f"rg_f_{leg}", f"in_f_{leg}", weight=18.0, p=0.50)
-        self._connect(f"in_f_{leg}", f"rg_e_{leg}", weight=-45.0, p=0.50)
+        # --- (2) Rhythm generator internal projections (ipsilateral) ---
+        self._connect(f"rg_e_{leg}", f"in_e_{leg}", weight=12.0, p=0.50)   # RGE -> InE (exc relay)
+        self._connect(f"rg_e_{leg}", f"rg_f_{leg}", weight=-30.0, p=0.50)  # RGE -| RGF (reciprocal, direct)
+        self._connect(f"rg_f_{leg}", f"in_f_{leg}", weight=12.0, p=0.50)   # RGF -> InF (exc relay)
+        self._connect(f"rg_f_{leg}", f"rg_e_{leg}", weight=-30.0, p=0.50)  # RGF -| RGE (reciprocal, direct)
 
-        # --- RG Self-recurrence ---
-        self._connect(f"rg_e_{leg}", f"rg_e_{leg}", weight=4.5, p=0.15)
-        self._connect(f"rg_f_{leg}", f"rg_f_{leg}", weight=5.5, p=0.15)
-
-        # --- RG to Motor Neurons ---
-        self._connect(f"rg_e_{leg}", f"m_e_{leg}", weight=28.0, p=0.50)
-        self._connect(f"rg_f_{leg}", f"m_f_{leg}", weight=28.0, p=0.50)
-
-        # --- Motor Neurons to Muscles ---
+        # --- (3) Motor output ---
+        self._connect(f"in_e_{leg}", f"m_e_{leg}", weight=20.0, p=0.50)    # InE -> M-E
+        self._connect(f"in_f_{leg}", f"m_f_{leg}", weight=20.0, p=0.50)    # InF -> M-F
         self._connect(f"m_e_{leg}", f"mus_e_{leg}", weight=1.0, p=0.80)
         self._connect(f"m_f_{leg}", f"mus_f_{leg}", weight=1.0, p=0.80)
 
-        # --- Renshaw Recurrent Inhibition (M -> R -> M and R -> Ia) ---
-        # Extensor Renshaw
-        self._connect(f"m_e_{leg}", f"r_e_{leg}", weight=15.0, p=0.50)
-        self._connect(f"r_e_{leg}", f"m_e_{leg}", weight=-20.0, p=0.50)
-        self._connect(f"r_e_{leg}", f"ia_e_{leg}", weight=-12.0, p=0.40)
+        # --- (4) Recurrent (Renshaw) inhibition ---
+        self._connect(f"m_e_{leg}", f"r_e_{leg}", weight=15.0, p=0.50)     # M-E -> R-E
+        self._connect(f"r_e_{leg}", f"m_e_{leg}", weight=-20.0, p=0.50)    # R-E -| M-E
+        self._connect(f"r_e_{leg}", f"ia_e_{leg}", weight=-12.0, p=0.40)   # R-E -| Ia-E
+        self._connect(f"m_f_{leg}", f"r_f_{leg}", weight=15.0, p=0.50)     # M-F -> R-F
+        self._connect(f"r_f_{leg}", f"m_f_{leg}", weight=-20.0, p=0.50)    # R-F -| M-F
+        self._connect(f"r_f_{leg}", f"ia_f_{leg}", weight=-12.0, p=0.40)   # R-F -| Ia-F
 
-        # Flexor Renshaw
-        self._connect(f"m_f_{leg}", f"r_f_{leg}", weight=15.0, p=0.50)
-        self._connect(f"r_f_{leg}", f"m_f_{leg}", weight=-20.0, p=0.50)
-        self._connect(f"r_f_{leg}", f"ia_f_{leg}", weight=-12.0, p=0.40)
+        # --- (5) Reciprocal inhibition (Ia interneuron circuits) ---
+        self._connect(f"ia_e_{leg}", f"m_f_{leg}", weight=-25.0, p=0.40)   # Ia-E -| M-F
+        self._connect(f"ia_f_{leg}", f"m_e_{leg}", weight=-25.0, p=0.40)   # Ia-F -| M-E
+        self._connect(f"in_e_{leg}", f"ia_e_{leg}", weight=12.0, p=0.40)   # InE -> Ia-E
+        self._connect(f"in_f_{leg}", f"ia_f_{leg}", weight=12.0, p=0.40)   # InF -> Ia-F
 
-        # --- Ia Reciprocal Inhibition to Antagonist Motor Neurons ---
-        self._connect(f"ia_e_{leg}", f"m_f_{leg}", weight=-25.0, p=0.40)
-        self._connect(f"ia_f_{leg}", f"m_e_{leg}", weight=-25.0, p=0.40)
+        # --- (6) Afferent sensory projections (Ia spindle) ---
+        self._connect(f"ia_e_in_{leg}", f"m_e_{leg}", weight=18.0, p=0.40)  # Ia(top)    -> M-E
+        self._connect(f"ia_e_in_{leg}", f"ia_f_{leg}", weight=14.0, p=0.40)  # Ia(top)    -> Ia-F
+        self._connect(f"ia_f_in_{leg}", f"m_f_{leg}", weight=18.0, p=0.40)  # Ia(bottom) -> M-F
+        self._connect(f"ia_f_in_{leg}", f"ia_e_{leg}", weight=14.0, p=0.40)  # Ia(bottom) -> Ia-E
 
-        # --- Ia Spindle Afferent Feedback (Stretch reflex & RG driving) ---
-        # Extensor Ia
-        self._connect(f"ia_e_in_{leg}", f"m_e_{leg}", weight=18.0, p=0.40)
-        self._connect(f"ia_e_in_{leg}", f"ia_e_{leg}", weight=12.0, p=0.40)
-        self._connect(f"ia_e_in_{leg}", f"rg_e_{leg}", weight=5.0, p=0.35,
-                      is_stdp=True, key=f"ia_rg_e_{leg}")
-
-        # Flexor Ia
-        self._connect(f"ia_f_in_{leg}", f"m_f_{leg}", weight=18.0, p=0.40)
-        self._connect(f"ia_f_in_{leg}", f"ia_f_{leg}", weight=12.0, p=0.40)
-        self._connect(f"ia_f_in_{leg}", f"rg_f_{leg}", weight=5.0, p=0.35,
-                      is_stdp=True, key=f"ia_rg_f_{leg}")
-
-        # --- Ib Golgi Tendon Organ Feedback (Tension protection / autogenic inhibition) ---
-        self._connect(f"ib_e_in_{leg}", f"m_e_{leg}", weight=-18.0, p=0.40)
+        # --- Extra sensory afferents (present in the project, not in the CPG core) ---
+        self._connect(f"ib_e_in_{leg}", f"m_e_{leg}", weight=-18.0, p=0.40)  # Ib autogenic inhibition
         self._connect(f"ib_f_in_{leg}", f"m_f_{leg}", weight=-18.0, p=0.40)
-
-        # --- Cutaneous (CUT) Feedback (Stance reinforcement) ---
-        self._connect(f"cut_in_{leg}", f"rg_e_{leg}", weight=22.0, p=0.45, is_stdp=True, key=f"cut_rge_{leg}")
-        self._connect(f"cut_in_{leg}", f"in_e_{leg}", weight=8.0, p=0.30)
-
-        # --- Commissural Projections from RG-F ---
-        self._connect(f"rg_f_{leg}", f"v2a_{leg}", weight=15.0, p=0.45)
-        self._connect(f"v2a_{leg}", f"v0v_{leg}", weight=18.0, p=0.45)
-        self._connect(f"rg_f_{leg}", f"v0d_{leg}", weight=12.0, p=0.40)
-        self._connect(f"rg_f_{leg}", f"v3_f_{leg}", weight=15.0, p=0.40)
-
-        # In1 inhibits ipsilateral RG-F
-        self._connect(f"in1_{leg}", f"rg_f_{leg}", weight=-20.0, p=0.40)
+        self._connect(f"cut_in_{leg}", f"rg_e_{leg}", weight=22.0, p=0.45,   # CUT stance reinforcement (STDP)
+                      is_stdp=True, key=f"cut_rge_{leg}")
 
     def update_sensory_feedback(self, cut_hz: float,
                                 ia_e_hz: float, ia_f_hz: float,

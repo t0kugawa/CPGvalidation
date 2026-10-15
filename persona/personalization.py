@@ -112,7 +112,10 @@ class Personalizer:
                  loss_window: int = 30,
                  max_steps: int = 1000,
                  log_every: int = 20,
-                 verbose: bool = True):
+                 verbose: bool = True,
+                 belt_mps: float = 0.2,
+                 belt_start_step: int = 20,
+                 belt_ramp_steps: int = 50):
         self.registry = registry
         self.cpg = cpg
         self.rig = rig
@@ -126,6 +129,9 @@ class Personalizer:
         self.max_steps = int(max_steps)
         self.log_every = int(log_every)
         self.verbose = bool(verbose)
+        self.belt_mps = float(belt_mps)
+        self.belt_start_step = int(belt_start_step)
+        self.belt_ramp_steps = max(1, int(belt_ramp_steps))
 
     def _log_progress(self, log: RunLog, stage: str):
         if not self.verbose:
@@ -146,7 +152,10 @@ class Personalizer:
         stage = "pose"
         pose_ok = 0
 
-        for _ in range(self.max_steps):
+        for step in range(self.max_steps):
+            if step >= self.belt_start_step and hasattr(self.rig, "set_treadmill_surfacevel"):
+                frac = min(1.0, (step - self.belt_start_step + 1) / self.belt_ramp_steps)
+                self.rig.set_treadmill_surfacevel(self.belt_mps * frac)
             if stage == "pose":
                 tgt_L, tgt_R = self.target_driver.pose()
                 rig_kwargs = {"target_ankle_L": tgt_L, "target_ankle_R": tgt_R}
