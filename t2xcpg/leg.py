@@ -72,78 +72,89 @@ class Leg:
             max=max_val
         )
 
-    def _build_populations(self):
-        # Izhikevich parameters default: regular bursting/spiking
-        izhi_p = {
-            "a": self._param("a", 0.02, 0.002, 0.005, 0.001, 0.1),
-            "b": self._param("b", 0.20, 0.02, 0.04, 0.05, 0.5),
-            "c": self._param("c", -65.0, 2.0, 5.0, -80.0, -50.0),
-            "d": self._param("d", 8.0, 1.0, 2.0, 0.0, 20.0),
+    def _izhi(self, a, b, c, d):
+        return {
+            "a": self._param("a", a, 0.002, 0.005, 0.001, 0.1),
+            "b": self._param("b", b, 0.02, 0.04, 0.05, 0.5),
+            "c": self._param("c", c, 2.0, 5.0, -80.0, -50.0),
+            "d": self._param("d", d, 1.0, 2.0, 0.0, 20.0),
         }
+
+    def _build_populations(self):
+        # Izhikevich parameters from cpg_2legs_fast: regular-spiking excitatory,
+        # fast-spiking inhibitory, and intrinsically-bursting flexor RG.
+        def exc():
+            return self._izhi(0.02, 0.2, -65.0, 8.0)
+
+        def inh():
+            return self._izhi(0.1, 0.2, -65.0, 2.0)
+
+        def rgf():
+            return self._izhi(0.02, 0.2, -55.0, 4.0)
 
         # Rhythm Generators
         self.rg_e = self.registry.create_population(
-            Population(model="izhikevich", n=self.n_rg, params=izhi_p, name=f"rg_e_{self.leg}")
+            Population(model="izhikevich", n=self.n_rg, params=exc(), name=f"rg_e_{self.leg}")
         )
         self.rg_f = self.registry.create_population(
-            Population(model="izhikevich", n=self.n_rg, params=izhi_p, name=f"rg_f_{self.leg}")
+            Population(model="izhikevich", n=self.n_rg, params=rgf(), name=f"rg_f_{self.leg}")
         )
 
         # Motor Neurons
         self.m_e = self.registry.create_population(
-            Population(model="izhikevich", n=self.n_mn, params=izhi_p, name=f"m_e_{self.leg}")
+            Population(model="izhikevich", n=self.n_mn, params=exc(), name=f"m_e_{self.leg}")
         )
         self.m_f = self.registry.create_population(
-            Population(model="izhikevich", n=self.n_mn, params=izhi_p, name=f"m_f_{self.leg}")
+            Population(model="izhikevich", n=self.n_mn, params=exc(), name=f"m_f_{self.leg}")
         )
 
         # Renshaw Cells (R-E, R-F)
         self.r_e = self.registry.create_population(
-            Population(model="izhikevich", n=self.n_int, params=izhi_p, name=f"r_e_{self.leg}")
+            Population(model="izhikevich", n=self.n_int, params=inh(), name=f"r_e_{self.leg}")
         )
         self.r_f = self.registry.create_population(
-            Population(model="izhikevich", n=self.n_int, params=izhi_p, name=f"r_f_{self.leg}")
+            Population(model="izhikevich", n=self.n_int, params=inh(), name=f"r_f_{self.leg}")
         )
 
-        # Ia Inhibitory Interneurons (Ia-E, Ia-F)
+        # Ia inhibitory interneurons (Ia-E, Ia-F): speed/stretch reciprocal inhibition
         self.ia_e = self.registry.create_population(
-            Population(model="izhikevich", n=self.n_int, params=izhi_p, name=f"ia_e_{self.leg}")
+            Population(model="izhikevich", n=self.n_int, params=inh(), name=f"ia_e_{self.leg}")
         )
         self.ia_f = self.registry.create_population(
-            Population(model="izhikevich", n=self.n_int, params=izhi_p, name=f"ia_f_{self.leg}")
+            Population(model="izhikevich", n=self.n_int, params=inh(), name=f"ia_f_{self.leg}")
         )
 
-        # Alpha inhibitory interneurons (a-E, a-F)
-        self.a_e = self.registry.create_population(
-            Population(model="izhikevich", n=self.n_int, params=izhi_p, name=f"a_e_{self.leg}")
+        # Ib inhibitory interneurons (InIb-E, InIb-F): force/load autogenic inhibition
+        self.in_ib_e = self.registry.create_population(
+            Population(model="izhikevich", n=self.n_int, params=inh(), name=f"in_ib_e_{self.leg}")
         )
-        self.a_f = self.registry.create_population(
-            Population(model="izhikevich", n=self.n_int, params=izhi_p, name=f"a_f_{self.leg}")
+        self.in_ib_f = self.registry.create_population(
+            Population(model="izhikevich", n=self.n_int, params=inh(), name=f"in_ib_f_{self.leg}")
         )
 
-        # Reciprocal Interneurons (InE, InF, In1)
+        # Excitatory relay interneurons (InE, InF, In1)
         self.in_e = self.registry.create_population(
-            Population(model="izhikevich", n=self.n_int, params=izhi_p, name=f"in_e_{self.leg}")
+            Population(model="izhikevich", n=self.n_int, params=exc(), name=f"in_e_{self.leg}")
         )
         self.in_f = self.registry.create_population(
-            Population(model="izhikevich", n=self.n_int, params=izhi_p, name=f"in_f_{self.leg}")
+            Population(model="izhikevich", n=self.n_int, params=exc(), name=f"in_f_{self.leg}")
         )
         self.in1 = self.registry.create_population(
-            Population(model="izhikevich", n=self.n_int, params=izhi_p, name=f"in1_{self.leg}")
+            Population(model="izhikevich", n=self.n_int, params=exc(), name=f"in1_{self.leg}")
         )
 
-        # Commissural Nuclei (V2a, V0v, V0d, V3-F)
+        # Commissural nuclei (V2a, V0v, V0d, V3-F)
         self.v2a = self.registry.create_population(
-            Population(model="izhikevich", n=self.n_int, params=izhi_p, name=f"v2a_{self.leg}")
+            Population(model="izhikevich", n=self.n_int, params=exc(), name=f"v2a_{self.leg}")
         )
         self.v0v = self.registry.create_population(
-            Population(model="izhikevich", n=self.n_int, params=izhi_p, name=f"v0v_{self.leg}")
+            Population(model="izhikevich", n=self.n_int, params=exc(), name=f"v0v_{self.leg}")
         )
         self.v0d = self.registry.create_population(
-            Population(model="izhikevich", n=self.n_int, params=izhi_p, name=f"v0d_{self.leg}")
+            Population(model="izhikevich", n=self.n_int, params=inh(), name=f"v0d_{self.leg}")
         )
         self.v3_f = self.registry.create_population(
-            Population(model="izhikevich", n=self.n_int, params=izhi_p, name=f"v3_f_{self.leg}")
+            Population(model="izhikevich", n=self.n_int, params=exc(), name=f"v3_f_{self.leg}")
         )
 
         # Muscles (Parrot readout)
@@ -255,16 +266,32 @@ class Leg:
         self._connect(f"in_e_{leg}", f"ia_e_{leg}", weight=12.0, p=0.40)   # InE -> Ia-E
         self._connect(f"in_f_{leg}", f"ia_f_{leg}", weight=12.0, p=0.40)   # InF -> Ia-F
 
-        # --- (6) Afferent sensory projections (Ia spindle) ---
-        self._connect(f"ia_e_in_{leg}", f"m_e_{leg}", weight=18.0, p=0.40)  # Ia(top)    -> M-E
+        # --- (6) Afferent sensory projections (Ia spindle, monosynaptic) ---
+        self._connect(f"ia_e_in_{leg}", f"m_e_{leg}", weight=18.0, p=0.40)  # Ia(top)    -> M-E (exc)
         self._connect(f"ia_e_in_{leg}", f"ia_f_{leg}", weight=14.0, p=0.40)  # Ia(top)    -> Ia-F
-        self._connect(f"ia_f_in_{leg}", f"m_f_{leg}", weight=18.0, p=0.40)  # Ia(bottom) -> M-F
+        self._connect(f"ia_f_in_{leg}", f"m_f_{leg}", weight=18.0, p=0.40)  # Ia(bottom) -> M-F (exc)
         self._connect(f"ia_f_in_{leg}", f"ia_e_{leg}", weight=14.0, p=0.40)  # Ia(bottom) -> Ia-E
 
-        # --- Extra sensory afferents (present in the project, not in the CPG core) ---
-        self._connect(f"ib_e_in_{leg}", f"m_e_{leg}", weight=-18.0, p=0.40)  # Ib autogenic inhibition
-        self._connect(f"ib_f_in_{leg}", f"m_f_{leg}", weight=-18.0, p=0.40)
-        self._connect(f"cut_in_{leg}", f"rg_e_{leg}", weight=22.0, p=0.45,   # CUT stance reinforcement (STDP)
+        # --- (6b) Ib Golgi tendon organ, disynaptic via Ib interneurons ---
+        # Extensor Ib: GTO -> InIb-E -> {M-E inh, M-F exc, RGF exc}
+        self._connect(f"ib_e_in_{leg}", f"in_ib_e_{leg}", weight=16.0, p=0.40)   # GTO -> InIb-E
+        self._connect(f"in_ib_e_{leg}", f"m_e_{leg}", weight=-18.0, p=0.40)      # autogenic inhibition
+        self._connect(f"in_ib_e_{leg}", f"m_f_{leg}", weight=12.0, p=0.35)       # disinhibit flexor
+        self._connect(f"in_ib_e_{leg}", f"rg_f_{leg}", weight=10.0, p=0.35)      # phase switch -> flexion
+        # Flexor Ib: GTO -> InIb-F -> {M-F inh, M-E exc, RGE exc}
+        self._connect(f"ib_f_in_{leg}", f"in_ib_f_{leg}", weight=16.0, p=0.40)   # GTO -> InIb-F
+        self._connect(f"in_ib_f_{leg}", f"m_f_{leg}", weight=-18.0, p=0.40)      # autogenic inhibition
+        self._connect(f"in_ib_f_{leg}", f"m_e_{leg}", weight=12.0, p=0.35)       # disinhibit extensor
+        self._connect(f"in_ib_f_{leg}", f"rg_e_{leg}", weight=10.0, p=0.35)      # phase switch -> extension
+
+        # --- (6c) Ib interneuron convergence (spindle, CPG) ---
+        self._connect(f"ia_e_in_{leg}", f"in_ib_e_{leg}", weight=8.0, p=0.30)    # Ia -> InIb-E
+        self._connect(f"ia_f_in_{leg}", f"in_ib_f_{leg}", weight=8.0, p=0.30)    # Ia -> InIb-F
+        self._connect(f"rg_e_{leg}", f"in_ib_e_{leg}", weight=8.0, p=0.30)       # RGE -> InIb-E
+        self._connect(f"rg_f_{leg}", f"in_ib_f_{leg}", weight=8.0, p=0.30)       # RGF -> InIb-F
+
+        # --- (extra) Cutaneous (CUT) stance reinforcement (STDP) ---
+        self._connect(f"cut_in_{leg}", f"rg_e_{leg}", weight=22.0, p=0.45,
                       is_stdp=True, key=f"cut_rge_{leg}")
 
     def update_sensory_feedback(self, cut_hz: float,
