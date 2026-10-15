@@ -72,6 +72,13 @@ class Leg:
             for s in SIDES
         }
 
+        # Treadmill + target-limb foot geoms (used to level the plane).
+        self.treadmill_gid = self._gid("treadmill")
+        self.ref_foot_geoms = {
+            s: [self._gid(f"foot_ref_geom_{s}"), self._gid(f"toe_ref_geom_{s}")]
+            for s in SIDES
+        }
+
         self.cut_afferent = {s: CUTAfferent(dt_ms=dt_ms, r_peak_hz=120.0) for s in SIDES}
         self.ia_sol = {s: IaAfferent(l_0=0.040, k_l=600.0, k_v=120.0, r_base_hz=10.0, r_max_hz=250.0) for s in SIDES}
         self.ia_ta = {s: IaAfferent(l_0=0.028, k_l=600.0, k_v=120.0, r_base_hz=10.0, r_max_hz=250.0) for s in SIDES}
@@ -135,35 +142,60 @@ class Leg:
                 total += abs(float(f[0]))
         return total
 
-    def reset(self):
+    def reset(self, pose=None):
+        """
+        Resets the simulation. If `pose` (dict with hip/knee/ankle per side) is
+        given, the controlled limbs start from that pose so they match the
+        target limbs; otherwise the default stance pose is used.
+        """
         mujoco.mj_resetData(self.model, self.data)
         self.time_ms = 0.0
+        if pose is None:
+            pose = {s: {"hip": -0.2, "knee": 0.6, "ankle": 0.3} for s in SIDES}
         for s in SIDES:
             self.cut_afferent[s].reset()
-            q_hip_m = self.model.jnt_qposadr[self.j_hip_m[s]]
-            q_knee_m = self.model.jnt_qposadr[self.j_knee_m[s]]
-            q_ankle_m = self.model.jnt_qposadr[self.j_ankle_m[s]]
-            q_hip_ref = self.model.jnt_qposadr[self.j_hip_ref[s]]
-            q_knee_ref = self.model.jnt_qposadr[self.j_knee_ref[s]]
-            q_ankle_ref = self.model.jnt_qposadr[self.j_ankle_ref[s]]
-
-            self.data.qpos[q_hip_m] = -0.2
-            self.data.qpos[q_knee_m] = 0.6
-            self.data.qpos[q_ankle_m] = 0.3
-
-            self.data.qpos[q_hip_ref] = -0.2
-            self.data.qpos[q_knee_ref] = 0.6
-            self.data.qpos[q_ankle_ref] = 0.3
+            p = pose[s]
+            for jid, val in (
+                (self.j_hip_m[s], p["hip"]),
+                (self.j_knee_m[s], p["knee"]),
+                (self.j_ankle_m[s], p["ankle"]),
+                (self.j_hip_ref[s], p["hip"]),
+                (self.j_knee_ref[s], p["knee"]),
+                (self.j_ankle_ref[s], p["ankle"]),
+            ):
+                self.data.qpos[self.model.jnt_qposadr[jid]] = float(val)
 
         mujoco.mj_forward(self.model, self.data)
+        self._level_treadmill()
+        # Re-apply after moving the plane so contacts start settled.
+        mujoco.mj_forward(self.model, self.data)
 
-    def get_reference_kinematics(self, t_s: float) -> tuple[float, float, float]:
+    def _level_treadmill(self):
+        """
+        Lowers/raises the treadmill plane to the lowest point of the TARGET
+        limbs' feet, so the target rest on the belt without colliding with the
+        ground. Returns the plane height used.
+        """
+        lo = np.inf
+        for s in SIDES:
+            for gid in self.ref_foot_geoms[s]:
+                z = float(self.data.geom_xpos[gid, 2])
+                r = float(self.model.geom_size[gid, 0])
+                lo = min(lo, z - r)
+        if not np.isfinite(lo):
+            return float(self.model.geom_pos[self.treadmill_gid, 2])
+        # Small clearance so the target foot rests without a hard initial impact.
+        self.model.geom_pos[self.treadmill_gid, 2] = lo - 0.002
+        return lo - 0.002
+
+    def get_reference_kinematics(self, t_s: float, phase_offset: float = 0.0) -> tuple[float, float, float]:
         """
         Bio-plausible periodic reference joint waveforms (hip, knee, ankle) for
-        walking at ~1.5 Hz. Used when no external target trajectory is supplied.
+        walking at ~1.5 Hz. `phase_offset` shifts the cycle for the right leg so
+        the two reference limbs are not identical.
         """
         freq = 1.5
-        phase = 2.0 * np.pi * freq * t_s
+        phase = 2.0 * np.pi * freq * t_s + phase_offset
         hip_ref = -0.25 + 0.35 * np.cos(phase)
         knee_ref = 0.65 + 0.30 * np.sin(phase)
         ankle_ref = 0.40 + 0.45 * np.sin(phase - 0.5)
@@ -190,22 +222,27 @@ class Leg:
         self.contract_muscles(cpg_output)
 
         t_s = self.time_ms / 1000.0
-        hip_ref, knee_ref, ankle_ref = self.get_reference_kinematics(t_s)
+        # Distinct left/right reference trajectories (R is phase-shifted).
+        ref = {s: self.get_reference_kinematics(t_s, 0.0 if s == "L" else np.pi)
+               for s in SIDES}
         target_hip = {"L": target_hip_L, "R": target_hip_R}
         target_knee = {"L": target_knee_L, "R": target_knee_R}
         target_ankle = {"L": target_ankle_L, "R": target_ankle_R}
 
         for s in SIDES:
+            hip_ref, knee_ref, ankle_ref = ref[s]
             hip_s = hip_ref if target_hip[s] is None else float(target_hip[s])
             knee_s = knee_ref if target_knee[s] is None else float(target_knee[s])
+            ankle_s = ankle_ref if target_ankle[s] is None else float(target_ankle[s])
+
+            # Controlled limb: non-ankle joints servoed to the target limb's pose.
             self.data.ctrl[self.act_hip_m[s]] = hip_s
             self.data.ctrl[self.act_knee_m[s]] = knee_s
 
+            # Target limb: all three joints follow the reference trajectory.
             self.data.ctrl[self.act_hip_ref[s]] = hip_s
             self.data.ctrl[self.act_knee_ref[s]] = knee_s
-            self.data.ctrl[self.act_ankle_ref[s]] = (
-                ankle_ref if target_ankle[s] is None else float(target_ankle[s])
-            )
+            self.data.ctrl[self.act_ankle_ref[s]] = ankle_s
             self.data.ctrl[self.act_toe_ref[s]] = 0.0
 
         n_substeps = max(1, int(round((self.dt_ms / 1000.0) / self.physics_dt)))

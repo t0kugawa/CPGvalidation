@@ -65,47 +65,69 @@ def build(n_rg, n_mn, n_int, n_aff, n_bs):
     return reg, cpg, rig
 
 
-def run(steps, cams, width, height, fps, out_dir, n_rg, n_mn, n_int, n_aff, n_bs):
+def run(duration_s, cams, width, height, fps, out_dir, fmt,
+        n_rg, n_mn, n_int, n_aff, n_bs):
     reg, cpg, rig = build(n_rg, n_mn, n_int, n_aff, n_bs)
+    # Startup (option 2a): start the controlled limbs from the target pose so
+    # both ankle angles match at t=0; afferents are then derived from state.
+    start_hip, start_knee, start_ankle = rig.get_reference_kinematics(0.0)
+    rig.reset(pose={s: {"hip": start_hip, "knee": start_knee, "ankle": start_ankle}
+                    for s in ("L", "R")})
     renderer = LegRenderer(rig.model, rig.data, width=width, height=height)
-    writers = {c: imageio.get_writer(os.path.join(out_dir, f"locomotion_{c}.gif"),
-                                     mode="I", fps=fps) for c in cams}
+
+    n_frames = int(round(duration_s * fps))
+    dt_s = DT_MS / 1000.0
+    steps = int(round(duration_s / dt_s))
+    # simulation step at which each output frame is captured (exact fps timing)
+    frame_steps = {int(round(k / (fps * dt_s))) for k in range(n_frames)}
+
+    ext = "mp4" if fmt == "mp4" else "gif"
+    writers = {}
+    for c in cams:
+        path = os.path.join(out_dir, f"locomotion_{c}.{ext}")
+        if fmt == "mp4":
+            writers[c] = imageio.get_writer(path, fps=fps, codec="libx264",
+                                            quality=8, macro_block_size=1)
+        else:
+            writers[c] = imageio.get_writer(path, mode="I", fps=fps)
 
     cpg_in = CPGInput()
     belt_on = False
     for step in range(steps):
-        # treadmill belt starts after the brainstem drive has been running
         if not belt_on and step >= BELT_START_STEP:
             rig.set_treadmill_surfacevel(TREADMILL_MPS)
             belt_on = True
-
-        # startup: at t=0 both feet planted -> CUT fully active
         if step == 0 and cpg_in.cut_L == 0.0 and cpg_in.cut_R == 0.0:
             cpg_in.cut_L = CUT_PLANTED_HZ
             cpg_in.cut_R = CUT_PLANTED_HZ
 
         cpg.update(cpg_in)
         cpg_out = cpg.step()
-        cpg_in = rig.step(cpg_out, target_ankle_L=0.3, target_ankle_R=0.3)
+        # Target limbs follow the reference trajectory (distinct L/R); the
+        # controlled ankle is muscle-driven by the CPG.
+        cpg_in = rig.step(cpg_out)
 
-        if step % 5 == 0 or step == steps - 1:
+        if step in frame_steps:
             stage = "startup" if step < BELT_START_STEP else "locomotion"
             lines = hud_lines(cpg_in, cpg_out, cpg.current_time_ms, stage)
             for c in cams:
                 writers[c].append_data(renderer.frame(c, lines))
-            print(f"[{cpg.current_time_ms:6.0f} ms] {stage:9s} "
-                  f"CUT {cpg_in.cut_L:5.1f}  ankleL {cpg_in.ankle_angle_m_L:+.3f} "
-                  f"SOL {cpg_out.mus_E_L:.2f} TA {cpg_out.mus_F_L:.2f}", flush=True)
+        if step % 100 == 0:
+            print(f"[{cpg.current_time_ms:6.0f} ms] CUT {cpg_in.cut_L:5.1f} "
+                  f"ankleL {cpg_in.ankle_angle_m_L:+.3f} SOL {cpg_out.mus_E_L:.2f} "
+                  f"TA {cpg_out.mus_F_L:.2f}", flush=True)
 
     for w in writers.values():
         w.close()
     renderer.close()
-    print("wrote GIFs to", out_dir)
+    print(f"wrote {ext} ({n_frames} frames, {duration_s:.0f}s sim) to {out_dir}")
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--steps", type=int, default=400)
+    ap.add_argument("--duration-s", type=float, default=10.0)
+    ap.add_argument("--view", type=str, default="oblique_view")
+    ap.add_argument("--format", type=str, default="mp4", choices=["mp4", "gif"])
     ap.add_argument("--fps", type=int, default=40)
     ap.add_argument("--width", type=int, default=1920)
     ap.add_argument("--height", type=int, default=1080)
@@ -117,6 +139,5 @@ if __name__ == "__main__":
     ap.add_argument("--n-bs", type=int, default=10)
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
-    run(args.steps, ["sagittal_view", "oblique_view", "top_view"],
-        args.width, args.height, args.fps, args.out,
-        args.n_rg, args.n_mn, args.n_int, args.n_aff, args.n_bs)
+    run(args.duration_s, [args.view], args.width, args.height, args.fps,
+        args.out, args.format, args.n_rg, args.n_mn, args.n_int, args.n_aff, args.n_bs)

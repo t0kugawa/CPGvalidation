@@ -34,7 +34,7 @@
         <!-- ============================================================ -->
         <!--                           TREADMILL                          -->
         <!-- ============================================================ -->
-        <geom name="treadmill" type="plane" size="0.6 0.6 0.05" pos="0 0 0.026"
+        <geom name="treadmill" type="plane" size="0.6 0.6 0.05" pos="0 0 0"
               material="grid_mat"
               surfacevel="-0.3 0 0 0 0 0"
               contype="1" conaffinity="1"
@@ -219,13 +219,13 @@
         <!-- Target leg L servos -->
         <position name="hip_ref_ctrl_L" joint="hip_ref_L" kp="1.0" kv="0.02" ctrlrange="-1.57 1.05"/>
         <position name="knee_ref_ctrl_L" joint="knee_ref_L" kp="1.0" kv="0.02" ctrlrange="-1.22 1.54"/>
-        <position name="ankle_ref_ctrl_L" joint="ankle_ref_L" kp="0.5" kv="0.01" ctrlrange="-0.8 1.4"/>
+        <position name="ankle_ref_ctrl_L" joint="ankle_ref_L" kp="1.0" kv="0.05" ctrlrange="-0.8 1.4"/>
         <position name="toe_ref_ctrl_L" joint="toe_ref_jnt_L" kp="0.1" kv="0.005" ctrlrange="-0.3 0.8"/>
 
         <!-- Target leg R servos -->
         <position name="hip_ref_ctrl_R" joint="hip_ref_R" kp="1.0" kv="0.02" ctrlrange="-1.57 1.05"/>
         <position name="knee_ref_ctrl_R" joint="knee_ref_R" kp="1.0" kv="0.02" ctrlrange="-1.22 1.54"/>
-        <position name="ankle_ref_ctrl_R" joint="ankle_ref_R" kp="0.5" kv="0.01" ctrlrange="-0.8 1.4"/>
+        <position name="ankle_ref_ctrl_R" joint="ankle_ref_R" kp="1.0" kv="0.05" ctrlrange="-0.8 1.4"/>
         <position name="toe_ref_ctrl_R" joint="toe_ref_jnt_R" kp="0.1" kv="0.005" ctrlrange="-0.3 0.8"/>
     </actuator>
 
