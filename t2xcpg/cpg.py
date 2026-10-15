@@ -21,12 +21,16 @@ class L2CPG(CPGAdapter):
                  bs: BrainStem,
                  legs: Dict[str, Leg],
                  dt_ms: float = 10.0,
-                 p_comm: float = 0.40):
+                 p_comm: float = 0.40,
+                 leading_leg: str = "L",
+                 leading_gain: float = 1.5):
         self.registry = registry
         self.bs = bs
         self.legs = legs
         self.dt_ms = dt_ms
         self.current_time_ms = 0.0
+        self.leading_leg = leading_leg
+        self.leading_gain = float(leading_gain)
 
         # Build Brainstem drives and Commissural Cross-Connections
         self._build_bs_connections()
@@ -62,11 +66,14 @@ class L2CPG(CPGAdapter):
 
     def _build_bs_connections(self):
         """
-        Connects Brainstem to Extensor (RGE) and Flexor (RGF) generators of all legs.
+        Connects Brainstem to Extensor (RGE) and Flexor (RGF) generators of all
+        legs. The brainstem drive frequency is equal for both legs; the leading
+        leg receives a larger synaptic weight so the first step emerges from it.
         """
         for leg_key, leg in self.legs.items():
-            self._connect("BS_in_e", f"rg_e_{leg_key}", weight=18.0, p=0.45)
-            self._connect("BS_in_f", f"rg_f_{leg_key}", weight=18.0, p=0.45)
+            gain = self.leading_gain if leg_key == self.leading_leg else 1.0
+            self._connect("BS_in_e", f"rg_e_{leg_key}", weight=18.0 * gain, p=0.45)
+            self._connect("BS_in_f", f"rg_f_{leg_key}", weight=18.0 * gain, p=0.45)
 
     def _build_commissural_connections(self, p_comm: float = 0.40):
         """

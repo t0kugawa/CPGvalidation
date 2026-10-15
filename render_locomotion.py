@@ -1,0 +1,122 @@
+"""
+Render the CPG-driven locomotion (startup + personalization) from three
+camera views with a sensor HUD, and write GIFs.
+
+Usage (headless):
+    MUJOCO_GL=osmesa python render_locomotion.py --steps 400 --fps 40
+
+Startup protocol:
+  * t=0: both legs still, feet planted, CUT active, no muscle activity.
+  * the brainstem fires at equal frequency (40 Hz) on both legs, but the
+    leading (left) RG receives a larger synaptic weight so the first step
+    emerges from the left leg.
+  * the treadmill belt starts moving only after the brainstem drive begins.
+"""
+import argparse
+import os
+import sys
+
+os.environ.setdefault("MUJOCO_GL", "osmesa")
+
+import numpy as np
+import nest
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
+import imageio
+
+from persona.registry import Registry
+from t2xcpg.bs import BrainStem
+from t2xcpg.leg import Leg as CPG_Leg
+from t2xcpg.cpg import L2CPG
+from model.leg import Leg as MuJoCo_Leg
+from model.adapter import CPGInput
+from model.render import LegRenderer, hud_lines
+
+DT_MS = 10.0
+BS_HZ = 40.0
+LEADING_LEG = "L"
+LEADING_GAIN = 1.5
+CUT_PLANTED_HZ = 120.0
+TREADMILL_MPS = 0.2
+BS_START_STEP = 0
+BELT_START_STEP = 20
+
+
+def build(n_rg, n_mn, n_int, n_aff, n_bs):
+    nest.ResetKernel()
+    nest.SetKernelStatus({"resolution": 1.0, "print_time": False})
+    try:
+        nest.verbosity = nest.VerbosityLevel.ERROR
+    except Exception:
+        pass
+    reg = Registry()
+    bs = BrainStem(registry=reg, n_bs=n_bs, bs_e_hz=BS_HZ, bs_f_hz=BS_HZ)
+    leg_l = CPG_Leg("L", reg, n_rg=n_rg, n_mn=n_mn, n_int=n_int, n_aff=n_aff,
+                    w_scale=0.4, ref_hz=150.0)
+    leg_r = CPG_Leg("R", reg, n_rg=n_rg, n_mn=n_mn, n_int=n_int, n_aff=n_aff,
+                    w_scale=0.4, ref_hz=150.0)
+    cpg = L2CPG(registry=reg, bs=bs, legs={"L": leg_l, "R": leg_r}, dt_ms=DT_MS,
+                leading_leg=LEADING_LEG, leading_gain=LEADING_GAIN)
+    rig = MuJoCo_Leg(mujoco_cfg=os.path.join(BASE_DIR, "dual_rat_hindlimb.xml"), dt_ms=DT_MS)
+    rig.set_treadmill_surfacevel(0.0)  # belt off during startup
+    return reg, cpg, rig
+
+
+def run(steps, cams, width, height, fps, out_dir, n_rg, n_mn, n_int, n_aff, n_bs):
+    reg, cpg, rig = build(n_rg, n_mn, n_int, n_aff, n_bs)
+    renderer = LegRenderer(rig.model, rig.data, width=width, height=height)
+    writers = {c: imageio.get_writer(os.path.join(out_dir, f"locomotion_{c}.gif"),
+                                     mode="I", fps=fps) for c in cams}
+
+    cpg_in = CPGInput()
+    belt_on = False
+    for step in range(steps):
+        # treadmill belt starts after the brainstem drive has been running
+        if not belt_on and step >= BELT_START_STEP:
+            rig.set_treadmill_surfacevel(TREADMILL_MPS)
+            belt_on = True
+
+        # startup: at t=0 both feet planted -> CUT fully active
+        if step == 0 and cpg_in.cut_L == 0.0 and cpg_in.cut_R == 0.0:
+            cpg_in.cut_L = CUT_PLANTED_HZ
+            cpg_in.cut_R = CUT_PLANTED_HZ
+
+        cpg.update(cpg_in)
+        cpg_out = cpg.step()
+        cpg_in = rig.step(cpg_out, target_ankle_L=0.3, target_ankle_R=0.3)
+
+        if step % 5 == 0 or step == steps - 1:
+            stage = "startup" if step < BELT_START_STEP else "locomotion"
+            lines = hud_lines(cpg_in, cpg_out, cpg.current_time_ms, stage)
+            for c in cams:
+                writers[c].append_data(renderer.frame(c, lines))
+            print(f"[{cpg.current_time_ms:6.0f} ms] {stage:9s} "
+                  f"CUT {cpg_in.cut_L:5.1f}  ankleL {cpg_in.ankle_angle_m_L:+.3f} "
+                  f"SOL {cpg_out.mus_E_L:.2f} TA {cpg_out.mus_F_L:.2f}", flush=True)
+
+    for w in writers.values():
+        w.close()
+    renderer.close()
+    print("wrote GIFs to", out_dir)
+
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--steps", type=int, default=400)
+    ap.add_argument("--fps", type=int, default=40)
+    ap.add_argument("--width", type=int, default=1920)
+    ap.add_argument("--height", type=int, default=1080)
+    ap.add_argument("--out", type=str, default=os.path.join(BASE_DIR, "renders"))
+    ap.add_argument("--n-rg", type=int, default=12)
+    ap.add_argument("--n-mn", type=int, default=10)
+    ap.add_argument("--n-int", type=int, default=8)
+    ap.add_argument("--n-aff", type=int, default=6)
+    ap.add_argument("--n-bs", type=int, default=10)
+    args = ap.parse_args()
+    os.makedirs(args.out, exist_ok=True)
+    run(args.steps, ["sagittal_view", "oblique_view", "top_view"],
+        args.width, args.height, args.fps, args.out,
+        args.n_rg, args.n_mn, args.n_int, args.n_aff, args.n_bs)

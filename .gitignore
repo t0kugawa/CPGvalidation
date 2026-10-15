@@ -12,3 +12,6 @@ distribution.png
 run.log
 run_log.csv
 run_log.npz
+renders/
+renders_test/
+render_out/

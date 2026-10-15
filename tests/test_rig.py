@@ -38,10 +38,15 @@ def test_lr_symmetry():
         assert np.allclose([loL, hiL], [loR, hiR])
 
 
-def test_touch_sensors_both_sides():
+def test_foot_contact_geoms_and_bodies():
     m, _ = _load()
     for side in "LR":
-        assert _sid(m, f"cut_heel_0_{side}") >= 0
+        # foot/toe geoms collide with the ground (contype=2)
+        gid = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_GEOM, f"foot_m_geom_{side}")
+        assert gid >= 0 and m.geom_contype[gid] == 2
+        # CUT is computed from contacts on the foot/toe bodies
+        for b in (f"foot_m_{side}", f"toe_m_{side}"):
+            assert mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, b) >= 0
 
 
 def test_non_ankle_joint_servos_present():

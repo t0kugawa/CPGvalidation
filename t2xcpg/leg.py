@@ -32,7 +32,9 @@ class Leg:
                  n_mn: int = 20,
                  n_int: int = 15,
                  n_aff: int = 20,
-                 p_scale: float = 1.0):
+                 p_scale: float = 1.0,
+                 w_scale: float = 1.0,
+                 ref_hz: float = 100.0):
         self.leg = leg_name
         self.registry = registry
         self.n_rg = n_rg
@@ -40,6 +42,8 @@ class Leg:
         self.n_int = n_int
         self.n_aff = n_aff
         self.p_scale = float(p_scale)
+        self.w_scale = float(w_scale)
+        self.ref_hz = float(ref_hz)
         self.plastic_projections: list[str] = []
 
         # Create Noise Recorder for this leg
@@ -174,6 +178,7 @@ class Leg:
                  key: str | None = None) -> Any:
         d = get_jitter_delay() if delay is None else delay
         p = p * self.p_scale
+        weight = weight * self.w_scale
         w_param = self._param("weight", weight, sigma_param=abs(weight) * 0.05,
                               sigma_ctrl=abs(weight) * 0.1,
                               min_val=-150.0 if weight < 0 else 0.0,
@@ -301,23 +306,21 @@ class Leg:
 
     def get_muscle_drives(self, dt_ms: float) -> Tuple[float, float]:
         """
-        Calculates normalized muscle activation levels [0.0, 1.0] from spike events during the step.
+        Normalized muscle activation in [0, 1] from spikes during the step.
+        A pool at `ref_hz` per neuron (default 100 Hz) maps to full drive, so
+        the drive tracks population rate rather than saturating the instant the
+        pool fires.
         """
         ev_e = self.rec_muse.get("events")["times"]
         ev_f = self.rec_musf.get("events")["times"]
-
-        # Number of spikes in the last dt_ms
         n_e = len(ev_e)
         n_f = len(ev_f)
-
-        # Clear recorder memory to keep interval localized
         self.rec_muse.set({"n_events": 0})
         self.rec_musf.set({"n_events": 0})
 
-        # Convert spikes/step to normalized motor drive
-        # Scale: ~10 spikes per neuron per 10ms corresponds to full saturation
-        max_spikes = max(1.0, float(self.n_mn * (dt_ms / 5.0)))
-        drive_e = float(np.clip(n_e / max_spikes, 0.0, 1.0))
-        drive_f = float(np.clip(n_f / max_spikes, 0.0, 1.0))
+        return self._drive(n_e, dt_ms), self._drive(n_f, dt_ms)
 
-        return drive_e, drive_f
+    def _drive(self, spikes: int, dt_ms: float) -> float:
+        ref_hz = getattr(self, "ref_hz", 100.0)
+        max_spikes = max(1.0, self.n_mn * ref_hz * (dt_ms / 1000.0))
+        return float(np.clip(spikes / max_spikes, 0.0, 1.0))

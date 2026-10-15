@@ -65,12 +65,11 @@ class Leg:
         self.ten_sol = {s: self._tid(f"sol_tendon_m_{s}") for s in SIDES}
         self.ten_ta = {s: self._tid(f"ta_tendon_m_{s}") for s in SIDES}
 
-        self.cut_sensor_ids = {
-            s: [self._sensid(n) for n in (
-                f"cut_heel_0_{s}", f"cut_heel_1_{s}", f"cut_heel_2_{s}",
-                f"cut_mid_0_{s}", f"cut_mid_1_{s}",
-                f"cut_fore_0_{s}", f"cut_fore_1_{s}", f"cut_toe_0_{s}",
-            )] for s in SIDES
+        # Contact bodies for the CUT model (foot + toe of each controlled leg).
+        self.foot_bodies = {
+            s: [mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, n)
+                for n in (f"foot_m_{s}", f"toe_m_{s}")]
+            for s in SIDES
         }
 
         self.cut_afferent = {s: CUTAfferent(dt_ms=dt_ms, r_peak_hz=120.0) for s in SIDES}
@@ -121,6 +120,20 @@ class Leg:
         if adr >= 0 and adr < len(self.data.act):
             return float(self.data.act[adr])
         return 0.0
+
+    def _contact_force(self, side: str) -> float:
+        """Total normal contact force (N) on the foot/toe bodies of one leg."""
+        total = 0.0
+        bodies = set(self.foot_bodies[side])
+        for i in range(self.data.ncon):
+            c = self.data.contact[i]
+            b1 = int(self.model.geom_bodyid[c.geom1])
+            b2 = int(self.model.geom_bodyid[c.geom2])
+            if b1 in bodies or b2 in bodies:
+                f = np.zeros(6, dtype=np.float64)
+                mujoco.mj_contactForce(self.model, self.data, i, f)
+                total += abs(float(f[0]))
+        return total
 
     def reset(self):
         mujoco.mj_resetData(self.model, self.data)
@@ -203,10 +216,7 @@ class Leg:
 
         sensory = {}
         for s in SIDES:
-            total_contact_force = sum(
-                float(self.data.sensordata[self.model.sensor_adr[sid]])
-                for sid in self.cut_sensor_ids[s]
-            )
+            total_contact_force = self._contact_force(s)
             cut_hz = self.cut_afferent[s].get_cut_hz(total_contact_force)
             phase = "stance" if total_contact_force > 0.005 else "swing"
 
