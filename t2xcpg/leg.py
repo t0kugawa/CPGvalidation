@@ -22,7 +22,6 @@ class Leg:
     - Ia afferent stretch pathways (Ia-E, Ia-F) exciting homonymous MN/RG and reciprocal interneurons.
     - Ib afferent tension pathways inhibiting homonymous MNs against excessive strain.
     - Cutaneous (CUT) afferents reinforcing stance phase.
-    - Commissural relay interneurons (V2a, V0v, V0d, V3-F, In1).
     All neuronal and synaptic parameters are registered via PERSONA Registry.
     """
     def __init__(self,
@@ -132,29 +131,12 @@ class Leg:
             Population(model="izhikevich", n=self.n_int, params=inh(), name=f"in_ib_f_{self.leg}")
         )
 
-        # Excitatory relay interneurons (InE, InF, In1)
+        # Excitatory relay interneurons (InE, InF)
         self.in_e = self.registry.create_population(
             Population(model="izhikevich", n=self.n_int, params=exc(), name=f"in_e_{self.leg}")
         )
         self.in_f = self.registry.create_population(
             Population(model="izhikevich", n=self.n_int, params=exc(), name=f"in_f_{self.leg}")
-        )
-        self.in1 = self.registry.create_population(
-            Population(model="izhikevich", n=self.n_int, params=exc(), name=f"in1_{self.leg}")
-        )
-
-        # Commissural nuclei (V2a, V0v, V0d, V3-F)
-        self.v2a = self.registry.create_population(
-            Population(model="izhikevich", n=self.n_int, params=exc(), name=f"v2a_{self.leg}")
-        )
-        self.v0v = self.registry.create_population(
-            Population(model="izhikevich", n=self.n_int, params=exc(), name=f"v0v_{self.leg}")
-        )
-        self.v0d = self.registry.create_population(
-            Population(model="izhikevich", n=self.n_int, params=inh(), name=f"v0d_{self.leg}")
-        )
-        self.v3_f = self.registry.create_population(
-            Population(model="izhikevich", n=self.n_int, params=exc(), name=f"v3_f_{self.leg}")
         )
 
         # Muscles (Parrot readout)

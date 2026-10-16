@@ -6,8 +6,7 @@ def test_populations_registered(nest_kernel):
     reg = Registry()
     Leg("L", reg, n_rg=8, n_mn=8, n_int=6, n_aff=6)
     for name in ["rg_e_L", "rg_f_L", "m_e_L", "m_f_L", "r_e_L", "r_f_L",
-                 "ia_e_L", "ia_f_L", "in_e_L", "in_f_L",
-                 "v2a_L", "v0v_L", "v0d_L", "v3_f_L", "in1_L"]:
+                 "ia_e_L", "ia_f_L", "in_e_L", "in_f_L"]:
         assert reg.get(name) is not None
 
 

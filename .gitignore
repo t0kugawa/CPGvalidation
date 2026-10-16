@@ -15,3 +15,14 @@ run_log.npz
 renders/
 renders_test/
 render_out/
+validation_run/
+validation_run2/
+validation_run3/
+validation_smoke/
+validation_mvp/
+validation_mvp_20s/
+validation_fig/
+fastrun/
+*.mp4
+run_output/
+h5out/
