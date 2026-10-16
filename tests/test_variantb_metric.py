@@ -3,18 +3,18 @@ import numpy as np
 from persona.strategy import FisherMatrix
 
 
-def _fm(n=5, window=60):
+def _fm(n=5, window=600, lam=1e-9):
     names = [f"p{i}" for i in range(n)]
-    return FisherMatrix(param_names=names, window_size=window, lambda_reg=1e-3)
+    return FisherMatrix(param_names=names, window_size=window, lambda_reg=lam)
 
 
 def test_influence_ranks_high_impact_first():
     fm = _fm()
     rng = np.random.default_rng(0)
-    for _ in range(50):
+    for _ in range(500):
         dth = rng.standard_normal(5) * 0.1
-        dy = np.array([dth[0] * 10.0, dth[0] * 5.0])  # only p0 drives y
-        fm.record_response(dth, dy)
+        A = np.array([dth[0] * 10.0, dth[0] * 5.0])  # only p0 covaries with A
+        fm.record_response(dth, A)
     infl = fm.influence()
     assert infl.shape == (5,)
     assert infl[0] > 0.9 and np.all(infl[1:] < 0.1)
@@ -34,23 +34,23 @@ def test_short_window_is_finite():
 
 
 def test_step_is_unit_invariant():
-    # Physical plant: y0 = 10 * q, where q = p0. p0 is recorded in units that
-    # make its perturbation numbers scale0 times larger; dy stays physical.
     rng = np.random.default_rng(2)
-    q = rng.standard_normal(40) * 0.1
-    other = rng.standard_normal((40, 4)) * 0.1
+    base = [rng.standard_normal(5) * 0.1 for _ in range(100)]
 
-    def build(scale0):
+    def build(c):
         fm = _fm()
-        for i in range(40):
-            d = np.array([scale0 * q[i], other[i, 0], other[i, 1], other[i, 2], other[i, 3]])
-            fm.record_response(d, np.array([10.0 * q[i], other[i, 0]]))
+        for dth in base:
+            A = np.array([dth[0] * 10.0, dth[1]])   # reward from the physical dth
+            rec = dth.copy(); rec[0] *= c            # same data, p0 units rescaled
+            fm.record_response(rec, A)
         return fm
 
     def step(fm):
         return fm.compute_natural_gradient_step(
             {f"p{i}": 1.0 for i in range(5)}, {f"p{i}": 0.0 for i in range(5)},
-            {f"p{i}": 1.0 for i in range(5)}, np.array([1.0, 1.0]))["p0"]
+            {f"p{i}": 1.0 for i in range(5)}, np.array([1.0, 1.0]))
 
-    # Same physical step; a 10x-smaller unit gives 10x the step number.
-    assert np.isclose(step(build(10.0)), 10.0 * step(build(1.0)), rtol=1e-2)
+    d1 = step(build(1.0))["p0"]
+    d2 = step(build(10.0))["p0"]
+    # The physical step (Δμ·scale) is independent of the arbitrary unit scale.
+    assert np.isclose(d2 * 10.0, d1, rtol=1e-6)

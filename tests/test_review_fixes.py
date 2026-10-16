@@ -1,7 +1,6 @@
 import numpy as np
 
 from persona.parameter import PersonaParam
-from persona.strategy import FisherMatrix
 from persona.registry import Registry
 from persona.personalization import RunLog
 from t2xcpg.bs import BrainStem
@@ -22,33 +21,9 @@ def test_params_have_independent_rng():
     assert abs(np.corrcoef(da, db)[0, 1]) < 0.9
 
 
-# --- Important: standardized natural-gradient step maps back losslessly ---
-
-def _hist_fisher(scales, seed=1, n=40):
-    names = [f"p{i}" for i in range(len(scales))]
-    fm = FisherMatrix(param_names=names, window_size=50)
-    rng = np.random.default_rng(seed)
-    for _ in range(n):
-        z = rng.standard_normal(len(scales))
-        pert = {names[i]: float(z[i] * scales[i]) for i in range(len(scales))}
-        fm.record_step(pert, np.array([0.0]), "stance")
-    return fm
-
-
-def test_step_is_scale_lossless():
-    fm1 = _hist_fisher([1.0, 1.0])
-    d1 = fm1.compute_natural_gradient_step(
-        {"p0": 1.0, "p1": 1.0}, {"p0": 0.0, "p1": 0.0},
-        {"p0": 1.0, "p1": 1.0}, np.array([1.0]))
-    fm2 = _hist_fisher([10.0, 1.0])
-    d2 = fm2.compute_natural_gradient_step(
-        {"p0": 1.0, "p1": 1.0}, {"p0": 0.0, "p1": 0.0},
-        {"p0": 1.0, "p1": 1.0}, np.array([1.0]))
-    s1 = fm1.feature_scales()
-    s2 = fm2.feature_scales()
-    # The standardized step delta/scale is identical regardless of unit scale.
-    assert np.isclose(d2["p0"] / s2[0], d1["p0"] / s1[0], atol=1e-9)
-    assert np.isclose(d2["p1"] / s2[1], d1["p1"] / s1[1], atol=1e-9)
+# --- Important: natural-gradient step maps back losslessly ---
+# (Superseded: unit-invariance of the perturbation-advantage natural gradient is
+#  covered by tests/test_variantb_metric.py::test_step_is_unit_invariant.)
 
 
 # --- Critical 2: STDP weight deltas reach the noise recorder during a step ---

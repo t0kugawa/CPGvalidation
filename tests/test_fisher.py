@@ -3,15 +3,15 @@ import numpy as np
 from persona.strategy import FisherMatrix
 
 
-def make_metric(n_feat=4, noise_names=None, window=50, seed=0, n_samples=20):
+def make_metric(n_feat=4, noise_names=None, window=50, seed=0, n_samples=120):
     names = [f"p{i}" for i in range(n_feat)]
     fm = FisherMatrix(param_names=names, noise_names=list(noise_names or []),
                       window_size=window)
     rng = np.random.default_rng(seed)
     for _ in range(n_samples):
         dth = rng.standard_normal(n_feat)
-        dy = np.array([dth[0], dth[1] if n_feat > 1 else 0.0])
-        fm.record_response(dth, dy)
+        A = np.array([dth[0], dth[1] if n_feat > 1 else 0.0])  # p0, p1 drive A
+        fm.record_response(dth, A)
     return fm
 
 
@@ -25,12 +25,12 @@ def test_metric_shape_symmetric_pd():
     assert np.all(np.isfinite(scales)) and np.all(scales > 0)
 
 
-def test_metric_diagonal_is_impact_not_unity():
-    fm = make_metric(n_feat=4)  # p0,p1 drive y; p2,p3 do not
-    F, _ = fm.compute_metric()
-    diag = np.diag(F)
-    assert diag[0] > diag[2] and diag[1] > diag[3]
-    assert not np.allclose(diag, 1.0)
+def test_influence_ranks_impact_on_error():
+    fm = make_metric(n_feat=4)  # p0, p1 covary with A; p2, p3 do not
+    infl = fm.influence()
+    assert infl.shape == (fm.n_total,)
+    assert infl[0] > infl[2] and infl[1] > infl[3]
+    assert not np.allclose(infl, 1.0)
 
 
 def test_noise_features_enter_metric_not_score():

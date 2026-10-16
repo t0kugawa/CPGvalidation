@@ -57,13 +57,14 @@ class FisherMatrix:
         self.loss_history: List[np.ndarray] = []
         self.phase_history: List[str] = []
 
-        # Output-sensitivity responses (Variant B): (delta_theta, delta_y)
+        # Perturbation–advantage samples (natural gradient): (delta_theta, A)
         self.response_dtheta: List[np.ndarray] = []
-        self.response_dy: List[np.ndarray] = []
-        self.ridge_J: float = 1e-3
-        self.lambda_F: float = 1e-3
+        self.response_da: List[np.ndarray] = []
+        self.lambda_F: float = float(lambda_reg)
+        self.ridge_J: float = 1e-3  # kept for backwards-compatible imports
 
         self._scales: np.ndarray | None = None
+        self._G: np.ndarray | None = None
 
     def update_feature_names(self, noise_names: List[str]):
         """
@@ -112,14 +113,16 @@ class FisherMatrix:
         return self.compute_metric()[0]
 
     def feature_scales(self) -> np.ndarray:
+        if self._scales is None:
+            self.compute_metric()
         return np.asarray(self._scales, dtype=np.float64)
 
-    # --- Variant B: output-sensitivity metric -------------------------------
+    # --- Perturbation–advantage covariance (natural gradient) ---------------
 
-    def record_response(self, delta_theta: np.ndarray, delta_y: np.ndarray):
+    def record_response(self, delta_theta: np.ndarray, advantage: np.ndarray):
         """
-        Appends one exploratory perturbation and the output response it produced:
-        delta_theta = action - mean (n_total,), delta_y = output - output_mean (2,).
+        Appends one exploration sample: delta_theta = action - mean (n_total,)
+        paired with the reward advantage A (n_y,).
         """
         dth = np.asarray(delta_theta, dtype=np.float64).ravel()
         if dth.size < self.n_total:
@@ -127,40 +130,56 @@ class FisherMatrix:
         elif dth.size > self.n_total:
             dth = dth[:self.n_total]
         self.response_dtheta.append(dth.copy())
-        self.response_dy.append(np.asarray(delta_y, dtype=np.float64).ravel().copy())
+        self.response_da.append(np.asarray(advantage, dtype=np.float64).ravel().copy())
         if len(self.response_dtheta) > self.window_size:
             self.response_dtheta = self.response_dtheta[-self.window_size:]
-            self.response_dy = self.response_dy[-self.window_size:]
+            self.response_da = self.response_da[-self.window_size:]
 
-    def _sensitivity(self) -> tuple[np.ndarray, np.ndarray]:
-        """Ridge least-squares estimate of J = dy/dtheta (n_total x n_y)."""
+    def _stack(self) -> tuple[np.ndarray, np.ndarray]:
+        W = len(self.response_dtheta)
+        n_y = max((a.size for a in self.response_da), default=2)
+        X = np.zeros((W, self.n_total), dtype=np.float64)
+        Y = np.zeros((W, n_y), dtype=np.float64)
+        for i in range(W):
+            d = self.response_dtheta[i]
+            X[i, :min(d.size, self.n_total)] = d[:self.n_total]
+            a = self.response_da[i]
+            Y[i, :min(a.size, n_y)] = a[:n_y]
+        return X, Y
+
+    def _covariances(self) -> tuple[np.ndarray, np.ndarray]:
+        """
+        F = Cov(Δθ) + λ_F I          (n_total x n_total)  — metric / preconditioner
+        G = Cov(Δθ, A)               (n_total x n_y)      — per-parameter impact
+        Column means removed over the rolling window.
+        """
         W = len(self.response_dtheta)
         if W < 3:
-            n_y = len(self.response_dy[0]) if self.response_dy else 2
-            return np.zeros((self.n_total, n_y)), np.ones(self.n_total)
-        X = np.array(self.response_dtheta, dtype=np.float64)
-        Y = np.array(self.response_dy, dtype=np.float64)
-        std = np.maximum(X.std(axis=0), 1e-8)
-        Xs = X / std
-        A = Xs.T @ Xs + self.ridge_J * np.eye(self.n_total)
-        Jstd = np.linalg.solve(A, Xs.T @ Y)
-        return Jstd, std
+            n_y = max((a.size for a in self.response_da), default=2)
+            return np.eye(self.n_total, dtype=np.float64), np.zeros((self.n_total, n_y))
+        X, Y = self._stack()
+        Xc = X - X.mean(axis=0, keepdims=True)
+        Yc = Y - Y.mean(axis=0, keepdims=True)
+        F = (Xc.T @ Xc) / W + self.lambda_F * np.eye(self.n_total)
+        G = (Xc.T @ Yc) / W
+        self._G = G
+        return F, G
 
     def compute_metric(self) -> tuple[np.ndarray, np.ndarray]:
-        """
-        F = J JT (standardised columns) + lambda I, plus the per-column scales.
-        Diagonal = per-parameter impact on the tracked output; off-diagonal =
-        coupling. Returns (F_units, scales).
-        """
-        Jstd, scales = self._sensitivity()
-        self._scales = scales
-        F = Jstd @ Jstd.T + self.lambda_F * np.eye(self.n_total)
-        return F, scales
+        """Returns (F, scales); F = Cov(Δθ) + λ_F I, scales = sqrt(diag(F))."""
+        F, _ = self._covariances()
+        self._scales = np.sqrt(np.maximum(np.diag(F), 1e-12))
+        return F, self._scales
+
+    def compute_gradient(self) -> np.ndarray:
+        """g = Cov(Δθ, ΣA) — the natural-gradient direction (n_total,)."""
+        _, G = self._covariances()
+        return G.sum(axis=1)
 
     def influence(self) -> np.ndarray:
-        """Per-parameter impact on the output, normalised to [0, 1]."""
-        Jstd, _ = self._sensitivity()
-        row = np.linalg.norm(Jstd, axis=1)
+        """Per-parameter impact |Cov(Δθ_i, A)|, normalised to [0, 1]."""
+        _, G = self._covariances()
+        row = np.linalg.norm(G, axis=1)
         return row / (row.max() + 1e-12)
 
     def compute_correlation_matrix(self) -> np.ndarray:
@@ -173,25 +192,15 @@ class FisherMatrix:
                                       sigma_ctrl_dict: Dict[str, float],
                                       advantage_vector: np.ndarray) -> Dict[str, float]:
         """
-        Variant B natural-gradient step:
-            Delta mu = eta_mu * S^-1 * F_u^-1 * (J_std . A)
-        where A is the (vector) advantage, J_std the standardised output
-        sensitivity, and S the per-column scales (lossless unit round-trip).
-        TODO(advantage): unify the vector loss/advantage with the score term.
+        Natural-gradient ascent on the reward advantage:
+            Delta mu = eta_mu * F^-1 * g,   F = Cov(Δθ) + lambda I,  g = Cov(Δθ, ΣA).
+        Equivalently the ridge regression of the advantage on the perturbations.
+        E[Delta mu_i] = -eta * d E[ΣE] / d theta_i  (ascent on reward = descent on error).
+        TODO(advantage): the baselined advantage is the reward signal; unify the
+        per-leg loss/advantage weighting with the score term.
         """
-        Jstd, scales = self._sensitivity()
-        self._scales = scales
-        J = Jstd / scales[:, None]                      # physical dy/dtheta
-        F = J @ J.T + self.lambda_F * np.eye(self.n_total)
-
-        adv = np.asarray(advantage_vector, dtype=np.float64).ravel()
-        n_y = J.shape[1]
-        if adv.size == 1:
-            adv = np.full(n_y, float(adv[0]))
-        elif adv.size != n_y:
-            adv = np.full(n_y, float(np.mean(adv)))
-        g = J @ adv                                     # d(loss)/d(theta) direction
-
+        F, G = self._covariances()
+        g = G.sum(axis=1)
         try:
             nat_grad = np.linalg.solve(F, g)
         except np.linalg.LinAlgError:
