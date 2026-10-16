@@ -33,6 +33,24 @@ def test_figures_written(tmp_path):
     assert (tmp_path / "learning.png").exists()
 
 
+def test_influence_and_metric_figures(tmp_path):
+    from types import SimpleNamespace
+    from persona.strategy import FisherMatrix
+    fm = FisherMatrix(param_names=[f"p{i}" for i in range(6)],
+                      window_size=300, lambda_reg=1e-9)
+    rng = np.random.default_rng(0)
+    for _ in range(300):
+        dth = rng.standard_normal(6) * 0.1
+        fm.record_response(dth, np.array([dth[0] * 10.0, dth[1] * 5.0]))
+    agent = SimpleNamespace(strategy=fm)
+    rep = ValidationReport()
+    rep.plot_influence(agent)
+    rep.plot_metric(agent)
+    rep.save_all(tmp_path)
+    assert (tmp_path / "influence.png").exists()
+    assert (tmp_path / "metric.png").exists()
+
+
 def test_angle_acceptance_rule():
     err = np.array([0.01] * 70 + [0.3] * 30)
     res = biological_acceptance({}, stats=None, angle_errors=err,

@@ -19,17 +19,38 @@ class ValidationReport:
     def plot_tracking(self, log):
         fig, ax = plt.subplots(figsize=(12, 5))
         t = np.asarray(log.time_ms) / 1000.0
+        # Shade stance (light) for each leg so phase structure is visible.
+        self._shade_phases(ax, t, getattr(log, "phase_L", None), "red")
+        self._shade_phases(ax, t, getattr(log, "phase_R", None), "blue")
         ax.plot(t, log.ankle_target_L, "k--", label="target L")
         ax.plot(t, log.ankle_model_L, "r-", label="model L")
         ax.plot(t, log.ankle_target_R, "b--", label="target R")
         ax.plot(t, log.ankle_model_R, "g-", label="model R")
         ax.set_xlabel("time [s]")
         ax.set_ylabel("ankle angle [rad]")
-        ax.set_title("Ankle tracking: model vs target")
+        ax.set_title("Ankle tracking: model vs target (shaded = stance)")
         ax.legend(loc="upper right", fontsize=8)
         ax.grid(alpha=0.3)
         self.figures["tracking"] = fig
         return fig
+
+    @staticmethod
+    def _shade_phases(ax, t, phase, color):
+        if phase is None or len(t) == 0:
+            return
+        phase = list(phase)
+        n = min(len(phase), len(t))
+        step = float(t[1] - t[0]) if len(t) > 1 else 1.0
+        i = 0
+        while i < n:
+            if phase[i] == "stance":
+                j = i
+                while j < n and phase[j] == "stance":
+                    j += 1
+                ax.axvspan(t[i], t[j - 1] + step, color=color, alpha=0.10, lw=0)
+                i = j
+            else:
+                i += 1
 
     def plot_inputs(self, log):
         fig, ax = plt.subplots(figsize=(12, 4))
@@ -147,6 +168,50 @@ class ValidationReport:
         fig.colorbar(im, ax=ax, label="correlation")
         fig.tight_layout()
         self.figures["fisher"] = fig
+        return fig
+
+    def plot_influence(self, agent):
+        """Bar chart of the per-parameter impact |Cov(Δθ, A)| on the tracked error."""
+        infl = np.asarray(agent.strategy.influence(), dtype=float)
+        names = list(agent.strategy.all_names)
+        order = np.argsort(-infl)[:min(len(infl), 25)]
+        fig, ax = plt.subplots(figsize=(12, 4))
+        ax.bar(range(len(order)), infl[order], color="tab:purple")
+        ax.set_xticks(range(len(order)))
+        ax.set_xticklabels(
+            [names[i].replace("conn_", "").replace("_weight", "")[:22] for i in order],
+            rotation=90, fontsize=7)
+        ax.set_ylabel("influence  |Cov(Δθ, A)|  (norm.)")
+        ax.set_title("Per-parameter impact on the tracked error (top 25)")
+        ax.grid(alpha=0.3, axis="y")
+        fig.tight_layout()
+        self.figures["influence"] = fig
+        return fig
+
+    def plot_metric(self, agent):
+        """
+        Heat-map of the metric F = Cov(Δθ) + λ_F I. The diagonal is the
+        perturbation variance (the natural-gradient preconditioner); the
+        per-parameter impact on the error is |Cov(Δθ, A)| — see `influence()`.
+        """
+        F = np.asarray(agent.strategy.compute_metric()[0], dtype=float)
+        names = agent.strategy.all_names
+        show = min(len(names), 60)
+        Fsub = F[:show, :show]
+        labels = [names[i].replace("conn_", "").replace("_weight", "")[:14]
+                  for i in range(show)]
+        fig, ax = plt.subplots(figsize=(10, 9))
+        vmax = float(np.max(np.abs(Fsub))) or 1.0
+        im = ax.imshow(Fsub, cmap="coolwarm", vmin=-vmax, vmax=vmax)
+        ax.set_xticks(range(show))
+        ax.set_yticks(range(show))
+        ax.set_xticklabels(labels, rotation=90, fontsize=6)
+        ax.set_yticklabels(labels, fontsize=6)
+        ax.set_title("Metric F = Cov(Δθ) + λ_F I — diagonal = perturbation variance;"
+                     " impact = |Cov(Δθ, A)|")
+        fig.colorbar(im, ax=ax, label="Cov(Δθ)")
+        fig.tight_layout()
+        self.figures["metric"] = fig
         return fig
 
     def save_all(self, path):

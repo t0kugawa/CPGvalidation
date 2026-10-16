@@ -14,6 +14,11 @@ import os
 import sys
 
 os.environ.setdefault("MUJOCO_GL", "osmesa")
+# OpenBLAS spawns many threads that thrash on WSL (a 322x322 solve goes from
+# ~1.3 s to ~2 ms with a single thread). Force single-threaded BLAS.
+for _v in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS",
+           "NUMEXPR_NUM_THREADS"):
+    os.environ.setdefault(_v, "1")
 
 import numpy as np
 import nest
@@ -49,8 +54,8 @@ def run(duration_s, view, width, height, fps, out_dir,
     renderer = LegRenderer(rig.model, rig.data, width=width, height=height) if render else None
     writer = None
     if render:
-        writer = imageio.get_writer(os.path.join(out_dir, f"locomotion_{view}.mp4"),
-                                    fps=fps, codec="libx264", quality=8,
+        path = os.path.join(out_dir, f"locomotion_{view}.mp4")
+        writer = imageio.get_writer(path, fps=fps, codec="libx264", quality=8,
                                     macro_block_size=1)
 
     belt_start_step = int(round(belt_start_s / (DT_MS / 1000.0)))
@@ -118,20 +123,54 @@ def run(duration_s, view, width, height, fps, out_dir,
                   f"L {cpg_in.ankle_angle_m_L:+.3f}/{tgt_L:+.3f} "
                   f"drv {cpg_out.mus_E_L:.2f}/{cpg_out.mus_F_L:.2f}", flush=True)
 
-    log.finalize()
-    log.to_csv(os.path.join(out_dir, "run_log.csv"))
-    if writer is not None:
-        writer.close()
-    if renderer is not None:
-        renderer.close()
+    status = {}
+    try:
+        log.finalize()
+    except Exception as e:
+        status["finalize"] = f"ERROR {e}"
+    try:
+        log.to_csv(os.path.join(out_dir, "run_log.csv"))
+        status["run_log.csv"] = "ok"
+    except Exception as e:
+        status["run_log.csv"] = f"ERROR {e}"
+    finally:
+        if writer is not None:
+            try:
+                writer.close()
+                status["locomotion.mp4"] = "ok"
+            except Exception as e:
+                status["locomotion.mp4"] = f"ERROR {e}"
+        if renderer is not None:
+            try:
+                renderer.close()
+            except Exception:
+                pass
 
     rep = ValidationReport()
-    rep.plot_tracking(log)
-    rep.plot_learning(log)
-    rep.plot_param_shift(agent, top_n=10)
-    rep.plot_fisher(agent)
-    rep.save_all(out_dir)
-    print("figures + mp4 written to", out_dir)
+    for name, fn in (("tracking", rep.plot_tracking), ("learning", rep.plot_learning)):
+        try:
+            fn(log)
+            status[f"{name}.png"] = "ok"
+        except Exception as e:
+            status[f"{name}.png"] = f"ERROR {e}"
+    for name, fn in (("param_shift", lambda: rep.plot_param_shift(agent, top_n=10)),
+                     ("fisher", lambda: rep.plot_fisher(agent)),
+                     ("influence", lambda: rep.plot_influence(agent)),
+                     ("metric", lambda: rep.plot_metric(agent))):
+        try:
+            fn()
+            status[f"{name}.png"] = "ok"
+        except Exception as e:
+            status[f"{name}.png"] = f"ERROR {e}"
+    try:
+        rep.save_all(out_dir)
+    except Exception as e:
+        status["save_all"] = f"ERROR {e}"
+
+    print("---- output status ----")
+    for k, v in status.items():
+        print(f"  {k}: {v}")
+    print("files in", out_dir, ":", sorted(os.listdir(out_dir)))
     print("first10 loss", float(np.mean(log.loss[:10])), "last10", float(np.mean(log.loss[-10:])))
 
 
@@ -154,7 +193,13 @@ if __name__ == "__main__":
     ap.add_argument("--n-aff", type=int, default=6)
     ap.add_argument("--n-bs", type=int, default=8)
     ap.add_argument("--no-render", action="store_true")
+    ap.add_argument("--fast", action="store_true",
+                    help="quick low-res short run for iteration")
     args = ap.parse_args()
+    if args.fast:
+        args.duration_s = min(args.duration_s, 4.0)
+        args.width, args.height, args.fps = 480, 270, 20
+        args.n_rg, args.n_mn, args.n_int, args.n_aff, args.n_bs = 6, 5, 5, 3, 5
     run(args.duration_s, args.view, args.width, args.height, args.fps, args.out,
         args.w_scale, args.ref_hz, args.belt_mps, args.belt_start_s, args.belt_ramp_s,
         args.n_rg, args.n_mn, args.n_int, args.n_aff, args.n_bs, render=not args.no_render)
