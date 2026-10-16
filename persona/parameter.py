@@ -44,6 +44,15 @@ class PersonaParam:
     def sigma(self, val: float):
         self.sigma_param = float(val)
 
+    @property
+    def log_sigma_param(self) -> float:
+        """Natural-log of the parametric dispersion (a feature in theta)."""
+        return float(np.log(max(self.sigma_param, 1e-8)))
+
+    def set_log_sigma_param(self, value: float):
+        """Sets sigma_param = exp(value), clipped to [1e-4, 2.0]."""
+        self.sigma_param = float(np.clip(np.exp(value), 1e-4, 2.0))
+
     def sample(self, n: int) -> np.ndarray:
         """
         Generates biological population values according to sigma_param.

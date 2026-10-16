@@ -57,6 +57,7 @@ class Agent:
             "loss": [],
             "advantage_vector": [],
             "phase": [],
+            "influence": [],
             "means": {k: [] for k in param_names},
             "sigmas_ctrl": {k: [] for k in param_names},
             "sigmas_param": {k: [] for k in param_names},
@@ -142,12 +143,20 @@ class Agent:
             for tag, d_val in noise_deltas.items():
                 perturbations[tag] = d_val
 
-        # Record step in Fisher Matrix strategy
+        # Record step in Fisher Matrix strategy (legacy perturbation history, kept
+        # for the Fisher heat-map figure)
         self.strategy.record_step(
             perturbation_dict=perturbations,
             loss_vector=error_vec,
             phase=phase
         )
+
+        # Natural gradient: pair the exploration perturbation with the reward
+        # advantage A = baseline - error (per leg).
+        dtheta = np.zeros(self.strategy.n_total, dtype=np.float64)
+        for i, name in enumerate(self.strategy.all_names):
+            dtheta[i] = perturbations.get(name, 0.0)
+        self.strategy.record_response(dtheta, advantage_vec)
 
         # Compute natural gradient update
         mean_dict = {k: p.mean for k, p in self.params.items()}
@@ -174,11 +183,11 @@ class Agent:
                 lr_sigma=self.lr_sigma_ctrl
             )
 
-            # Parametric variance fine adjustment (population dispersion)
-            # Parametric stddev shifts slightly towards optimal homogeneity/heterogeneity
-            param.update_parametric_variance(
-                delta=self.lr_sigma_param * np.sign(adv_scalar) * 0.01
-            )
+            # TODO(sigma_param): sigma_param (biological dispersion) is held fixed
+            # for the MVP; registry applies the scalar explored value (`inert`).
+            # Promote log(sigma_param) to a feature in theta in a later revision.
+
+        influence = self.strategy.influence()
 
         # Logging
         self.history["steps"].append(self.current_step)
@@ -186,6 +195,7 @@ class Agent:
         self.history["loss"].append(loss)
         self.history["advantage_vector"].append(advantage_vec.copy())
         self.history["phase"].append(phase_key)
+        self.history["influence"].append(influence.copy())
         for k, p in self.params.items():
             self.history["means"][k].append(p.mean)
             self.history["sigmas_ctrl"][k].append(p.sigma_ctrl)
@@ -197,5 +207,6 @@ class Agent:
             "loss": loss,
             "advantage_vector": advantage_vec,
             "phase": phase_key,
+            "influence": influence,
             "delta_means": delta_means
         }
