@@ -57,6 +57,12 @@ class FisherMatrix:
         self.loss_history: List[np.ndarray] = []
         self.phase_history: List[str] = []
 
+        # Output-sensitivity responses (Variant B): (delta_theta, delta_y)
+        self.response_dtheta: List[np.ndarray] = []
+        self.response_dy: List[np.ndarray] = []
+        self.ridge_J: float = 1e-3
+        self.lambda_F: float = 1e-3
+
         self._scales: np.ndarray | None = None
 
     def update_feature_names(self, noise_names: List[str]):
@@ -101,33 +107,65 @@ class FisherMatrix:
 
     def compute_fisher_matrix(self) -> np.ndarray:
         """
-        Calculates the regularized empirical correlation matrix of all features
-        (parameters + noise). Columns are standardized to unit variance so
-        heterogeneous units (Hz, pA, probabilities, rad) enter on equal footing.
+        Backwards-compatible accessor: returns the metric matrix.
         """
-        return self.compute_correlation_matrix()
+        return self.compute_metric()[0]
 
     def feature_scales(self) -> np.ndarray:
         return np.asarray(self._scales, dtype=np.float64)
 
-    def compute_correlation_matrix(self) -> np.ndarray:
-        """
-        F = (1 - lambda) * Corr + lambda * I, where Corr is the empirical
-        correlation of the feature-perturbation history. Unit diagonal and
-        strictly positive definite.
-        """
-        if len(self.perturbation_history) < 3:
-            self._scales = np.ones(self.n_total, dtype=np.float64)
-            return np.eye(self.n_total, dtype=np.float64)
+    # --- Variant B: output-sensitivity metric -------------------------------
 
-        X = np.array(self.perturbation_history, dtype=np.float64)
-        mean = np.mean(X, axis=0, keepdims=True)
-        std = np.std(X, axis=0, keepdims=True)
-        self._scales = np.maximum(std.ravel(), 1e-12)
-        Xs = (X - mean) / self._scales
-        corr = (Xs.T @ Xs) / max(1, len(X))
-        F = (1.0 - self.lambda_reg) * corr + self.lambda_reg * np.eye(self.n_total)
-        return F
+    def record_response(self, delta_theta: np.ndarray, delta_y: np.ndarray):
+        """
+        Appends one exploratory perturbation and the output response it produced:
+        delta_theta = action - mean (n_total,), delta_y = output - output_mean (2,).
+        """
+        dth = np.asarray(delta_theta, dtype=np.float64).ravel()
+        if dth.size < self.n_total:
+            dth = np.concatenate([dth, np.zeros(self.n_total - dth.size)])
+        elif dth.size > self.n_total:
+            dth = dth[:self.n_total]
+        self.response_dtheta.append(dth.copy())
+        self.response_dy.append(np.asarray(delta_y, dtype=np.float64).ravel().copy())
+        if len(self.response_dtheta) > self.window_size:
+            self.response_dtheta = self.response_dtheta[-self.window_size:]
+            self.response_dy = self.response_dy[-self.window_size:]
+
+    def _sensitivity(self) -> tuple[np.ndarray, np.ndarray]:
+        """Ridge least-squares estimate of J = dy/dtheta (n_total x n_y)."""
+        W = len(self.response_dtheta)
+        if W < 3:
+            n_y = len(self.response_dy[0]) if self.response_dy else 2
+            return np.zeros((self.n_total, n_y)), np.ones(self.n_total)
+        X = np.array(self.response_dtheta, dtype=np.float64)
+        Y = np.array(self.response_dy, dtype=np.float64)
+        std = np.maximum(X.std(axis=0), 1e-8)
+        Xs = X / std
+        A = Xs.T @ Xs + self.ridge_J * np.eye(self.n_total)
+        Jstd = np.linalg.solve(A, Xs.T @ Y)
+        return Jstd, std
+
+    def compute_metric(self) -> tuple[np.ndarray, np.ndarray]:
+        """
+        F = J JT (standardised columns) + lambda I, plus the per-column scales.
+        Diagonal = per-parameter impact on the tracked output; off-diagonal =
+        coupling. Returns (F_units, scales).
+        """
+        Jstd, scales = self._sensitivity()
+        self._scales = scales
+        F = Jstd @ Jstd.T + self.lambda_F * np.eye(self.n_total)
+        return F, scales
+
+    def influence(self) -> np.ndarray:
+        """Per-parameter impact on the output, normalised to [0, 1]."""
+        Jstd, _ = self._sensitivity()
+        row = np.linalg.norm(Jstd, axis=1)
+        return row / (row.max() + 1e-12)
+
+    def compute_correlation_matrix(self) -> np.ndarray:
+        """Deprecated alias for the metric matrix (kept for importers)."""
+        return self.compute_metric()[0]
 
     def compute_natural_gradient_step(self,
                                       action_dict: Dict[str, float],
@@ -135,37 +173,33 @@ class FisherMatrix:
                                       sigma_ctrl_dict: Dict[str, float],
                                       advantage_vector: np.ndarray) -> Dict[str, float]:
         """
-        Computes Delta mu = eta_mu * F^{-1} * score.
-        Score = (action - mean) / (sigma_ctrl^2) * advantage_scalar.
+        Variant B natural-gradient step:
+            Delta mu = eta_mu * S^-1 * F_u^-1 * (J_std . A)
+        where A is the (vector) advantage, J_std the standardised output
+        sensitivity, and S the per-column scales (lossless unit round-trip).
+        TODO(advantage): unify the vector loss/advantage with the score term.
         """
-        adv_scalar = float(np.mean(advantage_vector))
+        Jstd, scales = self._sensitivity()
+        self._scales = scales
+        J = Jstd / scales[:, None]                      # physical dy/dtheta
+        F = J @ J.T + self.lambda_F * np.eye(self.n_total)
 
-        grad_log_pi = np.zeros(self.n_total, dtype=np.float64)
-        for i, name in enumerate(self.param_names):
-            if name in action_dict and name in mean_dict and name in sigma_ctrl_dict:
-                diff = action_dict[name] - mean_dict[name]
-                s_ctrl = max(1e-6, sigma_ctrl_dict[name])
-                grad_log_pi[i] = (diff / (s_ctrl ** 2)) * adv_scalar
+        adv = np.asarray(advantage_vector, dtype=np.float64).ravel()
+        n_y = J.shape[1]
+        if adv.size == 1:
+            adv = np.full(n_y, float(adv[0]))
+        elif adv.size != n_y:
+            adv = np.full(n_y, float(np.mean(adv)))
+        g = J @ adv                                     # d(loss)/d(theta) direction
 
-        # TODO(fisher): recursive / Sherman-Morrison inverse or a pruned
-        # feature subspace (see spec §5.1 well-posedness).
-        F = self.compute_correlation_matrix()
         try:
-            nat_grad = np.linalg.solve(F, grad_log_pi)
+            nat_grad = np.linalg.solve(F, g)
         except np.linalg.LinAlgError:
-            nat_grad = np.linalg.pinv(F) @ grad_log_pi
+            nat_grad = np.linalg.pinv(F) @ g
 
-        # Map the standardized natural-gradient step back to physical units
-        # losslessly (spec §5.1): F is built on standardized columns, so the
-        # step in standardized coordinates is F^-1 * score; multiplying by the
-        # per-feature scale restores physical units without changing the
-        # relative (standardized) direction.
-        scales = self.feature_scales()
-        delta_vec = self.lr_mu * scales * nat_grad
+        delta_vec = self.lr_mu * nat_grad
 
-        # Return dict only for controllable parameters
         deltas = {}
         for i, name in enumerate(self.param_names):
             deltas[name] = float(delta_vec[i])
-
         return deltas
