@@ -77,33 +77,16 @@ class L2CPG(CPGAdapter):
 
     def _build_commissural_connections(self, p_comm: float = 0.40):
         """
-        Bilateral commissural coordination (scheme section 7):
-          RGE -> contralateral V2a, V0v ;  RGF -> contralateral V0d, V3-F
-          V2a, V0v -> contralateral RGE ;  V0d, In1, V3-F -> contralateral RGF
+        Bilateral commissural inhibition (cpg_2legs_fast):
+          RGF -| contralateral RGF  (P_COMM_F=0.22, W_COMM_F_INH=-20)
+          RGE -| contralateral RGE  (P_COMM_E=0.10, W_COMM_E_INH=-8)
         """
         if "L" in self.legs and "R" in self.legs:
-            d = 3.0
-            # L -> R
-            self._connect("rg_e_L", "v2a_R", weight=12.0, p=p_comm, delay=d)
-            self._connect("rg_e_L", "v0v_R", weight=12.0, p=p_comm, delay=d)
-            self._connect("rg_f_L", "v0d_R", weight=12.0, p=p_comm, delay=d)
-            self._connect("rg_f_L", "v3_f_R", weight=12.0, p=p_comm, delay=d)
-            self._connect("v2a_L", "rg_e_R", weight=12.0, p=p_comm, delay=d)
-            self._connect("v0v_L", "rg_e_R", weight=12.0, p=p_comm, delay=d)
-            self._connect("v0d_L", "rg_f_R", weight=-18.0, p=p_comm, delay=d)
-            self._connect("in1_L", "rg_f_R", weight=12.0, p=p_comm, delay=d)
-            self._connect("v3_f_L", "rg_f_R", weight=12.0, p=p_comm, delay=d)
-
-            # R -> L
-            self._connect("rg_e_R", "v2a_L", weight=12.0, p=p_comm, delay=d)
-            self._connect("rg_e_R", "v0v_L", weight=12.0, p=p_comm, delay=d)
-            self._connect("rg_f_R", "v0d_L", weight=12.0, p=p_comm, delay=d)
-            self._connect("rg_f_R", "v3_f_L", weight=12.0, p=p_comm, delay=d)
-            self._connect("v2a_R", "rg_e_L", weight=12.0, p=p_comm, delay=d)
-            self._connect("v0v_R", "rg_e_L", weight=12.0, p=p_comm, delay=d)
-            self._connect("v0d_R", "rg_f_L", weight=-18.0, p=p_comm, delay=d)
-            self._connect("in1_R", "rg_f_L", weight=12.0, p=p_comm, delay=d)
-            self._connect("v3_f_R", "rg_f_L", weight=12.0, p=p_comm, delay=d)
+            d = 1.0  # DELAY_COMM_MS
+            self._connect("rg_f_L", "rg_f_R", weight=-20.0, p=0.22, delay=d)  # W_COMM_F_INH, P_COMM_F
+            self._connect("rg_f_R", "rg_f_L", weight=-20.0, p=0.22, delay=d)
+            self._connect("rg_e_L", "rg_e_R", weight=-8.0, p=0.10, delay=d)   # W_COMM_E_INH, P_COMM_E
+            self._connect("rg_e_R", "rg_e_L", weight=-8.0, p=0.10, delay=d)
 
     def update(self, cpg_in: CPGInput):
         """
