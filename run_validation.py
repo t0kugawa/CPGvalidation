@@ -32,6 +32,7 @@ import imageio
 from personalize import build_personalizer, DEFAULT_REFERENCE, DEFAULT_STATS, DT_MS
 from persona.personalization import RunLog
 from persona.validation import ValidationReport
+from persona.h5io import save_run
 from model.render import LegRenderer, hud_lines
 from model.adapter import CPGInput
 
@@ -133,6 +134,12 @@ def run(duration_s, view, width, height, fps, out_dir,
         status["run_log.csv"] = "ok"
     except Exception as e:
         status["run_log.csv"] = f"ERROR {e}"
+    try:
+        save_run(os.path.join(out_dir, "run.h5"), log, agent,
+                 meta={"duration_s": float(duration_s), "dt_ms": float(DT_MS)})
+        status["run.h5"] = "ok"
+    except Exception as e:
+        status["run.h5"] = f"ERROR {e}"
     finally:
         if writer is not None:
             try:
