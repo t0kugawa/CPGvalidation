@@ -240,19 +240,36 @@ class Leg:
     def _build_connections(self):
         leg = self.leg
 
-        # --- (2) Rhythm generator internal projections (ipsilateral) ---
-        self._connect(f"rg_e_{leg}", f"in_e_{leg}", weight=12.0, p=0.50)   # RGE -> InE (exc relay)
-        self._connect(f"rg_e_{leg}", f"rg_f_{leg}", weight=-30.0, p=0.50)  # RGE -| RGF (reciprocal, direct)
-        self._connect(f"rg_f_{leg}", f"in_f_{leg}", weight=12.0, p=0.50)   # RGF -> InF (exc relay)
-        self._connect(f"rg_f_{leg}", f"rg_e_{leg}", weight=-30.0, p=0.50)  # RGF -| RGE (reciprocal, direct)
+        # --- Rhythm-generator half-centre THROUGH the InE/InF relays
+        #     (cpg_2legs_fast): RGE->InE (exc), InE-|RGF, RGF->InF (exc), InF-|RGE.
+        self._connect(f"rg_e_{leg}", f"in_e_{leg}", weight=12.0, p=0.15)   # W_RG2INE, P_RG_RECIP_E
+        self._connect(f"in_e_{leg}", f"rg_f_{leg}", weight=-8.0, p=0.30)   # W_INE2RGF
+        self._connect(f"rg_f_{leg}", f"in_f_{leg}", weight=18.0, p=0.30)   # W_RG2INF, P_RG_RECIP_F
+        self._connect(f"in_f_{leg}", f"rg_e_{leg}", weight=-48.0, p=0.30)  # W_INF2RGE
 
-        # --- (3) Motor output ---
-        self._connect(f"in_e_{leg}", f"m_e_{leg}", weight=20.0, p=0.50)    # InE -> M-E
-        self._connect(f"in_f_{leg}", f"m_f_{leg}", weight=20.0, p=0.50)    # InF -> M-F
-        self._connect(f"m_e_{leg}", f"mus_e_{leg}", weight=1.0, p=0.80)
+        # --- RG self-recurrence ---
+        self._connect(f"rg_e_{leg}", f"rg_e_{leg}", weight=4.0, p=0.12)    # W_RG_REC_E, P_RG_REC
+        self._connect(f"rg_f_{leg}", f"rg_f_{leg}", weight=5.5, p=0.12)    # W_RG_REC_F
+
+        # --- Motor output: RG -> MN direct; MN -> muscle ---
+        self._connect(f"rg_e_{leg}", f"m_e_{leg}", weight=2.75, p=0.50)    # W_RG2MN
+        self._connect(f"rg_f_{leg}", f"m_f_{leg}", weight=2.75, p=0.50)
+        self._connect(f"m_e_{leg}", f"mus_e_{leg}", weight=1.0, p=0.80)    # W_M2MUS, P_M2MUS
         self._connect(f"m_f_{leg}", f"mus_f_{leg}", weight=1.0, p=0.80)
 
-        # --- (4) Recurrent (Renshaw) inhibition ---
+        # --- Ia (spindle): monosynaptic to homonymous MN/RG + Ia inhibitory IN ---
+        self._connect(f"ia_e_in_{leg}", f"m_e_{leg}", weight=12.0, p=0.40)  # Ia(top) -> M-E (exc)
+        self._connect(f"ia_f_in_{leg}", f"m_f_{leg}", weight=12.0, p=0.40)  # Ia(bottom) -> M-F (exc)
+        self._connect(f"ia_e_in_{leg}", f"rg_e_{leg}", weight=12.0, p=0.40)  # IA2RG_W/P (homonymous)
+        self._connect(f"ia_f_in_{leg}", f"rg_f_{leg}", weight=12.0, p=0.40)
+        self._connect(f"ia_e_in_{leg}", f"ia_e_{leg}", weight=6.0, p=0.40)   # W_IA_IN2INT
+        self._connect(f"ia_f_in_{leg}", f"ia_f_{leg}", weight=6.0, p=0.40)
+        self._connect(f"ia_e_{leg}", f"m_f_{leg}", weight=-10.0, p=0.40)     # W_IA_INT2ANT
+        self._connect(f"ia_f_{leg}", f"m_e_{leg}", weight=-10.0, p=0.40)
+        self._connect(f"ia_e_in_{leg}", f"in_e_{leg}", weight=6.0, p=0.25)   # W_IA2IN, P_IA2IN
+        self._connect(f"ia_f_in_{leg}", f"in_f_{leg}", weight=6.0, p=0.25)
+
+        # --- Recurrent (Renshaw) inhibition (project values) ---
         self._connect(f"m_e_{leg}", f"r_e_{leg}", weight=15.0, p=0.50)     # M-E -> R-E
         self._connect(f"r_e_{leg}", f"m_e_{leg}", weight=-20.0, p=0.50)    # R-E -| M-E
         self._connect(f"r_e_{leg}", f"ia_e_{leg}", weight=-12.0, p=0.40)   # R-E -| Ia-E
@@ -260,19 +277,7 @@ class Leg:
         self._connect(f"r_f_{leg}", f"m_f_{leg}", weight=-20.0, p=0.50)    # R-F -| M-F
         self._connect(f"r_f_{leg}", f"ia_f_{leg}", weight=-12.0, p=0.40)   # R-F -| Ia-F
 
-        # --- (5) Reciprocal inhibition (Ia interneuron circuits) ---
-        self._connect(f"ia_e_{leg}", f"m_f_{leg}", weight=-25.0, p=0.40)   # Ia-E -| M-F
-        self._connect(f"ia_f_{leg}", f"m_e_{leg}", weight=-25.0, p=0.40)   # Ia-F -| M-E
-        self._connect(f"in_e_{leg}", f"ia_e_{leg}", weight=12.0, p=0.40)   # InE -> Ia-E
-        self._connect(f"in_f_{leg}", f"ia_f_{leg}", weight=12.0, p=0.40)   # InF -> Ia-F
-
-        # --- (6) Afferent sensory projections (Ia spindle, monosynaptic) ---
-        self._connect(f"ia_e_in_{leg}", f"m_e_{leg}", weight=18.0, p=0.40)  # Ia(top)    -> M-E (exc)
-        self._connect(f"ia_e_in_{leg}", f"ia_f_{leg}", weight=14.0, p=0.40)  # Ia(top)    -> Ia-F
-        self._connect(f"ia_f_in_{leg}", f"m_f_{leg}", weight=18.0, p=0.40)  # Ia(bottom) -> M-F (exc)
-        self._connect(f"ia_f_in_{leg}", f"ia_e_{leg}", weight=14.0, p=0.40)  # Ia(bottom) -> Ia-E
-
-        # --- (6b) Ib Golgi tendon organ, disynaptic via Ib interneurons ---
+        # --- Ib Golgi tendon organ, disynaptic via Ib interneurons (project values) ---
         # Extensor Ib: GTO -> InIb-E -> {M-E inh, M-F exc, RGF exc}
         self._connect(f"ib_e_in_{leg}", f"in_ib_e_{leg}", weight=16.0, p=0.40)   # GTO -> InIb-E
         self._connect(f"in_ib_e_{leg}", f"m_e_{leg}", weight=-18.0, p=0.40)      # autogenic inhibition
@@ -284,15 +289,16 @@ class Leg:
         self._connect(f"in_ib_f_{leg}", f"m_e_{leg}", weight=12.0, p=0.35)       # disinhibit extensor
         self._connect(f"in_ib_f_{leg}", f"rg_e_{leg}", weight=10.0, p=0.35)      # phase switch -> extension
 
-        # --- (6c) Ib interneuron convergence (spindle, CPG) ---
+        # --- Ib interneuron convergence (spindle, CPG) ---
         self._connect(f"ia_e_in_{leg}", f"in_ib_e_{leg}", weight=8.0, p=0.30)    # Ia -> InIb-E
         self._connect(f"ia_f_in_{leg}", f"in_ib_f_{leg}", weight=8.0, p=0.30)    # Ia -> InIb-F
         self._connect(f"rg_e_{leg}", f"in_ib_e_{leg}", weight=8.0, p=0.30)       # RGE -> InIb-E
         self._connect(f"rg_f_{leg}", f"in_ib_f_{leg}", weight=8.0, p=0.30)       # RGF -> InIb-F
 
-        # --- (extra) Cutaneous (CUT) stance reinforcement (STDP) ---
-        self._connect(f"cut_in_{leg}", f"rg_e_{leg}", weight=22.0, p=0.45,
-                      is_stdp=True, key=f"cut_rge_{leg}")
+        # --- Cutaneous (CUT) stance reinforcement ---
+        self._connect(f"cut_in_{leg}", f"rg_e_{leg}", weight=14.0, p=0.35,
+                      is_stdp=True, key=f"cut_rge_{leg}")   # W_CUT2RGE, P_CUT2RGE_STATIC
+        self._connect(f"cut_in_{leg}", f"in_e_{leg}", weight=6.0, p=0.30)   # W_CUT2INE, P_CUT2INE
 
     def update_sensory_feedback(self, cut_hz: float,
                                 ia_e_hz: float, ia_f_hz: float,
