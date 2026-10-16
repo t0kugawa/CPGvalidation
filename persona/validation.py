@@ -146,7 +146,7 @@ class ValidationReport:
         return fig
 
     def plot_fisher(self, agent):
-        """Heat-map of the correlation-style Fisher matrix at the end of the run."""
+        """Heat-map of the metric F = Cov(Δθ) + λ_F I (diagonal = perturbation variance)."""
         F = agent.strategy.compute_correlation_matrix()
         names = agent.strategy.all_names
         show = min(len(names), 60)  # keep the heat-map legible
@@ -159,13 +159,14 @@ class ValidationReport:
         Fsub = F[np.ix_(idx, idx)]
         labels = [names[i].replace("conn_", "").replace("_weight", "")[:14] for i in idx]
         fig, ax = plt.subplots(figsize=(10, 9))
-        im = ax.imshow(Fsub, cmap="coolwarm", vmin=-1, vmax=1)
+        vmax = float(np.max(np.abs(Fsub))) or 1.0
+        im = ax.imshow(Fsub, cmap="coolwarm", vmin=-vmax, vmax=vmax)
         ax.set_xticks(range(len(idx)))
         ax.set_yticks(range(len(idx)))
         ax.set_xticklabels(labels, rotation=90, fontsize=6)
         ax.set_yticklabels(labels, fontsize=6)
-        ax.set_title(f"Fisher (correlation) matrix, final — {len(idx)} most active features")
-        fig.colorbar(im, ax=ax, label="correlation")
+        ax.set_title(f"Metric F = Cov(Δθ) + λF I, final — {len(idx)} most active features")
+        fig.colorbar(im, ax=ax, label="Cov(Δθ)")
         fig.tight_layout()
         self.figures["fisher"] = fig
         return fig

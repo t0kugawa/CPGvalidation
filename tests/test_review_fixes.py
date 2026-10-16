@@ -39,15 +39,15 @@ def test_stdp_weight_deltas_recorded_in_step(nest_kernel):
     assert any(k.endswith("_weight") for k in deltas)
 
 
-# --- Important: ia_rg STDP seed must not exceed its plastic ceiling ---
+# --- Important: plastic (STDP) seed weights must lie within their bounds ---
 
-def test_ia_rg_seed_within_wmax(nest_kernel):
+def test_plastic_seed_within_bounds(nest_kernel):
     reg = Registry()
     leg = CPG_Leg("L", reg, n_rg=8, n_mn=8, n_int=6, n_aff=6)
+    assert leg.plastic_projections, "expected at least one plastic projection"
     for k in leg.plastic_projections:
-        if k.startswith("ia_rg"):
-            w = reg.connection_cfgs[k].parameters["weight"].mean
-            assert w <= 10.0, f"{k} seed {w} exceeds Wmax"
+        p = reg.connection_cfgs[k].parameters["weight"]
+        assert p.min <= p.mean <= p.max, f"{k} seed {p.mean} outside [{p.min},{p.max}]"
 
 
 # --- Important: treadmill surface velocity settable ---

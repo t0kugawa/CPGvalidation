@@ -198,6 +198,9 @@ class FisherMatrix:
         E[Delta mu_i] = -eta * d E[ΣE] / d theta_i  (ascent on reward = descent on error).
         TODO(advantage): the baselined advantage is the reward signal; unify the
         per-leg loss/advantage weighting with the score term.
+        TODO(fisher): the ridge lambda_F is absolute; scale it to the perturbation
+        variance (or gate g_i by its standard error) so inert low-variance params
+        do not drift to a bound.
         """
         F, G = self._covariances()
         g = G.sum(axis=1)

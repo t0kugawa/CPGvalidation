@@ -209,7 +209,8 @@ class Leg:
         model = "static_synapse"
         wr = None
         if is_stdp:
-            syn_type = STDP_POSTFIX.get(key, "default") if key else "default"
+            syn_base = key.rsplit("_", 1)[0] if key else "default"
+            syn_type = STDP_POSTFIX.get(syn_base, "default")
             model, wr = create_stdp_synapse(syn_type, f"{src}_{tgt}")
 
         cfg = Connection(
