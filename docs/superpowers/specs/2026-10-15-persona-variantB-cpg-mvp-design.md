@@ -63,9 +63,9 @@ Close the final gap to a ready MVP. Three coupled problems:
 loop: a = μ + σ_ctrl·ε  →  apply(a)  →  nest+MuJoCo  →  y = [ankleL, ankleR]
       E = |y* − y|;  A = phase_baseline(E) − E        # reward advantage (2-vec)
       record (Δθ = a − μ, A)                          # rolling window W
-      F = Cov(Δθ) + λI                                # metric (natural grad)
+      F = E[score·scoreᵀ] + λI,  score_i = Δθ_i/σ_ctrl,i²   # score Fisher
       G = Cov(Δθ, A)                                  # per-parameter impact
-      Δμ = η · F−1 · (G·1)                            # ascent on the advantage
+      Δμ = η · F−1 · E[score·ΣA]                      # ascent on the advantage
 ```
 
 ## 5. Detailed design
@@ -78,20 +78,20 @@ loop: a = μ + σ_ctrl·ε  →  apply(a)  →  nest+MuJoCo  →  y = [ankleL, a
   (moving average); `A = b − E` (2-vector reward advantage).
 - **Record** the pair `(Δθ_k, A_k)` each step in a rolling window `W`:
   `Δθ = a − μ` (the exploration perturbation), `A` the advantage above.
-- **Covariances over the window** (column means removed):
-  - metric / preconditioner `F = (1/W)·ΔΘcT ΔΘc + λ_F I` — the perturbation
-    covariance `Cov(Δθ)` (diagonal when exploration is independent);
-  - impact `G = (1/W)·ΔΘcT Ac = Cov(Δθ, A)` (shape `n_θ × 2`).
-- **Gradient** of the summed advantage `ΣA`: `g = G·1 = Cov(Δθ, ΣA)`.
-- **Step:** `Δμ = η · F−1 · g` — a natural gradient, equivalently the ridge
-  regression of the advantage on the perturbations. `E[Δμ_i] = −η·∂E[ΣE]/∂θ_i`,
-  i.e. ascent on the reward = descent on the tracked error.
+- **Impact / influence:** `G = (1/W)·ΔΘcT Ac = Cov(Δθ, A)` (shape `n_θ × 2`);
+  `influence() = |Cov(Δθ, A)|` normalised to [0,1].
+- **Metric / step:** policy (score) Fisher `F = E[score·scoreᵀ] + λ_F I` with
+  `score_i = Δθ_i / σ_ctrl,i²`; gradient `g = E[score·ΣA]`; step
+  `Δμ = η·F⁻¹·g`. For the diagonal case `Δμ_i = Cov(Δθ_i, ΣA)` — the correct
+  natural gradient, which does **not** amplify an inert low-σ parameter's noise
+  (dividing by `Cov(Δθ_i)` would). `E[Δμ_i] = −η·∂E[ΣE]/∂θ_i`, i.e. ascent on
+  the reward = descent on the tracked error.
 - **σ_ctrl**: sampling std, updated by the policy-gradient variance rule.
 - **σ_param**: see §5.5.
 - **Noise features**: latest Poisson-rate deltas and STDP-weight deltas appended
-  as extra columns of `θ` (their `Δθ` column captures coupling to the error).
-- **Rank note:** with `W < n_θ`, `F` is ridge-regularised to stay invertible; a
-  short window stays finite.
+  as extra columns of `θ` (scored with their empirical perturbation std).
+- **Rank note:** `F` is ridge-regularised; a short window (`W < 3`) returns a
+  zero step.
 
 ### 5.2 Influence (for logging/figures)
 
@@ -188,11 +188,12 @@ muscle path off the bone axis so the tendons are visible when they shorten.
 
 ## 9. Decisions (check these)
 
-- **V1** Metric = perturbation covariance `Cov(Δθ)` (+ ridge `λ_F`).
+- **V1** Metric = policy (score) Fisher `E[score·scoreᵀ] + λ_F I`,
+  `score_i = Δθ_i/σ_ctrl,i²`.
 - **V2** Gradient/impact = `Cov(Δθ, A)` — the per-parameter covariance with the
   reward advantage `A = phase_baseline(E) − E`; `influence() = |Cov(Δθ, A)|`.
-- **V3** Step `Δμ = η·F−1·g` (natural gradient = ridge regression of the
-  advantage on the perturbations); ascent on the advantage = descent on error.
+- **V3** Step `Δμ = η·F⁻¹·g` (natural gradient; diagonal case `Δμ_i = Cov(Δθ_i,ΣA)`);
+  ascent on the advantage = descent on error; drift-free for inert parameters.
 - **V4** Optimise connection weights + rates + Izh `a,b,c,d`; exclude only
   connection `p` and σ_param.
 - **V5** σ_param held fixed for the MVP (`TODO(sigma_param)`); `sign(adv)` hack

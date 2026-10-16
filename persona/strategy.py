@@ -165,6 +165,31 @@ class FisherMatrix:
         self._G = G
         return F, G
 
+    def _score_fisher(self, sigma_ctrl_dict: Dict[str, float] | None):
+        """
+        Policy (score) Fisher and gradient for the Gaussian exploration:
+        score_i = Δθ_i / σ_ctrl,i²,  F = E[score scoreᵀ] + λI,  g = E[score·ΣA].
+        Δμ = F⁻¹ g reduces (for the diagonal case) to Δμ_i = Cov(Δθ_i, ΣA) —
+        the correct natural gradient, which does NOT blow up the noise of an
+        inert low-σ parameter the way dividing by Cov(Δθ_i) does.
+        Features without a σ_ctrl (noise/exogenous) use their empirical
+        perturbation std as the scale, so they collapse to the same form.
+        """
+        W = len(self.response_dtheta)
+        if W < 3:
+            return np.eye(self.n_total, dtype=np.float64), np.zeros(self.n_total)
+        X, Y = self._stack()
+        Xc = X - X.mean(axis=0, keepdims=True)
+        Yc = Y - Y.mean(axis=0, keepdims=True)
+        s2 = np.empty(self.n_total, dtype=np.float64)
+        for i, name in enumerate(self.all_names):
+            sc = sigma_ctrl_dict.get(name) if sigma_ctrl_dict else None
+            s2[i] = (sc ** 2) if (sc and sc > 0.0) else max(float(Xc[:, i].var()), 1e-12)
+        S = Xc / s2[None, :]
+        F = (S.T @ S) / W + self.lambda_F * np.eye(self.n_total)
+        g = ((S.T @ Yc) / W).sum(axis=1)
+        return F, g
+
     def compute_metric(self) -> tuple[np.ndarray, np.ndarray]:
         """Returns (F, scales); F = Cov(Δθ) + λ_F I, scales = sqrt(diag(F))."""
         F, _ = self._covariances()
@@ -193,17 +218,15 @@ class FisherMatrix:
                                       advantage_vector: np.ndarray) -> Dict[str, float]:
         """
         Natural-gradient ascent on the reward advantage:
-            Delta mu = eta_mu * F^-1 * g,   F = Cov(Δθ) + lambda I,  g = Cov(Δθ, ΣA).
-        Equivalently the ridge regression of the advantage on the perturbations.
-        E[Delta mu_i] = -eta * d E[ΣE] / d theta_i  (ascent on reward = descent on error).
+            Delta mu = eta_mu * F^-1 * g,  F = E[score score^T] + lambda I,
+            g = E[score * ΣA],  score_i = Δθ_i / sigma_ctrl_i^2.
+        For the diagonal case this is Delta mu_i = Cov(Δθ_i, ΣA) — the impact of
+        each parameter on the tracked error. E[Delta mu_i] = -eta * d E[ΣE]/dtheta_i
+        (ascent on reward = descent on error).
         TODO(advantage): the baselined advantage is the reward signal; unify the
         per-leg loss/advantage weighting with the score term.
-        TODO(fisher): the ridge lambda_F is absolute; scale it to the perturbation
-        variance (or gate g_i by its standard error) so inert low-variance params
-        do not drift to a bound.
         """
-        F, G = self._covariances()
-        g = G.sum(axis=1)
+        F, g = self._score_fisher(sigma_ctrl_dict)
         try:
             nat_grad = np.linalg.solve(F, g)
         except np.linalg.LinAlgError:

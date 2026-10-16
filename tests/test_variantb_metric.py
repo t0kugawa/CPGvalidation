@@ -54,3 +54,18 @@ def test_step_is_unit_invariant():
     d2 = step(build(10.0))["p0"]
     # The physical step (Δμ·scale) is independent of the arbitrary unit scale.
     assert np.isclose(d2 * 10.0, d1, rtol=1e-6)
+
+
+def test_inert_low_sigma_parameter_does_not_drift():
+    # RF1: an inert low-σ parameter's perturbation does not covary with A, so
+    # its step must be ~0 — the metric must not amplify its noise to a bound.
+    fm = FisherMatrix(param_names=["drive", "inert"], window_size=300, lambda_reg=1e-3)
+    rng = np.random.default_rng(0)
+    sig = 0.005
+    for _ in range(300):
+        dth = rng.standard_normal(2) * sig
+        fm.record_response(dth, np.array([dth[0] / sig * 0.1, 0.0]))  # drive only
+    d = fm.compute_natural_gradient_step(
+        {"drive": 0.0, "inert": 0.0}, {"drive": 0.0, "inert": 0.0},
+        {"drive": sig, "inert": sig}, np.array([1.0, 1.0]))
+    assert abs(d["inert"]) < 0.01 * abs(d["drive"])
