@@ -11,6 +11,8 @@ _SCALAR_LOG = [
     "time_ms", "ankle_model_L", "ankle_model_R", "ankle_target_L",
     "ankle_target_R", "loss", "advantage", "mus_E_L", "mus_F_L",
     "mus_E_R", "mus_F_R", "cut_L", "ia_rate_E_L", "ib_rate_E_L",
+    "ankle_ref_L", "ankle_ref_R", "knee_model_L", "knee_model_R",
+    "hip_model_L", "hip_model_R", "ia_rate_F_L",
 ]
 _STR_LOG = ["phase_L", "phase_R", "stage"]
 

@@ -107,7 +107,7 @@ VELOCITY_MPS: float = 5.45
 
 # STDP is used on the sensory input pathways (spec D12): CUT -> RGE and Ia -> RG.
 # All other projections are static synapses.
-STDP_POSTFIX = {"cut_rge": "default", "ia_rg": "ia"}
+STDP_POSTFIX = {"cut_rge": "default", "ia_rg": "ia", "ia_rge": "ia", "ia_rgf": "ia"}
 
 
 def get_jitter_delay(jitter_ms: float = 0.2) -> float:

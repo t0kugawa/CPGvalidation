@@ -8,6 +8,8 @@ def test_plastic_projections_exist(nest_kernel):
     reg = Registry()
     leg = Leg("L", reg, n_rg=8, n_mn=8, n_int=6, n_aff=6)
     assert any("cut" in k and "rge" in k for k in leg.plastic_projections)
+    assert any("ia" in k for k in leg.plastic_projections), \
+        "Ia->RG must be a plastic (STDP) projection (spec D12)"
     for k in leg.plastic_projections:
         assert reg.connection_cfgs[k].model.startswith("stdp")
 

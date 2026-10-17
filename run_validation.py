@@ -109,6 +109,13 @@ def run(duration_s, view, width, height, fps, out_dir,
         log.cut_L.append(cpg_in.cut_L)
         log.ia_rate_E_L.append(cpg_in.ia_rate_E_L)
         log.ib_rate_E_L.append(cpg_in.ib_rate_E_L)
+        log.ankle_ref_L.append(cpg_in.ankle_angle_ref_L)
+        log.ankle_ref_R.append(cpg_in.ankle_angle_ref_R)
+        log.knee_model_L.append(cpg_in.knee_angle_m_L)
+        log.knee_model_R.append(cpg_in.knee_angle_m_R)
+        log.hip_model_L.append(cpg_in.hip_angle_m_L)
+        log.hip_model_R.append(cpg_in.hip_angle_m_R)
+        log.ia_rate_F_L.append(cpg_in.ia_rate_F_L)
 
         if render and step in frame_steps:
             lines = hud_lines(cpg_in, cpg_out, cpg.current_time_ms, stage)

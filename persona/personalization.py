@@ -69,10 +69,19 @@ class RunLog:
     cut_L: List[float] = field(default_factory=list)
     ia_rate_E_L: List[float] = field(default_factory=list)
     ib_rate_E_L: List[float] = field(default_factory=list)
+    ankle_ref_L: List[float] = field(default_factory=list)
+    ankle_ref_R: List[float] = field(default_factory=list)
+    knee_model_L: List[float] = field(default_factory=list)
+    knee_model_R: List[float] = field(default_factory=list)
+    hip_model_L: List[float] = field(default_factory=list)
+    hip_model_R: List[float] = field(default_factory=list)
+    ia_rate_F_L: List[float] = field(default_factory=list)
 
     _NUMERIC = ("time_ms", "ankle_model_L", "ankle_model_R", "ankle_target_L",
                 "ankle_target_R", "loss", "advantage", "mus_E_L", "mus_F_L",
-                "mus_E_R", "mus_F_R", "cut_L", "ia_rate_E_L", "ib_rate_E_L")
+                "mus_E_R", "mus_F_R", "cut_L", "ia_rate_E_L", "ib_rate_E_L",
+                "ankle_ref_L", "ankle_ref_R", "knee_model_L", "knee_model_R",
+                "hip_model_L", "hip_model_R", "ia_rate_F_L")
 
     def finalize(self) -> "RunLog":
         for name in self._NUMERIC:
@@ -194,6 +203,13 @@ class Personalizer:
             log.cut_L.append(cpg_in.cut_L)
             log.ia_rate_E_L.append(cpg_in.ia_rate_E_L)
             log.ib_rate_E_L.append(cpg_in.ib_rate_E_L)
+            log.ankle_ref_L.append(cpg_in.ankle_angle_ref_L)
+            log.ankle_ref_R.append(cpg_in.ankle_angle_ref_R)
+            log.knee_model_L.append(cpg_in.knee_angle_m_L)
+            log.knee_model_R.append(cpg_in.knee_angle_m_R)
+            log.hip_model_L.append(cpg_in.hip_angle_m_L)
+            log.hip_model_R.append(cpg_in.hip_angle_m_R)
+            log.ia_rate_F_L.append(cpg_in.ia_rate_F_L)
 
             if self.log_every > 0 and (len(log.stage) % self.log_every == 0
                                        or len(log.stage) == 1):
