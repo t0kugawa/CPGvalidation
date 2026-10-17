@@ -4,6 +4,7 @@ import mujoco
 
 from model.adapter import CPGOutput, CPGInput
 from model.cut import CUTAfferent, IaAfferent, IbAfferent
+from model.model_cfg import TREADMILL_PENETRATION_M
 
 SIDES = ("L", "R")
 
@@ -197,9 +198,11 @@ class Leg:
 
     def _level_treadmill(self):
         """
-        Lowers/raises the treadmill plane to the lowest point of the TARGET
-        limbs' feet, so the target rest on the belt without colliding with the
-        ground. Returns the plane height used.
+        Places the treadmill plane so the limbs' feet rest on the belt: at the
+        lowest surface point of the TARGET limbs' feet plus a small penetration
+        (`TREADMILL_PENETRATION_M`), so a resting contact (and thus a stance
+        phase) is actually generated. A positive gap would suppress contact
+        entirely. Returns the plane height used.
         """
         lo = np.inf
         for s in SIDES:
@@ -209,9 +212,13 @@ class Leg:
                 lo = min(lo, z - r)
         if not np.isfinite(lo):
             return float(self.model.geom_pos[self.treadmill_gid, 2])
-        # Small clearance so the target foot rests without a hard initial impact.
-        self.model.geom_pos[self.treadmill_gid, 2] = lo - 0.002
-        return lo - 0.002
+        plane_z = lo + TREADMILL_PENETRATION_M
+        self.model.geom_pos[self.treadmill_gid, 2] = plane_z
+        # MuJoCo bakes static-geom world transforms at compile time; the
+        # geom_pos write above only reaches collision after mj_setConst
+        # (otherwise the belt stays at z=0 and no contact is ever generated).
+        mujoco.mj_setConst(self.model, self.data)
+        return plane_z
 
     def get_reference_kinematics(self, t_s: float, phase_offset: float = 0.0) -> tuple[float, float, float]:
         """
