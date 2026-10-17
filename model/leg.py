@@ -78,6 +78,11 @@ class Leg:
             s: [self._gid(f"foot_ref_geom_{s}"), self._gid(f"toe_ref_geom_{s}")]
             for s in SIDES
         }
+        self.model_foot_geoms = {
+            s: [gid for gid in range(self.model.ngeom)
+                if int(self.model.geom_bodyid[gid]) in set(self.foot_bodies[s])]
+            for s in SIDES
+        }
 
         self.cut_afferent = {s: CUTAfferent(dt_ms=dt_ms, r_peak_hz=120.0) for s in SIDES}
         self.ia_sol = {s: IaAfferent(l_0=0.040, k_l=600.0, k_v=120.0, r_base_hz=10.0, r_max_hz=250.0) for s in SIDES}
@@ -129,7 +134,7 @@ class Leg:
         return 0.0
 
     def _contact_force(self, side: str) -> float:
-        """Total normal contact force (N) on the foot/toe bodies of one leg."""
+        """Total normal contact force (N) on the MODEL foot/toe bodies of one leg."""
         total = 0.0
         bodies = set(self.foot_bodies[side])
         for i in range(self.data.ncon):
@@ -137,10 +142,30 @@ class Leg:
             b1 = int(self.model.geom_bodyid[c.geom1])
             b2 = int(self.model.geom_bodyid[c.geom2])
             if b1 in bodies or b2 in bodies:
-                f = np.zeros(6, dtype=np.float64)
-                mujoco.mj_contactForce(self.model, self.data, i, f)
-                total += abs(float(f[0]))
+                total += self._contact_force_i(i)
         return total
+
+    def _contact_force_ref(self, side: str) -> float:
+        """Total normal contact force (N) on the TARGET limb's foot/toe geoms."""
+        geoms = set(self.ref_foot_geoms[side])
+        total = 0.0
+        for i in range(self.data.ncon):
+            c = self.data.contact[i]
+            if int(c.geom1) in geoms or int(c.geom2) in geoms:
+                total += self._contact_force_i(i)
+        return total
+
+    def _contact_force_i(self, i: int) -> float:
+        f = np.zeros(6, dtype=np.float64)
+        mujoco.mj_contactForce(self.model, self.data, i, f)
+        return abs(float(f[0]))
+
+    def _foot_lowest_z(self, geoms) -> float:
+        """Lowest surface point (m) of the given foot/toe geoms."""
+        lo = np.inf
+        for gid in geoms:
+            lo = min(lo, float(self.data.geom_xpos[gid, 2]) - float(self.model.geom_size[gid, 0]))
+        return float(lo) if np.isfinite(lo) else 0.0
 
     def reset(self, pose=None):
         """
@@ -254,8 +279,10 @@ class Leg:
         sensory = {}
         for s in SIDES:
             total_contact_force = self._contact_force(s)
+            total_contact_ref = self._contact_force_ref(s)
             cut_hz = self.cut_afferent[s].get_cut_hz(total_contact_force)
             phase = "stance" if total_contact_force > 0.005 else "swing"
+            phase_ref = "stance" if total_contact_ref > 0.005 else "swing"
 
             sol_len = float(self.data.ten_length[self.ten_sol[s]])
             sol_vel = float(self.data.ten_velocity[self.ten_sol[s]])
@@ -275,9 +302,16 @@ class Leg:
             q_ankle_ref = float(self.data.qpos[self.model.jnt_qposadr[self.j_ankle_ref[s]]])
             q_knee_m = float(self.data.qpos[self.model.jnt_qposadr[self.j_knee_m[s]]])
             q_hip_m = float(self.data.qpos[self.model.jnt_qposadr[self.j_hip_m[s]]])
+            q_knee_ref = float(self.data.qpos[self.model.jnt_qposadr[self.j_knee_ref[s]]])
+            q_hip_ref = float(self.data.qpos[self.model.jnt_qposadr[self.j_hip_ref[s]]])
+
+            foot_z_m = self._foot_lowest_z(self.model_foot_geoms[s])
+            foot_z_ref = self._foot_lowest_z(self.ref_foot_geoms[s])
 
             sensory[s] = dict(
-                cut=cut_hz, phase=phase,
+                cut=cut_hz, phase=phase, phase_ref=phase_ref,
+                contact=total_contact_force, contact_ref=total_contact_ref,
+                foot_z_m=foot_z_m, foot_z_ref=foot_z_ref,
                 sol_len=sol_len, sol_vel=sol_vel, ta_len=ta_len, ta_vel=ta_vel,
                 ia_rate_e=ia_rate_e, ia_rate_f=ia_rate_f,
                 sol_force=sol_force, ta_force=ta_force,
@@ -285,6 +319,7 @@ class Leg:
                 ib_rate_e=ib_rate_e, ib_rate_f=ib_rate_f,
                 q_ankle_m=q_ankle_m, q_ankle_ref=q_ankle_ref,
                 q_knee_m=q_knee_m, q_hip_m=q_hip_m,
+                q_knee_ref=q_knee_ref, q_hip_ref=q_hip_ref,
             )
 
         L, R = sensory["L"], sensory["R"]
@@ -299,8 +334,15 @@ class Leg:
             ib_act_E_R=R["sol_act"], ib_force_E_R=R["sol_force"], ib_rate_E_R=R["ib_rate_e"],
             ib_act_F_R=R["ta_act"], ib_force_F_R=R["ta_force"], ib_rate_F_R=R["ib_rate_f"],
             phase_L=L["phase"], phase_R=R["phase"],
+            phase_ref_L=L["phase_ref"], phase_ref_R=R["phase_ref"],
+            contact_m_L=L["contact"], contact_m_R=R["contact"],
+            contact_ref_L=L["contact_ref"], contact_ref_R=R["contact_ref"],
+            foot_z_m_L=L["foot_z_m"], foot_z_m_R=R["foot_z_m"],
+            foot_z_ref_L=L["foot_z_ref"], foot_z_ref_R=R["foot_z_ref"],
             ankle_angle_m_L=L["q_ankle_m"], ankle_angle_ref_L=L["q_ankle_ref"],
             knee_angle_m_L=L["q_knee_m"], hip_angle_m_L=L["q_hip_m"],
             ankle_angle_m_R=R["q_ankle_m"], ankle_angle_ref_R=R["q_ankle_ref"],
             knee_angle_m_R=R["q_knee_m"], hip_angle_m_R=R["q_hip_m"],
+            knee_angle_ref_L=L["q_knee_ref"], hip_angle_ref_L=L["q_hip_ref"],
+            knee_angle_ref_R=R["q_knee_ref"], hip_angle_ref_R=R["q_hip_ref"],
         )

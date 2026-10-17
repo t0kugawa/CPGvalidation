@@ -34,6 +34,85 @@ class ValidationReport:
         self.figures["tracking"] = fig
         return fig
 
+    def plot_model_vs_target(self, log):
+        """
+        Diagnostic comparison of the MODEL limb vs the TARGET (reference) limb in
+        MuJoCo: ankle/knee/hip, SOL/TA drives, Ia/Ib afferents, foot contact, and
+        stance/swing (model shaded red, target shaded blue). Answers whether the
+        target limb itself makes ground contact and how the two limbs differ.
+        """
+        t = np.asarray(log.time_ms) / 1000.0
+
+        def col(name):
+            v = getattr(log, name, None)
+            return np.asarray(v, dtype=float) if v is not None and len(v) == len(t) else None
+
+        fig, axes = plt.subplots(7, 1, figsize=(12, 17), sharex=True)
+
+        ax = axes[0]
+        if col("ankle_target_L") is not None:
+            ax.plot(t, col("ankle_target_L"), "k--", label="target traj L")
+        ax.plot(t, log.ankle_model_L, "r-", label="model ankle L")
+        if col("ankle_ref_L") is not None:
+            ax.plot(t, col("ankle_ref_L"), color="magenta", lw=1.0, label="target ankle L")
+        ax.set_ylabel("ankle [rad]"); ax.legend(fontsize=7)
+
+        ax = axes[1]
+        ax.plot(t, log.knee_model_L, "r-", label="model knee L")
+        ax.plot(t, log.hip_model_L, "b-", label="model hip L")
+        if col("knee_ref_L") is not None:
+            ax.plot(t, col("knee_ref_L"), "r--", lw=1.0, label="target knee L")
+        if col("hip_ref_L") is not None:
+            ax.plot(t, col("hip_ref_L"), "b--", lw=1.0, label="target hip L")
+        ax.set_ylabel("knee/hip [rad]"); ax.legend(fontsize=7)
+
+        ax = axes[2]
+        ax.plot(t, log.mus_E_L, "r-", label="SOL drive L")
+        ax.plot(t, log.mus_F_L, "b-", label="TA drive L")
+        ax.set_ylabel("muscle drive"); ax.legend(fontsize=7)
+
+        ax = axes[3]
+        ax.plot(t, log.ia_rate_E_L, "r-", label="Ia SOL L")
+        if col("ia_rate_F_L") is not None:
+            ax.plot(t, col("ia_rate_F_L"), "b-", label="Ia TA L")
+        ax.plot(t, log.ib_rate_E_L, "k-", label="Ib SOL L")
+        ax.set_ylabel("afferent [Hz]"); ax.legend(fontsize=7)
+
+        ax = axes[4]
+        ax.plot(t, log.contact_m_L, "r-", label="model contact L")
+        if col("contact_ref_L") is not None:
+            ax.plot(t, col("contact_ref_L"), color="magenta", lw=1.0, label="target contact L")
+        self._shade_phases(ax, t, getattr(log, "phase_L", None), "red")
+        self._shade_phases(ax, t, getattr(log, "phase_ref_L", None), "blue")
+        ax.set_ylabel("contact [N]"); ax.legend(fontsize=7)
+
+        ax = axes[5]
+        ax.plot(t, log.cut_L, color="tab:orange", label="CUT L [Hz]")
+        ax.set_ylabel("CUT [Hz]"); ax.legend(fontsize=7)
+
+        ax = axes[6]
+        ax.plot(t, log.foot_z_m_L, "r-", label="model foot z L")
+        if col("foot_z_ref_L") is not None:
+            ax.plot(t, col("foot_z_ref_L"), color="magenta", lw=1.0, label="target foot z L")
+        ax.axhline(0.0, color="k", ls=":", alpha=0.6)
+        ax.set_ylabel("foot z [m]"); ax.set_xlabel("time [s]"); ax.legend(fontsize=7)
+
+        for a in axes:
+            a.grid(alpha=0.3)
+
+        def stance_frac(phase):
+            if phase is None or len(phase) == 0:
+                return float("nan")
+            return 100.0 * sum(1 for p in phase if p == "stance") / len(phase)
+
+        fig.suptitle(
+            "Model vs target limb (L): stance model "
+            f"{stance_frac(getattr(log, 'phase_L', None)):.1f}% / target "
+            f"{stance_frac(getattr(log, 'phase_ref_L', None)):.1f}%", fontsize=12)
+        fig.tight_layout()
+        self.figures["model_vs_target"] = fig
+        return fig
+
     @staticmethod
     def _shade_phases(ax, t, phase, color):
         if phase is None or len(t) == 0:
@@ -111,7 +190,6 @@ class ValidationReport:
         if not means:
             return None
         names = list(means.keys())
-        n_steps = len(next(iter(means.values())))
         # influence = relative shift + change in spread
         score = {}
         for k in names:

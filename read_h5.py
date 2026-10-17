@@ -40,6 +40,10 @@ def make_figures(h5_path, out_dir):
     )
     rep = ValidationReport()
     rep.plot_tracking(log)
+    try:
+        rep.plot_model_vs_target(log)
+    except Exception as e:  # noqa: BLE001
+        print(f"model_vs_target: {e}")
     rep.plot_learning(log)
     for name, fn in (("influence", lambda: rep.plot_influence(agent)),
                      ("param_shift", lambda: rep.plot_param_shift(agent, top_n=10))):

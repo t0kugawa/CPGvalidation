@@ -13,8 +13,11 @@ _SCALAR_LOG = [
     "mus_E_R", "mus_F_R", "cut_L", "ia_rate_E_L", "ib_rate_E_L",
     "ankle_ref_L", "ankle_ref_R", "knee_model_L", "knee_model_R",
     "hip_model_L", "hip_model_R", "ia_rate_F_L",
+    "contact_m_L", "contact_m_R", "contact_ref_L", "contact_ref_R",
+    "knee_ref_L", "knee_ref_R", "hip_ref_L", "hip_ref_R",
+    "foot_z_m_L", "foot_z_m_R", "foot_z_ref_L", "foot_z_ref_R",
 ]
-_STR_LOG = ["phase_L", "phase_R", "stage"]
+_STR_LOG = ["phase_L", "phase_R", "phase_ref_L", "phase_ref_R", "stage"]
 
 
 def save_run(path, log, agent, meta=None):

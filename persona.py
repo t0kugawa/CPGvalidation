@@ -591,7 +591,6 @@ def run_experiment(n_episodes=1500, steps_per_ep=30,
 # ### Plotting
 # %%
 import matplotlib.gridspec as gridspec
-from matplotlib.patches import Patch
 
 COLORS = plt.cm.tab10(np.linspace(0, 0.9, 10))
 

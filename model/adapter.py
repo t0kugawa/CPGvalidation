@@ -54,6 +54,20 @@ class CPGInput:
     phase_L: str = "stance"
     phase_R: str = "swing"
 
+    # Target-limb (reference) locomotion phase + normal contact force (N)
+    phase_ref_L: str = "stance"
+    phase_ref_R: str = "swing"
+    contact_m_L: float = 0.0
+    contact_m_R: float = 0.0
+    contact_ref_L: float = 0.0
+    contact_ref_R: float = 0.0
+
+    # Lowest surface point of each limb's foot (m) — ground clearance diagnostic
+    foot_z_m_L: float = 0.0
+    foot_z_m_R: float = 0.0
+    foot_z_ref_L: float = 0.0
+    foot_z_ref_R: float = 0.0
+
     # Kinematic joint angles (rad)
     ankle_angle_m_L: float = 0.0
     ankle_angle_ref_L: float = 0.0
@@ -64,6 +78,11 @@ class CPGInput:
     ankle_angle_ref_R: float = 0.0
     knee_angle_m_R: float = 0.0
     hip_angle_m_R: float = 0.0
+
+    knee_angle_ref_L: float = 0.0
+    hip_angle_ref_L: float = 0.0
+    knee_angle_ref_R: float = 0.0
+    hip_angle_ref_R: float = 0.0
 
 
 @dataclass

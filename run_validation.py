@@ -21,7 +21,6 @@ for _v in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS",
     os.environ.setdefault(_v, "1")
 
 import numpy as np
-import nest
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if BASE_DIR not in sys.path:
@@ -29,7 +28,7 @@ if BASE_DIR not in sys.path:
 
 import imageio
 
-from personalize import build_personalizer, DEFAULT_REFERENCE, DEFAULT_STATS, DT_MS
+from personalize import build_personalizer, DEFAULT_REFERENCE, DT_MS
 from persona.personalization import RunLog
 from persona.validation import ValidationReport
 from persona.h5io import save_run
@@ -66,7 +65,6 @@ def run(duration_s, view, width, height, fps, out_dir,
     cpg_in = CPGInput()
     stage = "pose"
     pose_ok = 0
-    tgt = driver.pose()
     for step in range(steps):
         if step >= belt_start_step:
             frac = min(1.0, (step - belt_start_step + 1) / belt_ramp_steps)
@@ -116,6 +114,20 @@ def run(duration_s, view, width, height, fps, out_dir,
         log.hip_model_L.append(cpg_in.hip_angle_m_L)
         log.hip_model_R.append(cpg_in.hip_angle_m_R)
         log.ia_rate_F_L.append(cpg_in.ia_rate_F_L)
+        log.contact_m_L.append(cpg_in.contact_m_L)
+        log.contact_m_R.append(cpg_in.contact_m_R)
+        log.contact_ref_L.append(cpg_in.contact_ref_L)
+        log.contact_ref_R.append(cpg_in.contact_ref_R)
+        log.phase_ref_L.append(cpg_in.phase_ref_L)
+        log.phase_ref_R.append(cpg_in.phase_ref_R)
+        log.knee_ref_L.append(cpg_in.knee_angle_ref_L)
+        log.knee_ref_R.append(cpg_in.knee_angle_ref_R)
+        log.hip_ref_L.append(cpg_in.hip_angle_ref_L)
+        log.hip_ref_R.append(cpg_in.hip_angle_ref_R)
+        log.foot_z_m_L.append(cpg_in.foot_z_m_L)
+        log.foot_z_m_R.append(cpg_in.foot_z_m_R)
+        log.foot_z_ref_L.append(cpg_in.foot_z_ref_L)
+        log.foot_z_ref_R.append(cpg_in.foot_z_ref_R)
 
         if render and step in frame_steps:
             lines = hud_lines(cpg_in, cpg_out, cpg.current_time_ms, stage)
@@ -161,7 +173,9 @@ def run(duration_s, view, width, height, fps, out_dir,
                 pass
 
     rep = ValidationReport()
-    for name, fn in (("tracking", rep.plot_tracking), ("learning", rep.plot_learning)):
+    for name, fn in (("tracking", rep.plot_tracking),
+                     ("model_vs_target", rep.plot_model_vs_target),
+                     ("learning", rep.plot_learning)):
         try:
             fn(log)
             status[f"{name}.png"] = "ok"

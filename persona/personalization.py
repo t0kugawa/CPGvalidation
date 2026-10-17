@@ -76,12 +76,30 @@ class RunLog:
     hip_model_L: List[float] = field(default_factory=list)
     hip_model_R: List[float] = field(default_factory=list)
     ia_rate_F_L: List[float] = field(default_factory=list)
+    contact_m_L: List[float] = field(default_factory=list)
+    contact_m_R: List[float] = field(default_factory=list)
+    contact_ref_L: List[float] = field(default_factory=list)
+    contact_ref_R: List[float] = field(default_factory=list)
+    phase_ref_L: List[str] = field(default_factory=list)
+    phase_ref_R: List[str] = field(default_factory=list)
+    knee_ref_L: List[float] = field(default_factory=list)
+    knee_ref_R: List[float] = field(default_factory=list)
+    hip_ref_L: List[float] = field(default_factory=list)
+    hip_ref_R: List[float] = field(default_factory=list)
+    foot_z_m_L: List[float] = field(default_factory=list)
+    foot_z_m_R: List[float] = field(default_factory=list)
+    foot_z_ref_L: List[float] = field(default_factory=list)
+    foot_z_ref_R: List[float] = field(default_factory=list)
 
     _NUMERIC = ("time_ms", "ankle_model_L", "ankle_model_R", "ankle_target_L",
                 "ankle_target_R", "loss", "advantage", "mus_E_L", "mus_F_L",
                 "mus_E_R", "mus_F_R", "cut_L", "ia_rate_E_L", "ib_rate_E_L",
                 "ankle_ref_L", "ankle_ref_R", "knee_model_L", "knee_model_R",
-                "hip_model_L", "hip_model_R", "ia_rate_F_L")
+                "hip_model_L", "hip_model_R", "ia_rate_F_L",
+                "contact_m_L", "contact_m_R", "contact_ref_L", "contact_ref_R",
+                "knee_ref_L", "knee_ref_R", "hip_ref_L", "hip_ref_R",
+                "foot_z_m_L", "foot_z_m_R", "foot_z_ref_L", "foot_z_ref_R")
+    _STR = ("phase_L", "phase_R", "phase_ref_L", "phase_ref_R", "stage")
 
     def finalize(self) -> "RunLog":
         for name in self._NUMERIC:
@@ -90,7 +108,7 @@ class RunLog:
 
     def to_csv(self, path: str) -> None:
         import csv
-        cols = list(self._NUMERIC) + ["phase_L", "phase_R", "stage"]
+        cols = list(self._NUMERIC) + list(self._STR)
         with open(path, "w", newline="") as fh:
             w = csv.writer(fh)
             w.writerow(cols)
@@ -210,6 +228,20 @@ class Personalizer:
             log.hip_model_L.append(cpg_in.hip_angle_m_L)
             log.hip_model_R.append(cpg_in.hip_angle_m_R)
             log.ia_rate_F_L.append(cpg_in.ia_rate_F_L)
+            log.contact_m_L.append(cpg_in.contact_m_L)
+            log.contact_m_R.append(cpg_in.contact_m_R)
+            log.contact_ref_L.append(cpg_in.contact_ref_L)
+            log.contact_ref_R.append(cpg_in.contact_ref_R)
+            log.phase_ref_L.append(cpg_in.phase_ref_L)
+            log.phase_ref_R.append(cpg_in.phase_ref_R)
+            log.knee_ref_L.append(cpg_in.knee_angle_ref_L)
+            log.knee_ref_R.append(cpg_in.knee_angle_ref_R)
+            log.hip_ref_L.append(cpg_in.hip_angle_ref_L)
+            log.hip_ref_R.append(cpg_in.hip_angle_ref_R)
+            log.foot_z_m_L.append(cpg_in.foot_z_m_L)
+            log.foot_z_m_R.append(cpg_in.foot_z_m_R)
+            log.foot_z_ref_L.append(cpg_in.foot_z_ref_L)
+            log.foot_z_ref_R.append(cpg_in.foot_z_ref_R)
 
             if self.log_every > 0 and (len(log.stage) % self.log_every == 0
                                        or len(log.stage) == 1):

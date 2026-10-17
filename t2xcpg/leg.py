@@ -307,12 +307,13 @@ class Leg:
         self.noise_recorder.observe("ib_e", current_time_ms, "rate", float(ib_e_hz))
         self.noise_recorder.observe("ib_f", current_time_ms, "rate", float(ib_f_hz))
 
-    def get_muscle_drives(self, dt_ms: float) -> Tuple[float, float]:
+    def get_muscle_drives(self, dt_ms: float, current_time_ms: float = 0.0) -> Tuple[float, float]:
         """
         Normalized muscle activation in [0, 1] from spikes during the step.
         A pool at `ref_hz` per neuron (default 100 Hz) maps to full drive, so
         the drive tracks population rate rather than saturating the instant the
-        pool fires.
+        pool fires. The per-step activation change is recorded as a noise
+        feature (inner muscle dynamics) for PERSONA.
         """
         ev_e = self.rec_muse.get("events")["times"]
         ev_f = self.rec_musf.get("events")["times"]
@@ -321,7 +322,11 @@ class Leg:
         self.rec_muse.set({"n_events": 0})
         self.rec_musf.set({"n_events": 0})
 
-        return self._drive(n_e, dt_ms), self._drive(n_f, dt_ms)
+        drive_e = self._drive(n_e, dt_ms)
+        drive_f = self._drive(n_f, dt_ms)
+        self.noise_recorder.observe("mus_e", current_time_ms, "act", drive_e)
+        self.noise_recorder.observe("mus_f", current_time_ms, "act", drive_f)
+        return drive_e, drive_f
 
     def _drive(self, spikes: int, dt_ms: float) -> float:
         ref_hz = getattr(self, "ref_hz", 100.0)

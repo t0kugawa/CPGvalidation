@@ -1,4 +1,3 @@
-import sys
 from personalize import run_personalization
 
 if __name__ == "__main__":

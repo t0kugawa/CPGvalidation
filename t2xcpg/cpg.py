@@ -124,10 +124,10 @@ class L2CPG(CPGAdapter):
 
         if "L" in self.legs:
             self.legs["L"].update_plastic_weights(t_before, self.current_time_ms)
-            d_e_L, d_f_L = self.legs["L"].get_muscle_drives(self.dt_ms)
+            d_e_L, d_f_L = self.legs["L"].get_muscle_drives(self.dt_ms, self.current_time_ms)
         if "R" in self.legs:
             self.legs["R"].update_plastic_weights(t_before, self.current_time_ms)
-            d_e_R, d_f_R = self.legs["R"].get_muscle_drives(self.dt_ms)
+            d_e_R, d_f_R = self.legs["R"].get_muscle_drives(self.dt_ms, self.current_time_ms)
 
         out = CPGOutput(
             mus_E_L=d_e_L,

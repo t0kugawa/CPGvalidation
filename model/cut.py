@@ -1,10 +1,5 @@
 from math import exp
 
-try:
-    from model.model_cfg import OBJECT_MASS
-except ImportError:
-    OBJECT_MASS = 300.0
-
 
 def clamp(x: float, lo: float, hi: float) -> float:
     return float(max(lo, min(hi, x)))
@@ -15,6 +10,27 @@ class CUTAfferent:
     Plantar cutaneous mechanoreceptor model.
     Converts contact pressure / touch area into firing rate (Hz)
     with first-order low-pass dynamics.
+
+    TODO(cut-multi-site): replace this single per-leg afferent + scalar Hz with
+    a multi-site plantar model (user-proposed, more physiological):
+      - N Poisson generators distributed across the sole (heel / metatarsal
+        pads / toe) instead of one scalar generator.
+      - A site's generator joins the ACTIVE list only while that site is in
+        contact with the floor; active generators drive RG-E through STDP.
+      - Each site's rate derives from the site's contact AREA and the contact
+        force the limb applies to that site (local force -> local Hz), so the
+        aggregate CUT code is a nonlinear population code (foot roll / centre
+        of pressure) rather than one sigmoid of total force.
+      - Requires: a sole site layout, contact-point -> site assignment in
+        model/leg.py (contacts are MuJoCo point contacts, so "area" must be a
+        fixed per-site weighting), and per-site STDP synapses to RG-E.
+      - The STDP postfix for these is already reserved: STDP_POSTFIX has an
+        "ia_rg"/"cut_rge" family; add per-site keys when implementing.
+
+    TODO(magic-numbers): the constants below (beta, p_theta, tau_ms, r_peak_hz,
+    and the `contact * 50` pressure gain / 100 cap in get_cut_hz) are hand-tuned.
+    Consider exposing sensor/actuator gains to PERSONA (see discussion) while
+    keeping geometry/contact flags fixed.
     """
     def __init__(self, dt_ms: float = 2.0, r_peak_hz: float = 120.0,
                  beta: float = 0.3, p_theta: float = 10.0, tau_ms: float = 20.0):
