@@ -233,7 +233,7 @@ class Registry:
     def sample_all_actions(self) -> Dict[str, float]:
         """
         Draws an exploratory action (parameter mean) for every registered PersonaParam
-        using its controlling standard deviation (sigma_ctrl).
+        using its single standard deviation (sigma).
         """
         params = self.get_all_optimizable_params()
         return {k: param.sample_exploration() for k, param in params.items()}

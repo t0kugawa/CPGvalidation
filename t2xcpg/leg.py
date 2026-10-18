@@ -65,12 +65,11 @@ class Leg:
 
         self.registry.finalize_connections()
 
-    def _param(self, name: str, mean: float, sigma_param: float = 0.05,
-               sigma_ctrl: float = 0.1, min_val: float = -100.0, max_val: float = 100.0) -> PersonaParam:
+    def _param(self, name: str, mean: float, sigma: float = 0.1,
+               min_val: float = -100.0, max_val: float = 100.0) -> PersonaParam:
         return PersonaParam(
             mean=mean,
-            sigma_param=sigma_param,
-            sigma_ctrl=sigma_ctrl,
+            sigma=sigma,
             min=min_val,
             max=max_val
         )
@@ -99,17 +98,16 @@ class Leg:
                 lo = max(lo, abs(weight))
             out[name] = self._param(
                 name, mean,
-                sigma_param=max(abs(mean) * 0.05, 1e-6),
-                sigma_ctrl=max(abs(mean) * 0.1, 1e-6),
+                sigma=max(abs(mean) * 0.1, 1e-6),
                 min_val=lo, max_val=hi)
         return out
 
     def _izhi(self, a, b, c, d):
         return {
-            "a": self._param("a", a, 0.002, 0.005, 0.001, 0.1),
-            "b": self._param("b", b, 0.02, 0.04, 0.05, 0.5),
-            "c": self._param("c", c, 2.0, 5.0, -80.0, -50.0),
-            "d": self._param("d", d, 1.0, 2.0, 0.0, 20.0),
+            "a": self._param("a", a, 0.005, 0.001, 0.1),
+            "b": self._param("b", b, 0.04, 0.05, 0.5),
+            "c": self._param("c", c, 5.0, -80.0, -50.0),
+            "d": self._param("d", d, 2.0, 0.0, 20.0),
         }
 
     def _build_populations(self):
@@ -227,8 +225,7 @@ class Leg:
             extra = {"delay": float(d), "weight": float(weight)}
         else:
             parameters = {"weight": self._param(
-                "weight", weight, sigma_param=abs(weight) * 0.05,
-                sigma_ctrl=abs(weight) * 0.1,
+                "weight", weight, abs(weight) * 0.1,
                 min_val=-150.0 if weight < 0 else 0.0,
                 max_val=0.0 if weight < 0 else 150.0)}
             extra = {"delay": float(d)}

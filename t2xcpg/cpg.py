@@ -40,19 +40,17 @@ class L2CPG(CPGAdapter):
         self._build_commissural_connections(p_comm=p_comm)
         self.registry.finalize_connections()
 
-    def _param(self, name: str, mean: float, sigma_param: float = 0.05,
-               sigma_ctrl: float = 0.1, min_val: float = -100.0, max_val: float = 100.0) -> PersonaParam:
+    def _param(self, name: str, mean: float, sigma: float = 0.1,
+               min_val: float = -100.0, max_val: float = 100.0) -> PersonaParam:
         return PersonaParam(
             mean=mean,
-            sigma_param=sigma_param,
-            sigma_ctrl=sigma_ctrl,
+            sigma=sigma,
             min=min_val,
             max=max_val
         )
 
     def _connect(self, src: str, tgt: str, weight: float, p: float = 0.40, delay: float = 3.0) -> Any:
-        w_param = self._param("weight", weight, sigma_param=abs(weight) * 0.05,
-                              sigma_ctrl=abs(weight) * 0.1,
+        w_param = self._param("weight", weight, abs(weight) * 0.1,
                               min_val=-100.0 if weight < 0 else 0.0,
                               max_val=0.0 if weight < 0 else 100.0)
         cfg = Connection(

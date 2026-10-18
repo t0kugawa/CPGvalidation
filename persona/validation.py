@@ -189,11 +189,11 @@ class ValidationReport:
     def plot_param_shift(self, agent, top_n: int = 10):
         """
         Gaussian before/after for the `top_n` most influential parameters:
-        for each parameter, overlay the initial and final N(mean, sigma_ctrl)
+        for each parameter, overlay the initial and final N(mean, sigma)
         distributions so the shift from one distribution to another is visible.
         """
         means = agent.history["means"]
-        sigmas = agent.history["sigmas_ctrl"]
+        sigmas = agent.history["sigmas"]
         if not means:
             return None
         names = list(means.keys())

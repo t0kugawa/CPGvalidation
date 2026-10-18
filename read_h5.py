@@ -33,7 +33,7 @@ def make_figures(h5_path, out_dir):
     log = SimpleNamespace(**data["log"])
     agent = SimpleNamespace(
         history={"means": data["agent"]["means"],
-                 "sigmas_ctrl": data["agent"]["sigmas_ctrl"]},
+                 "sigmas": data["agent"]["sigmas"]},
         strategy=_StrategyView(data["agent"].get("influence"),
                                data["agent"].get("all_names")
                                or data["agent"].get("param_names", [])),

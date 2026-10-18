@@ -10,20 +10,22 @@ from model.adapter import CPGOutput
 from model.leg import Leg
 
 
-# --- Important: the controlling-variance rule must not diverge ---
+# --- Important: the single-sigma rule must not diverge ---
 
-def test_controlling_variance_stays_bounded():
-    p = PersonaParam(mean=0.0, sigma_ctrl=1e-3)
+def test_sigma_stays_bounded():
+    p = PersonaParam(mean=0.0, sigma=1e-3)
     for _ in range(200):
-        p.update_controlling_variance(p.sample_exploration(), advantage=0.5, lr_sigma=0.005)
-    assert 1e-3 <= p.sigma_ctrl < 0.05
+        x = p.sample_exploration()
+        p.update_sigma(sample=x, mu_at_sample=p.mean, sigma_at_sample=p.sigma,
+                       advantage=0.5, lr_sigma=0.005)
+    assert 1e-4 <= p.sigma < 0.05
 
 
 # --- Critical 3: per-parameter independent RNG streams ---
 
 def test_params_have_independent_rng():
-    a = PersonaParam(mean=0.0, sigma_ctrl=1.0)
-    b = PersonaParam(mean=0.0, sigma_ctrl=1.0)
+    a = PersonaParam(mean=0.0, sigma=1.0)
+    b = PersonaParam(mean=0.0, sigma=1.0)
     da = np.array([a.sample_exploration() for _ in range(50)])
     db = np.array([b.sample_exploration() for _ in range(50)])
     assert not np.allclose(da, db)
@@ -277,7 +279,7 @@ def test_h5_round_trip_has_stdp_afferent_and_fisher(nest_kernel, tmp_path):
     assert "final_weights" in data["stdp"]
     assert "fisher" in data["agent"]
     assert data["agent"]["means"]
-    assert data["agent"]["sigmas_param"]
+    assert data["agent"]["sigmas"]
     assert float(meta["duration_s"]) == 0.12
 
 

@@ -13,9 +13,9 @@ def make_agent(nest_kernel):
         reset_rng_stream(0)
         reg = Registry()
         reg.create_population(Population("izhikevich", 5,
-                              {"a": PersonaParam(mean=1.0, sigma_ctrl=0.3, min=0.0, max=3.0)},
+                              {"a": PersonaParam(mean=1.0, sigma=0.3, min=0.0, max=3.0)},
                               "pop"))
-        return Agent(registry=reg, lr_mu=0.2, lr_sigma_ctrl=0.0, lr_sigma_param=0.0,
+        return Agent(registry=reg, lr_mu=0.2, lr_sigma_ctrl=0.0,
                      window_size=40), reg
     return _make
 

@@ -23,8 +23,8 @@ class BrainStem:
         self.prefix = prefix
 
         # Optimizable parameters for BS drive rates
-        self.p_rate_e = PersonaParam(mean=bs_e_hz, sigma_param=2.0, sigma_ctrl=5.0, min=0.0, max=250.0)
-        self.p_rate_f = PersonaParam(mean=bs_f_hz, sigma_param=2.0, sigma_ctrl=5.0, min=0.0, max=250.0)
+        self.p_rate_e = PersonaParam(mean=bs_e_hz, sigma=5.0, min=0.0, max=250.0)
+        self.p_rate_f = PersonaParam(mean=bs_f_hz, sigma=5.0, min=0.0, max=250.0)
 
         # BS to E generator and parrot relay
         self.bs_pg_e = nest.Create("poisson_generator", n_bs, params={"rate": float(bs_e_hz)})
@@ -65,7 +65,7 @@ class BaseDrive:
         self.n_bs = n_bs
         self.prefix = prefix
 
-        self.p_rate = PersonaParam(mean=base_hz, sigma_param=2.0, sigma_ctrl=5.0,
+        self.p_rate = PersonaParam(mean=base_hz, sigma=5.0,
                                    min=0.0, max=250.0)
 
         self.base_pg = nest.Create("poisson_generator", n_bs,

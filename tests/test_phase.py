@@ -12,7 +12,7 @@ from persona.strategy import PhaseBaselines, FisherMatrix
 def make_agent(nest_kernel):
     def _make(n: int = 5):
         reg = Registry()
-        p = PersonaParam(mean=1.0, sigma_param=0.01, sigma_ctrl=0.1, min=0.0, max=2.0)
+        p = PersonaParam(mean=1.0, sigma=0.1, min=0.0, max=2.0)
         reg.create_population(
             Population(model="izhikevich", n=n, params={"a": p}, name="pop")
         )

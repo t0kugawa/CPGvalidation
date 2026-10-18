@@ -17,7 +17,7 @@ class Population:
         """
         Samples neuron parameters for all n neurons in the population.
         If explored_means is provided, uses those as the centers; otherwise uses param.mean.
-        The biological dispersion across neurons is governed by param.sigma_param.
+        The biological dispersion across neurons is governed by the single param.sigma.
         """
         keys = list(self.params.keys())
         n = self.n
@@ -29,7 +29,7 @@ class Population:
             for k in keys
         ], dtype=np.float64)
 
-        sigmas = np.array([self.params[k].sigma_param for k in keys], dtype=np.float64)
+        sigmas = np.array([self.params[k].sigma for k in keys], dtype=np.float64)
 
         if self.corr is None:
             sampled_dict = {}

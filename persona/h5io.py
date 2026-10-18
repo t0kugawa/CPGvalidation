@@ -49,7 +49,7 @@ def save_run(path, log, agent, meta=None):
 
         hist = getattr(agent, "history", {}) or {}
         ag = f.create_group("agent")
-        for grp in ("means", "sigmas_ctrl", "sigmas_param"):
+        for grp in ("means", "sigmas"):
             gg = ag.create_group(grp)
             for k, v in hist.get(grp, {}).items():
                 gg.create_dataset(k, data=np.asarray(v, dtype=float))
@@ -77,8 +77,7 @@ def save_run(path, log, agent, meta=None):
 
 def load_run(path):
     """Return (data, meta); data['log'] holds arrays, data['agent'] the histories."""
-    out = {"log": {}, "stdp": {}, "agent": {"means": {}, "sigmas_ctrl": {},
-                                            "sigmas_param": {}}}
+    out = {"log": {}, "stdp": {}, "agent": {"means": {}, "sigmas": {}}}
     with h5py.File(path, "r") as f:
         meta = {k: f.attrs[k] for k in f.attrs}
         for top in ("log", "stdp"):
@@ -95,7 +94,7 @@ def load_run(path):
                     arr = np.array([x.decode() if isinstance(x, bytes) else x for x in arr])
                 out[top][k] = arr
         if "agent" in f:
-            for grp in ("means", "sigmas_ctrl", "sigmas_param"):
+            for grp in ("means", "sigmas"):
                 if grp in f["agent"]:
                     for k, v in f["agent"][grp].items():
                         out["agent"][grp][k] = v[()]

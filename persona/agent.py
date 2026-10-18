@@ -9,15 +9,14 @@ from persona.parameter import PersonaParam
 class Agent:
     """
     PERSONA Agent implementing online PPO with Natural Gradient (Fisher Information Matrix),
-    separated Stance/Swing phase baselines, noise integration, and dual standard deviation
-    (controlling variance for exploration/exploitation and parametric variance for biological heterogeneity).
+    separated Stance/Swing phase baselines, noise integration, and a single
+    per-site sigma that serves exploration/exploitation and biological dispersion.
     """
     def __init__(self,
                  registry: Registry,
                  strategy: FisherMatrix | None = None,
                  lr_mu: float = 0.02,
                  lr_sigma_ctrl: float = 0.005,
-                 lr_sigma_param: float = 0.001,
                  window_size: int = 50,
                  smooth_kernel_size: int = 5):
         self.registry = registry
@@ -35,7 +34,6 @@ class Agent:
             )
 
         self.lr_sigma_ctrl = lr_sigma_ctrl
-        self.lr_sigma_param = lr_sigma_param
         self.smooth_kernel_size = smooth_kernel_size
 
         # Output smoothing filter (convolution matrix / moving average)
@@ -60,8 +58,7 @@ class Agent:
             "phase": [],
             "influence": [],
             "means": {k: [] for k in param_names},
-            "sigmas_ctrl": {k: [] for k in param_names},
-            "sigmas_param": {k: [] for k in param_names},
+            "sigmas": {k: [] for k in param_names},
         }
 
     def sample_actions(self) -> Dict[str, float]:
@@ -168,7 +165,7 @@ class Agent:
 
         # Compute natural gradient update
         mean_dict = {k: p.mean for k, p in self.params.items()}
-        sigma_ctrl_dict = {k: p.sigma_ctrl for k, p in self.params.items()}
+        sigma_ctrl_dict = {k: p.sigma for k, p in self.params.items()}
 
         delta_means = self.strategy.compute_natural_gradient_step(
             action_dict=self.current_actions,
@@ -180,20 +177,23 @@ class Agent:
         # Update parameter means and variances (homeostasis enforced inside PersonaParam)
         adv_scalar = float(np.mean(advantage_vec))
         for name, param in self.params.items():
+            # Snapshot the sampling-time (mu, sigma) BEFORE the mean moves so the
+            # sigma update scores the exact sample that was applied.
+            mu_before = param.mean
+            sig_before = param.sigma
+
             if name in delta_means:
                 param.update_mean(delta_means[name])
 
-            # Controlling variance update
-            action_val = self.current_actions.get(name, param.mean)
-            param.update_controlling_variance(
-                action=action_val,
+            # Single-sigma update (exploration and dispersion share one sigma)
+            action_val = self.current_actions.get(name, mu_before)
+            param.update_sigma(
+                sample=action_val,
+                mu_at_sample=mu_before,
+                sigma_at_sample=sig_before,
                 advantage=adv_scalar,
                 lr_sigma=self.lr_sigma_ctrl
             )
-
-            # TODO(sigma_param): sigma_param (biological dispersion) is held fixed
-            # for the MVP; registry applies the scalar explored value (`inert`).
-            # Promote log(sigma_param) to a feature in theta in a later revision.
 
         influence = self.strategy.influence()
 
@@ -206,8 +206,7 @@ class Agent:
         self.history["influence"].append(influence.copy())
         for k, p in self.params.items():
             self.history["means"][k].append(p.mean)
-            self.history["sigmas_ctrl"][k].append(p.sigma_ctrl)
-            self.history["sigmas_param"][k].append(p.sigma_param)
+            self.history["sigmas"][k].append(p.sigma)
 
         return {
             "step": self.current_step,

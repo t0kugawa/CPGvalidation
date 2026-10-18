@@ -12,7 +12,7 @@ from persona.strategy import PhaseBaselines, FisherMatrix
 def make_agent(nest_kernel):
     def _make(n: int = 5):
         reg = Registry()
-        p = PersonaParam(mean=1.0, sigma_param=0.01, sigma_ctrl=0.1, min=0.0, max=2.0)
+        p = PersonaParam(mean=1.0, sigma=0.1, min=0.0, max=2.0)
         reg.create_population(
             Population(model="izhikevich", n=n, params={"a": p}, name="pop")
         )
@@ -48,5 +48,4 @@ def test_cold_start_no_nan(make_agent):
                    target=np.array([1.0, 1.0]), phase="stance")
     for _, p in agent.params.items():
         assert np.isfinite(p.mean)
-        assert np.isfinite(p.sigma_ctrl) and p.sigma_ctrl > 0.0
-        assert np.isfinite(p.sigma_param) and p.sigma_param > 0.0
+        assert np.isfinite(p.sigma) and p.sigma > 0.0
