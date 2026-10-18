@@ -85,18 +85,24 @@ STDP_BS = {
 }
 
 
+def stdp_param_spec(syn_type: str) -> dict:
+    """
+    The optimizable STDP hyper-parameters (means) for a synapse family. PERSONA
+    optimizes these, never the synaptic `weight` (which STDP itself owns).
+    """
+    match syn_type:
+        case "ia":
+            return dict(STDP_IA)
+        case "bs":
+            return dict(STDP_BS)
+        case _:
+            return dict(STDP_DEFAULT)
+
+
 def create_stdp_synapse(syn_type: str, postfix: str):
     name = f"stdp_{syn_type}_{postfix}"
     wr = create_weight_recorder()
-    match syn_type:
-        case "default":
-            copy_syn_model(name, STDP_DEFAULT, wr)
-        case "ia":
-            copy_syn_model(name, STDP_IA, wr)
-        case "bs":
-            copy_syn_model(name, STDP_BS, wr)
-        case _:
-            copy_syn_model(name, STDP_DEFAULT, wr)
+    copy_syn_model(name, stdp_param_spec(syn_type), wr)
     return name, wr
 
 

@@ -9,6 +9,7 @@ from persona.noise_recorder import NoiseRecorder
 from persona.registry import Registry
 from t2xcpg.utils import (
     get_jitter_delay, create_spike_recorder, create_stdp_synapse, STDP_POSTFIX,
+    stdp_param_spec,
 )
 
 
@@ -70,6 +71,35 @@ class Leg:
             min=min_val,
             max=max_val
         )
+
+    _STDP_RANGES = {
+        "tau_plus": (1.0, 200.0),
+        "lambda": (1e-5, 0.1),
+        "alpha": (0.0, 1.0),
+        "mu_plus": (0.0, 1.0),
+        "mu_minus": (0.0, 1.0),
+        "Wmax": (1.0, 2000.0),
+    }
+
+    def _stdp_params(self, syn_type: str, weight: float) -> dict:
+        """
+        Optimizable STDP hyper-parameters for one plastic projection. The
+        synaptic weight is owned by STDP and is only seeded (never optimized);
+        Wmax is kept above the seed weight so the initial synapse is valid.
+        """
+        out = {}
+        for name, mean in stdp_param_spec(syn_type).items():
+            mean = float(mean)
+            lo, hi = self._STDP_RANGES.get(name, (-1e6, 1e6))
+            if name == "Wmax":
+                mean = max(mean, abs(weight) * 1.01)
+                lo = max(lo, abs(weight))
+            out[name] = self._param(
+                name, mean,
+                sigma_param=max(abs(mean) * 0.05, 1e-6),
+                sigma_ctrl=max(abs(mean) * 0.1, 1e-6),
+                min_val=lo, max_val=hi)
+        return out
 
     def _izhi(self, a, b, c, d):
         return {
@@ -180,24 +210,31 @@ class Leg:
         d = get_jitter_delay() if delay is None else delay
         p = p * self.p_scale
         weight = weight * self.w_scale
-        w_param = self._param("weight", weight, sigma_param=abs(weight) * 0.05,
-                              sigma_ctrl=abs(weight) * 0.1,
-                              min_val=-150.0 if weight < 0 else 0.0,
-                              max_val=0.0 if weight < 0 else 150.0)
 
-        extra = {"delay": float(d)}
         model = "static_synapse"
         wr = None
         if is_stdp:
             syn_base = key.rsplit("_", 1)[0] if key else "default"
             syn_type = STDP_POSTFIX.get(syn_base, "default")
             model, wr = create_stdp_synapse(syn_type, f"{src}_{tgt}")
+            # STDP owns the synaptic weight; PERSONA optimizes only the STDP
+            # hyper-parameters (tau_plus/lambda/alpha/mu/Wmax). The seed weight
+            # is written once via the syn_spec and never overwritten afterwards.
+            parameters = self._stdp_params(syn_type, weight)
+            extra = {"delay": float(d), "weight": float(weight)}
+        else:
+            parameters = {"weight": self._param(
+                "weight", weight, sigma_param=abs(weight) * 0.05,
+                sigma_ctrl=abs(weight) * 0.1,
+                min_val=-150.0 if weight < 0 else 0.0,
+                max_val=0.0 if weight < 0 else 150.0)}
+            extra = {"delay": float(d)}
 
         cfg = Connection(
             source=src,
             target=tgt,
             model=model,
-            parameters={"weight": w_param},
+            parameters=parameters,
             rule="pairwise_bernoulli",
             p=float(p),
             noise_recorder_id=self.noise_recorder.name,

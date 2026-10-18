@@ -46,8 +46,12 @@ def test_plastic_seed_within_bounds(nest_kernel):
     leg = CPG_Leg("L", reg, n_rg=8, n_mn=8, n_int=6, n_aff=6)
     assert leg.plastic_projections, "expected at least one plastic projection"
     for k in leg.plastic_projections:
-        p = reg.connection_cfgs[k].parameters["weight"]
-        assert p.min <= p.mean <= p.max, f"{k} seed {p.mean} outside [{p.min},{p.max}]"
+        cfg = reg.connection_cfgs[k]
+        # STDP owns the weight; PERSONA optimizes only the hyper-parameters.
+        assert "weight" not in cfg.parameters, f"{k} must not expose weight"
+        assert "Wmax" in cfg.parameters, f"{k} must expose Wmax"
+        seed = float(cfg.extra_syn_spec["weight"])
+        assert 0.0 <= seed <= cfg.parameters["Wmax"].mean, f"{k} seed {seed} > Wmax"
 
 
 # --- Important: treadmill surface velocity settable ---

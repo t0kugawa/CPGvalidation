@@ -68,7 +68,11 @@ class Registry:
             conn_spec = {"rule": cfg.rule}
 
         syn_spec = cfg.sample_syn_spec(explored_params=explored_params)
-        syn_col = nest.Connect(src_nodes, tgt_nodes, conn_spec=conn_spec, syn_spec=syn_spec)
+        nest.Connect(src_nodes, tgt_nodes, conn_spec=conn_spec, syn_spec=syn_spec)
+        # nest.Connect returns None in NEST 3, so fetch the SynapseCollection
+        # explicitly; without it no synaptic parameter could ever be applied.
+        syn_col = nest.GetConnections(source=src_nodes, target=tgt_nodes,
+                                      synapse_model=cfg.model)
 
         cfg.synapse_collection = syn_col
         conn_key = cfg.key if cfg.key is not None else f"{cfg.source}_{cfg.target}"

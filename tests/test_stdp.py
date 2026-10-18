@@ -14,6 +14,15 @@ def test_plastic_projections_exist(nest_kernel):
         assert reg.connection_cfgs[k].model.startswith("stdp")
 
 
+def test_plastic_params_are_hyperparams_not_weight(nest_kernel):
+    reg = Registry()
+    leg = Leg("L", reg, n_rg=8, n_mn=8, n_int=6, n_aff=6)
+    params = reg.get_all_optimizable_params()
+    k = leg.plastic_projections[0]
+    assert f"conn_{k}_weight" not in params, "STDP weight must not be optimized"
+    assert f"conn_{k}_Wmax" in params, "STDP hyper-parameters must be optimized"
+
+
 def test_weight_delta_sampled(nest_kernel):
     reg = Registry()
     Leg("L", reg, n_rg=8, n_mn=8, n_int=6, n_aff=6)
