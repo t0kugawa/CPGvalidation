@@ -60,7 +60,7 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
                        loss_stop: float = 0.05,
                        loss_window: int = 30,
                        seed: int = 0,
-                       w_scale: float = 0.5,
+                       w_scale: float = 1.0,
                        ref_hz: float = 100.0) -> tuple[Personalizer, MocapLoader]:
     """
     Builds the full closed loop: bilateral CPG (via the PERSONA registry),
@@ -206,7 +206,7 @@ def run_personalization(reference_path: str = DEFAULT_REFERENCE,
 
     return {
         "acceptable": acceptance["acceptable"],
-        "global_in_distribution": acceptance["global_in_distribution"],
+        "duty_factor_in_distribution": acceptance["duty_factor_in_distribution"],
         "angle_coverage": acceptance["angle_coverage"],
         "final_loss": float(np.mean(log.loss[-20:])) if len(log.loss) else float("nan"),
         "n_steps_done": int(len(log.time_ms)),

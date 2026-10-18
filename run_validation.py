@@ -210,7 +210,7 @@ if __name__ == "__main__":
     ap.add_argument("--width", type=int, default=1920)
     ap.add_argument("--height", type=int, default=1080)
     ap.add_argument("--out", type=str, default=os.path.join(BASE_DIR, "validation_run"))
-    ap.add_argument("--w-scale", type=float, default=0.5)
+    ap.add_argument("--w-scale", type=float, default=1.0)
     ap.add_argument("--ref-hz", type=float, default=100.0)
     ap.add_argument("--belt-mps", type=float, default=0.2)
     ap.add_argument("--belt-start-s", type=float, default=0.5)

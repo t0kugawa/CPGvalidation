@@ -56,10 +56,7 @@ class Registry:
         src_nodes = self.get(cfg.source)
         tgt_nodes = self.get(cfg.target)
 
-        effective_p = cfg.get_effective_p(
-            explored_p=explored_params.get(f"conn_{cfg.source}_{cfg.target}_p") if explored_params else None
-        )
-        effective_p = float(np.clip(effective_p, 0.001, 1.0))
+        effective_p = float(np.clip(cfg.get_effective_p(), 0.001, 1.0))
 
         if cfg.rule == "pairwise_bernoulli":
             conn_spec = {"rule": "pairwise_bernoulli", "p": effective_p}
@@ -125,10 +122,9 @@ class Registry:
                 key = f"pop_{pop_name}_{p_name}"
                 all_params[key] = param_obj
 
-        # Connection parameters
+        # Connection parameters (connection probability `p` is excluded: NEST
+        # cannot re-apply it post-hoc without rebuilding synapses).
         for conn_key, conn in self.connection_cfgs.items():
-            if isinstance(conn.p, PersonaParam):
-                all_params[f"conn_{conn_key}_p"] = conn.p
             for p_name, param_obj in conn.parameters.items():
                 key = f"conn_{conn_key}_{p_name}"
                 all_params[key] = param_obj

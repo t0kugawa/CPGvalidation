@@ -185,8 +185,6 @@ class Leg:
                               min_val=-150.0 if weight < 0 else 0.0,
                               max_val=0.0 if weight < 0 else 150.0)
 
-        p_param = self._param("p", p, sigma_param=0.02, sigma_ctrl=0.05, min_val=0.01, max_val=1.0)
-
         extra = {"delay": float(d)}
         model = "static_synapse"
         wr = None
@@ -201,7 +199,7 @@ class Leg:
             model=model,
             parameters={"weight": w_param},
             rule="pairwise_bernoulli",
-            p=p_param,
+            p=float(p),
             noise_recorder_id=self.noise_recorder.name,
             extra_syn_spec=extra,
             key=key,
@@ -245,9 +243,9 @@ class Leg:
         self._connect(f"ia_f_in_{leg}", f"m_f_{leg}", weight=12.0, p=0.40)  # Ia(bottom) -> M-F (exc)
         # MOD_IA_RG_STDP: homonymous Ia->RG is plastic (spec D12) — Ia-E potentiates
         # onto RG-E, Ia-F onto RG-F; muscle afferents become a learning drive.
-        self._connect(f"ia_e_in_{leg}", f"rg_e_{leg}", weight=10.0, p=0.50,
+        self._connect(f"ia_e_in_{leg}", f"rg_e_{leg}", weight=12.0, p=0.40,
                       is_stdp=True, key=f"ia_rge_{leg}")
-        self._connect(f"ia_f_in_{leg}", f"rg_f_{leg}", weight=10.0, p=0.50,
+        self._connect(f"ia_f_in_{leg}", f"rg_f_{leg}", weight=12.0, p=0.40,
                       is_stdp=True, key=f"ia_rgf_{leg}")
         self._connect(f"ia_e_in_{leg}", f"ia_e_{leg}", weight=6.0, p=0.40)   # W_IA_IN2INT
         self._connect(f"ia_f_in_{leg}", f"ia_f_{leg}", weight=6.0, p=0.40)

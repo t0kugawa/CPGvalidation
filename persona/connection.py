@@ -15,18 +15,14 @@ class Connection:
     model: str = "static_synapse"
     parameters: Dict[str, PersonaParam] = field(default_factory=dict)
     rule: str = "pairwise_bernoulli"
-    p: float | PersonaParam = 0.5
+    p: float = 0.5
     noise_recorder_id: str | None = None
     extra_syn_spec: Dict[str, Any] = field(default_factory=dict)
     synapse_collection: Any = None
     key: str | None = None
     weight_recorder: Any = None
 
-    def get_effective_p(self, explored_p: float | None = None) -> float:
-        if explored_p is not None:
-            return float(explored_p)
-        if isinstance(self.p, PersonaParam):
-            return float(self.p.mean)
+    def get_effective_p(self) -> float:
         return float(self.p)
 
     def sample_syn_spec(self, explored_params: Dict[str, float] | None = None) -> Dict[str, Any]:

@@ -66,14 +66,15 @@ class LocomotionMetrics:
                 return float(np.ptp(x) * 1000.0)  # m -> mm
             return _excursion(side_ankle)
 
+        # TODO(stride_length): stride length needs real horizontal foot positions
+        # (a full stride = one complete locomotor cycle), not an ankle-angle
+        # excursion; re-introduce it once foot trajectories are supplied.
         return {
             "duty_factor_L": _duty_factor(contact_L),
             "duty_factor_R": _duty_factor(contact_R),
             "double_support": _double_support(contact_L, contact_R),
             "step_length_L": _length(ankle_L, foot_pos_L),
             "step_length_R": _length(ankle_R, foot_pos_R),
-            "stride_length_L": _length(ankle_L, foot_pos_L),
-            "stride_length_R": _length(ankle_R, foot_pos_R),
         }
 
 

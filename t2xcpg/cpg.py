@@ -51,15 +51,13 @@ class L2CPG(CPGAdapter):
                               sigma_ctrl=abs(weight) * 0.1,
                               min_val=-100.0 if weight < 0 else 0.0,
                               max_val=0.0 if weight < 0 else 100.0)
-        p_param = self._param("p", p, sigma_param=0.02, sigma_ctrl=0.05, min_val=0.01, max_val=1.0)
-
         cfg = Connection(
             source=src,
             target=tgt,
             model="static_synapse",
             parameters={"weight": w_param},
             rule="pairwise_bernoulli",
-            p=p_param,
+            p=float(p),
             extra_syn_spec={"delay": float(delay)}
         )
         return self.registry.create_connection(cfg)

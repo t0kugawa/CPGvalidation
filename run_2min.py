@@ -32,7 +32,7 @@ def main():
     run_validation.run(
         duration_s=args.duration_s, view=args.view,
         width=1920, height=1080, fps=40, out_dir=args.out,
-        w_scale=0.5, ref_hz=100.0, belt_mps=0.2, belt_start_s=0.5,
+        w_scale=1.0, ref_hz=100.0, belt_mps=0.2, belt_start_s=0.5,
         belt_ramp_s=0.5, n_rg=10, n_mn=8, n_int=8, n_aff=6, n_bs=8,
         render=not args.no_render)
 

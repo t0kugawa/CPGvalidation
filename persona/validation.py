@@ -333,7 +333,7 @@ def biological_acceptance(metrics: Dict[str, float],
         global_ok = all(checks) if checks else True
 
     return {
-        "global_in_distribution": bool(global_ok),
+        "duty_factor_in_distribution": bool(global_ok),
         "angle_coverage": angle_coverage,
         "acceptable": bool(global_ok and angle_coverage >= coverage),
     }
