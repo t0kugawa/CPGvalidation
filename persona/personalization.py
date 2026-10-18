@@ -182,7 +182,11 @@ class Personalizer:
             f"| CUT {log.cut_L[i]:.0f} Ia {log.ia_rate_E_L[i]:.0f} Ib {log.ib_rate_E_L[i]:.0f}",
             flush=True)
 
-    def run(self) -> RunLog:
+    def run(self, step_hook=None) -> RunLog:
+        """
+        Runs the two-stage loop. `step_hook(step, log, cpg_in, cpg_out, stage)`
+        is invoked after every step (e.g. to render a frame).
+        """
         log = RunLog()
         cpg_in = CPGInput()
         stage = "pose"
@@ -251,6 +255,9 @@ class Personalizer:
             log.foot_z_m_R.append(cpg_in.foot_z_m_R)
             log.foot_z_ref_L.append(cpg_in.foot_z_ref_L)
             log.foot_z_ref_R.append(cpg_in.foot_z_ref_R)
+
+            if step_hook is not None:
+                step_hook(step, log, cpg_in, cpg_out, stage)
 
             if self.log_every > 0 and (len(log.stage) % self.log_every == 0
                                        or len(log.stage) == 1):
