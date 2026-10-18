@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PERSONA personalization — process review (2026-10-19)</title>
+<style>
+  :root{
+    --ink:#1c2733; --muted:#5b6b7c; --line:#d8e0e8; --bg:#f5f7fa; --card:#ffffff;
+    --persona:#2b5f8f; --persona-bg:#e8f1f9;
+    --nest:#1f7a4d; --nest-bg:#e9f5ee;
+    --plant:#6d3fa8; --plant-bg:#f2ecfa;
+    --eval:#0f7285; --eval-bg:#e6f4f6;
+    --strat:#8a5a00; --strat-bg:#fdf3e0;
+    --open:#9a6b00; --open-bg:#fff2cf;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.55 "Segoe UI",system-ui,-apple-system,sans-serif}
+  .wrap{max-width:1120px;margin:0 auto;padding:30px 24px 70px}
+  h1{font-size:23px;margin:0 0 2px}
+  h2{font-size:16px;margin:40px 0 12px;padding-bottom:6px;border-bottom:2px solid var(--line)}
+  h3{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
+  p{margin:8px 0}
+  .sub{color:var(--muted);margin:4px 0 0;font-size:13.5px}
+  .chips{margin:14px 0 0}
+  .chip{display:inline-block;font-size:11px;font-weight:600;letter-spacing:.03em;padding:3px 9px;border-radius:20px;margin-right:6px}
+  .chip.now{background:#e8ecf0;color:#4d5c6b}
+  .chip.agreed{background:#e6f4ec;color:#1f7a4d}
+  .chip.open{background:var(--open-bg);color:var(--open)}
+
+  .loop{display:grid;grid-template-columns:1fr 330px;gap:20px;align-items:start}
+  .step{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--line);border-radius:10px;padding:10px 14px;box-shadow:0 1px 2px rgba(20,40,60,.05);margin:0}
+  .step.p{border-left-color:var(--persona)} .step.n{border-left-color:var(--nest)}
+  .step.m{border-left-color:var(--plant)} .step.e{border-left-color:var(--eval)}
+  .step.s{border-left-color:var(--strat)}
+  .step b{font-weight:600}
+  .step .owner{font-size:10.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:2px}
+  .step .math{margin:7px 0 2px}
+  .down{display:flex;justify-content:center;color:#9aa8b6;font-size:18px;line-height:1;margin:6px 0}
+  .recs{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;position:sticky;top:20px}
+  .rec{border:1px dashed #e0a800;background:#fffaf0;border-radius:8px;padding:8px 10px;margin:8px 0;font-size:12.8px}
+  .rec b{color:#8a5a00}
+  .rec .math{background:#fff6e2;border-color:#eed9a8}
+
+  .math{font-family:"Cambria Math",Cambria,Georgia,"Times New Roman",serif;background:#f2f5f8;border:1px solid var(--line);border-radius:8px;padding:7px 11px;margin:8px 0;font-size:14px;overflow-x:auto}
+  sub,sup{font-size:.72em}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .card.t1{border-top:4px solid var(--strat)} .card.t2{border-top:4px solid var(--persona)}
+  .card.upd{border-top:4px solid var(--eval);margin-top:16px}
+
+  table{border-collapse:collapse;width:100%;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden;font-size:13.3px}
+  th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  th{background:#eef2f6;font-size:11.5px;letter-spacing:.03em;text-transform:uppercase;color:var(--muted)}
+  tr:last-child td{border-bottom:none}
+  .note{border-left:4px solid #e0a800;background:#fff8e8;border-radius:8px;padding:10px 14px;margin:12px 0;font-size:13.5px}
+  .foot{color:var(--muted);font-size:12.5px;margin-top:44px;border-top:1px solid var(--line);padding-top:12px}
+  ul{margin:6px 0 6px 18px;padding:0} li{margin:3px 0}
+  code{font-family:Consolas,Menlo,monospace;font-size:12.5px;background:#eef2f6;padding:1px 5px;border-radius:4px}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;margin:10px 0 0;font-size:12px;color:var(--muted)}
+  .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>PERSONA personalization — step-by-step process review</h1>
+  <p class="sub">Draft for discussion · 2026-10-19 · closed loop: NEST CPG ↔ MuJoCo rat hindlimb ↔ PERSONA strategy</p>
+  <div class="chips">
+    <span class="chip now">as in code today</span>
+    <span class="chip agreed">agreed in discussion</span>
+    <span class="chip open">open — needs your ruling</span>
+  </div>
+
+  <div class="legend">
+    <span><span class="dot" style="background:#2b5f8f"></span>PERSONA</span>
+    <span><span class="dot" style="background:#1f7a4d"></span>NEST / CPG</span>
+    <span><span class="dot" style="background:#6d3fa8"></span>MuJoCo plant</span>
+    <span><span class="dot" style="background:#0f7285"></span>loss / advantage / update</span>
+    <span><span class="dot" style="background:#8a5a00"></span>strategy state</span>
+    <span><span class="dot" style="background:#e0a800"></span>noise recorders (read-only)</span>
+  </div>
+
+  <!-- ======================= §1 LOOP ======================= -->
+  <h2>1 · The loop — one dt (dt = 10 ms)</h2>
+
+  <div class="note">
+    Run-level: two stages share this exact loop — <b>pose</b> (target held at its first frame until both ankle errors settle)
+    and <b>track</b> (mocap trajectory played). Everything below is per dt, every dt — parameter and σ updates included.
+  </div>
+
+  <div class="loop">
+    <div>
+      <div class="step p">
+        <span class="owner">PERSONA · site</span>
+        <b>1 · Sample the site distributions</b>
+        <div class="math">ε<sub>s</sub>(t) ~ N(0,1) &nbsp;→&nbsp; x̂<sub>s</sub>(t) = clip( μ<sub>s</sub>(t) + σ<sub>s</sub>(t)·ε<sub>s</sub>(t) ) &nbsp;→&nbsp; Δθ<sub>s</sub>(t) = x̂<sub>s</sub>(t) − μ<sub>s</sub>(t) = σ<sub>s</sub>(t)·ε<sub>s</sub>(t)</div>
+        Each site writes <b>(x̂<sub>s</sub>(t), σ<sub>s</sub>(t))</b> into its own noise recorder; the sampled distribution is then
+        realized in NEST (per-neuron / per-synapse draws, see §2).
+      </div>
+      <div class="down">↓</div>
+
+      <div class="step n">
+        <span class="owner">NEST · CPG</span>
+        <b>2 · Sensory routing</b>
+        Poisson generator rates for CUT / Ia-E / Ia-F / Ib-E / Ib-F (per leg, from the previous physics state) —
+        every rate from MuJoCo, no timers. Rate deltas are written to the Poisson recorders.
+      </div>
+      <div class="down">↓</div>
+
+      <div class="step n">
+        <span class="owner">NEST · CPG</span>
+        <b>3 · Simulate dt</b>
+        <div class="math">spikes → muscle drive &nbsp; d(t) = clip( n<sub>spikes</sub> / (N·ν<sub>ref</sub>·dt) , 0, 1 )</div>
+        STDP projections update their weights (plasticity owns them); the per-projection weight deltas are drained into the STDP recorders.
+      </div>
+      <div class="down">↓</div>
+
+      <div class="step m">
+        <span class="owner">MuJoCo · plant</span>
+        <b>4 · Physics dt</b>
+        SOL/TA drives → hindlimb dynamics → outputs <b>y(t) = [ankle<sub>L</sub>, ankle<sub>R</sub>]</b> and the new sensory state
+        (CUT contact, Ia length+velocity, Ib force) which returns to step 2 next dt — a 1-dt sensory latency, and any parameter
+        change needs several dt to surface in y. <i>This is why credit must reach back.</i>
+      </div>
+      <div class="down">↓</div>
+
+      <div class="step e">
+        <span class="owner">loss</span>
+        <b>5 · Smooth &amp; error</b>
+        <div class="math">ȳ(t), ȳ*(t) — matched moving average (same filter on model and target) &nbsp;→&nbsp; E(t) = | ȳ*(t) − ȳ(t) | ∈ ℝ²</div>
+        Components: ankle L / ankle R. <code>loss = mean(E)</code> for logging.
+      </div>
+      <div class="down">↓</div>
+
+      <div class="step e">
+        <span class="owner">advantage</span>
+        <b>6 · Advantage — the only place the phase lives</b>
+        <div class="math">per component c and its phase K<sub>c</sub> ∈ {stance, swing}:<br>
+        b<sub>c,K</sub> ← α·b<sub>c,K</sub> + (1−α)·E<sub>c</sub>(t) &nbsp;&nbsp;(baseline first, then)<br>
+        A<sub>c</sub>(t) = b<sub>c,K</sub>(before update) − E<sub>c</sub>(t)</div>
+        Single persisted strategy — <b>no separate stance/swing strategy state</b>; only the baseline differs per phase.
+      </div>
+      <div class="down">↓</div>
+
+      <div class="step s">
+        <span class="owner">strategy</span>
+        <b>7 · Strategy — two kinds of information, persisted and β-merged</b>
+        <div class="math">X̄<sub>t</sub> = β·X̄<sub>t−1</sub> + (1−β)·Δθ<sub>t</sub> &nbsp;&nbsp;&nbsp;&nbsp; F<sub>t</sub> = β·F<sub>t−1</sub> + (1−β)·s<sub>t</sub>s<sub>t</sub><sup>T</sup> &nbsp;&nbsp;&nbsp;&nbsp; G<sub>t</sub> = β·G<sub>t−1</sub> + (1−β)·X̄<sub>t</sub>·A<sub>t</sub><sup>T</sup></div>
+        Type&nbsp;1 (<b>F</b>): where to search — metric from the sampled distributions (σ-channels and noise channels included).
+        Type&nbsp;2 (<b>X̄, G</b>): how previous samples impact the current state — a sample from k steps ago still sits in the
+        trace X̄ when its effect finally surfaces in A<sub>t</sub>, so credit lands in the right place. Nothing is pruned at phase
+        flips; β alone ages everything (see §3).
+      </div>
+      <div class="down">↓</div>
+
+      <div class="step e">
+        <span class="owner">update</span>
+        <b>8 · Apply, every dt</b>
+        <div class="math">g<sub>t</sub> = G<sub>t</sub>·1<sub>2</sub> &nbsp;&nbsp; Δμ<sub>t</sub> = η<sub>μ</sub>·(F<sub>t</sub>+λI)<sup>−1</sup>·g<sub>t</sub> &nbsp;&nbsp; Δlogσ<sub>i</sub> = η<sub>σ</sub>·clip( (z<sub>i</sub>²−1)·Ā<sub>i</sub> )</div>
+        μ ← clip(μ + Δμ); σ ← clip(σ·exp(Δlogσ)). Computed from sampling-time μ, σ (fixes today's order bug).
+        → next dt.
+      </div>
+    </div>
+
+    <!-- RIGHT COLUMN -->
+    <div>
+      <div class="recs">
+        <h3>Noise recorders — by producer (read-only)</h3>
+        <div class="rec">
+          <b>PERSONA sites</b> — stream of (x̂, σ) per site. Source of the σ-channel and the sample trace X̄.
+          Every site has its own recorder (unique key).
+        </div>
+        <div class="rec">
+          <b>STDP synapses</b> — per plastic projection (CUT→RGE, Ia→RG): mean weight delta per dt, from the NEST weight recorder.
+        </div>
+        <div class="rec">
+          <b>Poisson generators</b> — per generator: rate delta per dt (sensory CUT/Ia/Ib; BS, BASE).
+        </div>
+        <div class="note" style="margin-bottom:0">
+          Noise is never written by the agent. Each recorder keeps a <b>β-decayed distribution</b> of its channel.
+          Noise enters the metric <b>F</b>, is excluded from the trace <b>X̄</b> (it is not ours to credit), and modulates
+          how long/short the parameter step is through the covariance structure — old STDP/Poisson fluctuations keep
+          influencing the strategy, just less and less.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================= §2 SITE ======================= -->
+  <h2>2 · One parameter site — sample, record, realize</h2>
+  <div class="cols">
+    <div class="card">
+      <h3>Site model</h3>
+      <p>A site is any PERSONA-controlled knob: neuron-population parameter (Izh a,b,c,d; rate), static-synapse weight,
+      or an STDP hyper-parameter (tau_plus, lambda, alpha, mu±, Wmax).</p>
+      <div class="math">μ<sub>s</sub>, σ<sub>s</sub> ∈ [bounds]&nbsp;&nbsp;&nbsp;x̂<sub>s</sub> = clip(μ<sub>s</sub> + σ<sub>s</sub>·ε<sub>s</sub>)</div>
+      <p><b>Single σ</b>: it sets both the explore/exploit scale of the site sample and the biological dispersion of the
+      realized distribution. σ is not moved like a μ-parameter — it runs on its own math — but it is a recorded channel
+      with its own covariations against the output.</p>
+    </div>
+    <div class="card">
+      <h3>Realization — one NEST-consistent interface</h3>
+      <ul>
+        <li><b>population site</b> (n neurons): x<sub>j</sub> = x̂ + σ·ξ<sub>j</sub>, j = 1…n — applied as per-neuron arrays via <code>node.set</code></li>
+        <li><b>static synapse site</b> (m synapses): x<sub>j</sub> = x̂ + σ·ξ<sub>j</sub> — per-synapse draws via the synapse collection</li>
+        <li><b>STDP hyper-params</b>: scalar sampled value applied to the projection; the <i>weight</i> stays owned by STDP and is only recorded</li>
+      </ul>
+      <div class="note" style="margin:8px 0 0">
+        <span class="chip open">open</span> With both draws sharing the same σ, the marginal applied value has variance 2σ²
+        (common-mode exploration + differential dispersion). Confirm this is intended, or decide the scaling.
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================= §3 STRATEGY ======================= -->
+  <h2>3 · The strategy — two kinds of information</h2>
+  <div class="cols">
+    <div class="card t1">
+      <h3>Type 1 — “where to search” (metric)</h3>
+      <p>Channels per site and per noise producer:</p>
+      <div class="math">
+        μ-channel: &nbsp; s<sub>i</sub> = Δθ<sub>i</sub>/σ<sub>i</sub>² &nbsp; (z<sub>i</sub> = Δθ<sub>i</sub>/σ<sub>i</sub>)<br>
+        σ-channel: &nbsp; d<sub>i</sub> = z<sub>i</sub>² − 1<br>
+        noise k: &nbsp; s<sub>k</sub> = δ<sub>k</sub>/τ<sub>k</sub>² &nbsp; (τ<sub>k</sub> = recorded scale)
+      </div>
+      <div class="math">F<sub>t</sub> = β·F<sub>t−1</sub> + (1−β)·s<sub>t</sub>s<sub>t</sub><sup>T</sup> &nbsp;&nbsp;&nbsp; solve with (F<sub>t</sub> + λI)</div>
+      <p>Persisted across the whole run — stance, swing, everything. Noise is captured here (read-only channels).</p>
+    </div>
+    <div class="card t2">
+      <h3>Type 2 — “how previous samples impact the current state” (credit)</h3>
+      <p>Distributions know where to search; they don’t know that a sample made 3 steps ago can be what shows up now
+      (SNN delays). So the trace persists:</p>
+      <div class="math">
+        X̄<sub>t</sub> = β·X̄<sub>t−1</sub> + (1−β)·Δθ<sub>t</sub> &nbsp;&nbsp;&nbsp;&nbsp; (PERSONA changes only — no STDP/Poisson)<br>
+        G<sub>t</sub> = β·G<sub>t−1</sub> + (1−β)·X̄<sub>t</sub>·A<sub>t</sub><sup>T</sup>
+      </div>
+      <p>At step t, X̄<sub>t</sub> still carries the samples from earlier steps; pairing it with the advantage surfacing now
+      assigns the credit with a decaying weight. F and G are merged into the following — never pruned.</p>
+    </div>
+  </div>
+
+  <div class="card upd">
+    <h3>Updates — every dt</h3>
+    <div class="math">g<sub>t</sub> = G<sub>t</sub>·1<sub>2</sub> &nbsp;&nbsp;&nbsp; Δμ<sub>t</sub> = η<sub>μ</sub>·(F<sub>t</sub> + λI)<sup>−1</sup>·g<sub>t</sub></div>
+    <div class="math">σ on its own math: &nbsp; Δlogσ<sub>i</sub> = η<sub>σ</sub>·clip( d<sub>i</sub>(t)·Ā<sub>i</sub>(t) ) &nbsp;&nbsp;<span class="chip open">exact form open</span></div>
+    <p>σ “does not change with the parameter” — it is not updated through F<sup>−1</sup>g; but it is <i>inside</i> F, so its
+    current impact makes the μ-step wider or shorter (naturally, through the covariance).</p>
+  </div>
+
+  <!-- ======================= §4 RECORDERS ======================= -->
+  <h2>4 · Noise recorders by producer</h2>
+  <table>
+    <tr><th>Producer</th><th>Recorded signal</th><th>Channels</th><th>Role in strategy</th><th>Decay</th></tr>
+    <tr>
+      <td>PERSONA sites</td>
+      <td>(x̂, σ) each dt — every time the site changes</td>
+      <td>site sample stream, σ stream</td>
+      <td>σ-channel in F; sample trace X̄ (credit); step-length modulation</td>
+      <td>β</td>
+    </tr>
+    <tr>
+      <td>STDP synapses</td>
+      <td>mean weight delta per dt (NEST weight recorder)</td>
+      <td>cut→RGE, Ia→RG per leg</td>
+      <td>noise channel in F; excluded from the credit trace</td>
+      <td>β</td>
+    </tr>
+    <tr>
+      <td>Poisson generators</td>
+      <td>rate delta per dt</td>
+      <td>CUT, Ia-E/F, Ib-E/F (per leg); BS, BASE</td>
+      <td>noise channel in F; excluded from the credit trace</td>
+      <td>β</td>
+    </tr>
+  </table>
+  <p class="sub">Separated by producer because each noise behaves differently and covaries with different parameters at
+  different ratios — so each affects the step length differently.</p>
+
+  <!-- ======================= §5 STATUS ======================= -->
+  <h2>5 · Status — what is decided, what is open</h2>
+  <table>
+    <tr><th>Item</th><th>State</th><th>Notes</th></tr>
+    <tr><td>Dual σ (σ_param + σ_ctrl) → single σ</td><td><span class="chip agreed">agreed</span></td><td>σ drives both explore/exploit and dispersion; recorded per site</td></tr>
+    <tr><td>Per-site recorders (x̂, σ)</td><td><span class="chip agreed">agreed</span></td><td>unique keys — fixes today’s cross-leg tag collisions</td></tr>
+    <tr><td>Recorders by producer (site / STDP / Poisson)</td><td><span class="chip agreed">agreed</span></td><td>read-only; separate covariances</td></tr>
+    <tr><td>Single persisted strategy; phase only in the baseline</td><td><span class="chip agreed">agreed</span></td><td>F and credit merged with β; nothing pruned at phase flips</td></tr>
+    <tr><td>Parameter update every dt</td><td><span class="chip agreed">agreed</span></td><td>already true in code; kept as an explicit constraint</td></tr>
+    <tr><td>Trace/credit for late assignment (SNN delays)</td><td><span class="chip agreed">agreed</span></td><td>exact kernel open</td></tr>
+    <tr><td>External noise excluded from credit, kept via recorders</td><td><span class="chip agreed">agreed</span></td><td>affects step length through F; old noise decays by β</td></tr>
+    <tr><td>Exact credit kernel (trace ⊗ current A vs lag-0 EWMA)</td><td><span class="chip open">open</span></td><td>proposed: trace form above — confirm</td></tr>
+    <tr><td>σ update: exact expression (β? Ā vs A? caps?)</td><td><span class="chip open">open</span></td><td>keep log-variance rule from the sketch</td></tr>
+    <tr><td>σ-channels in the credit trace?</td><td><span class="chip open">open</span></td><td>σ changes are also “ours” — include as own rows, or exclude?</td></tr>
+    <tr><td>Applied marginal variance 2σ²; realization cadence</td><td><span class="chip open">open</span></td><td>per-synapse redraws every dt = known perf hot spot</td></tr>
+    <tr><td>Noise scale τ<sub>k</sub>; does noise enter G at all?</td><td><span class="chip open">open</span></td><td>proposed: τ<sub>k</sub> = recorded EWMA std; noise only in F</td></tr>
+    <tr><td>Bug fixes</td><td><span class="chip agreed">agreed</span></td><td>σ-update order; stale recorder deltas; tag collisions; registry routing; silent apply failures</td></tr>
+  </table>
+
+  <div class="foot">
+    Sources: <code>persona/{parameter,population,connection,registry,noise_recorder,strategy,agent,personalization}.py</code>,
+    <code>t2xcpg/{leg,cpg,bs,utils}.py</code>, <code>personalize.py</code> · review draft 2026-10-19.
+    Next step after your corrections: revise the design spec (2026-10-15 revision), then the plan. No code touched.
+  </div>
+
+</div>
+</body>
+</html>
