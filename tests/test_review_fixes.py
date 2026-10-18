@@ -207,6 +207,56 @@ def test_joint_ranges_cover_loader_clamp():
             assert hi >= JOINT_RANGES[j][1] - 1e-9, (s, j, hi)
 
 
+def test_target_foot_lowest_percentile():
+    leg = Leg(mujoco_cfg="dual_rat_hindlimb.xml", dt_ms=10.0)
+    n = 20
+    z = np.full(n, 0.05)
+    a = np.linspace(0.0, 1.0, n)
+    val = leg.target_foot_lowest_percentile(
+        hip_x={"L": np.zeros(n), "R": np.zeros(n)},
+        hip_z={"L": z, "R": z},
+        hip={"L": a, "R": a}, knee={"L": a, "R": a}, ankle={"L": a, "R": a},
+        percentile=5.0)
+    assert np.isfinite(val)
+    assert val < 0.05
+
+
+def test_run_log_has_full_channel_set(nest_kernel):
+    from tests.test_personalization import build_small_personalizer
+
+    pers = build_small_personalizer(nest_kernel, max_steps=12)
+    pers.stdp_every = 4
+    log = pers.run()
+    for name in ("cut_R", "ia_rate_E_R", "ia_len_F_R", "ib_force_F_L",
+                 "ib_act_E_R", "adv_L", "adv_R", "hip_ref_R", "knee_model_R"):
+        assert hasattr(log, name), name
+        assert len(getattr(log, name)) == len(log.time_ms), name
+    assert log.stdp["delta"], "plastic projections must be logged"
+    assert len(log.stdp["time_ms"]) == len(log.time_ms)
+    assert log.stdp["sample_time_ms"].size
+    for key, vals in log.stdp["weight_mean"].items():
+        assert len(vals) == log.stdp["sample_time_ms"].size
+
+
+def test_h5_round_trip_has_stdp_afferent_and_fisher(nest_kernel, tmp_path):
+    from persona.h5io import save_run, load_run
+    from tests.test_personalization import build_small_personalizer
+
+    pers = build_small_personalizer(nest_kernel, max_steps=12)
+    pers.stdp_every = 4
+    log = pers.run()
+    path = str(tmp_path / "run.h5")
+    save_run(path, log, pers.agent, meta={"duration_s": 0.12})
+    data, meta = load_run(path)
+    assert data["log"]["cut_R"].shape == (len(log.time_ms),)
+    assert set(log.stdp["delta"].keys()) <= set(data["stdp"]["delta"].keys())
+    assert "final_weights" in data["stdp"]
+    assert "fisher" in data["agent"]
+    assert data["agent"]["means"]
+    assert data["agent"]["sigmas_param"]
+    assert float(meta["duration_s"]) == 0.12
+
+
 # --- Output limb is scaled to the target's per-side segment lengths ---
 
 def test_set_limb_lengths_matches_target():

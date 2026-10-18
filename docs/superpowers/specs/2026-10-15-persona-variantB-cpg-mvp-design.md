@@ -240,3 +240,30 @@ muscle path off the bone axis so the tendons are visible when they shorten.
   can stop on a wall-clock budget (`wall_clock_s`), so contact-driven CPG activity
   cannot stall the loop and a run fits a server time limit.
 - **V15** MVP scope is **RatA**; per-side recorded lengths, no symmetrisation.
+- **V16** A run's duration is **simulated** time (`--duration-s`, default 120 s) and the
+  target trajectory **loops** (period = trial length), so runs longer than the 60 s
+  reference trial keep walking. `--budget-s` is an optional wall-clock cap, not the
+  server contract.
+- **V17** `run.h5` carries `log/` (all per-step channels: both-limb CUT, Ia
+  length/velocity/rate, Ib activation/force/rate, hip/knee/ankle model+target, muscle
+  drives, phases, contacts, foot x/z, loss, per-leg advantage), `stdp/` (per-step mean
+  weight change and update count from the weight recorders, sampled live weight
+  distribution, final weight vectors) and `agent/` (means, σ_ctrl, σ_param, influence,
+  advantage/error vectors, the final Fisher metric matrix and feature scales). Figures:
+  tracking, model_vs_target, learning, sensory, stdp, param_shift, fisher, influence,
+  metric.
+- **V18** Weight recorders are **drained every step** (`read_plastic_events` reads the new
+  events then clears `n_events`), so a long run costs O(new events)/step instead of
+  re-scanning and growing the whole history; within a step both limbs share the batch.
+- **V19** Belt placement is selectable (`--belt dataset|model`). Head-to-head on RatA
+  Lfast T1 (4 s, small populations): `dataset` (belt −3.3 mm) closes the loop
+  (model stance L 0.57/R 0.41, 2.6/3.2 N, CUT 47–112 Hz) but the muscle-driven ankle
+  saturates (1.19…2.95 rad) and the tracking error is 0.94 rad; `model` (belt −17.0 mm)
+  opens the loop (stance 0.00/0.12, CUT 0, no contact) with a smaller tracking error
+  (0.31/0.39 rad) because the ankle merely drifts passively. `dataset` is the default:
+  it is the specified treadmill position and the only setting that exercises the
+  contact→afferent loop. The remaining blocker is the ankle actuation, not the belt.
+- **V20** `eps_pose` is the settling tolerance of stage 1 only: the pose stage ends after
+  `pose_hold_steps` consecutive steps with `max(|ankle_model − ankle_target|) < eps_pose`
+  (or when `pose_max_steps` is reached). It gates the stage transition, never the
+  optimization. `TODO(perf)` marks `Registry.apply_explored_parameters`.

@@ -86,6 +86,39 @@
 - **MVP scope: RatA only.** `DEFAULT_REFERENCE` is a `RatA` trial; the per-side
   recorded lengths are used as-is.
 
+## Decisions recorded 2026-10-18 (c): 2-minute simulation + evaluation outputs
+
+- **"2 minutes" = simulated time.** `run_validation.py --duration-s` defaults to
+  **120 s** and the target trajectory now **loops** (`MocapTargetDriver(loop=True)`,
+  period = trial length), so a run longer than the 60 s reference trial keeps
+  walking instead of freezing on the last frame. The wall-clock `--budget-s`
+  remains available but is not the server contract.
+- **Run outputs.** `run.h5` holds `log/` (every `RunLog` channel: both-limb CUT,
+  Ia length/velocity/rate, Ib activation/force/rate, hip/knee/ankle model+target,
+  muscle drives, phases, contacts, foot x/z, loss, advantage per leg),
+  `stdp/` (per-step mean weight change and update count from the **weight
+  recorders**, the sampled live weight distribution, and the final weight
+  vectors) and `agent/` (means, σ_ctrl, σ_param, influence, advantage/error
+  vectors, the final Fisher metric matrix and feature scales).
+- **Figures.** tracking, model_vs_target, learning (loss + per-leg advantage),
+  sensory (CUT/Ia/Ib + muscle drives), stdp, param_shift, fisher, influence,
+  metric.
+- **Weight recorders are drained every step.** `Registry.read_plastic_events`
+  reads the new events and clears the recorder (`n_events = 0`), so a long run
+  costs O(new events) per step instead of re-scanning (and growing) the whole
+  history; the drained batch is shared by both limbs within a step.
+- **Belt placement is selectable** (`--belt dataset|model`): `dataset` = the
+  dataset's ground (min foot-marker height), `model` = the 5th percentile of the
+  reconstructed target foot's lowest surface over the trajectory. Both are
+  evaluated head-to-head.
+- **`eps_pose`** is the per-step settling tolerance: the pose stage ends after
+  `pose_hold_steps` consecutive steps with `max(|ankle_model − ankle_target|) <
+  eps_pose` (or the `pose_max_steps` cap). It gates the *stage transition*, not
+  the optimization.
+- **`TODO(perf)`** marks the per-step exploration application
+  (`Registry.apply_explored_parameters`), which dominates the step cost but is
+  required for personalization.
+
 ## Review Focus
 
 1. **A parameter that does not affect the error** — its perturbation does not covary with `A`: `influence()` ≈ 0 and its step ≈ 0 (must not drift to bounds). → Task 1/2.

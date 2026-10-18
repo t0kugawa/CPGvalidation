@@ -61,7 +61,9 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
                        loss_window: int = 30,
                        seed: int = 0,
                        w_scale: float = 1.0,
-                       ref_hz: float = 100.0) -> tuple[Personalizer, MocapLoader]:
+                       ref_hz: float = 100.0,
+                       belt_mode: str = "dataset",
+                       loop: bool = True) -> tuple[Personalizer, MocapLoader]:
     """
     Builds the full closed loop: bilateral CPG (via the PERSONA registry),
     bilateral MuJoCo rig, PERSONA agent, and the mocap-driven target limb.
@@ -116,13 +118,24 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
         "knee_R": np.asarray(angles["knee_R"], dtype=np.float64),
     }
 
-    # The belt is the dataset's ground (treadmill surface) over the window the run
-    # actually traverses — the driver clamps at the trial end. One plane, shared
-    # by both the target and the output limbs.
-    n_win = min(int(max_steps), len(angles["hip_L"]))
-    ground_mm = min(float(np.min(angles["mh_z_L"][:n_win])),
-                    float(np.min(angles["mh_z_R"][:n_win])))
-    rig.set_treadmill_height(ground_mm / 1000.0 + TREADMILL_PENETRATION_M)
+    # The belt is one plane shared by both limbs. Two placements are supported:
+    #   "dataset" — the dataset's ground (min foot-marker height over the trial);
+    #   "model"   — the model-derived lowest surface of the reconstructed target
+    #               foot (5th percentile over the trajectory), which keeps the
+    #               reset pose reachable but leaves little controlled contact.
+    if belt_mode == "model":
+        belt_z = rig.target_foot_lowest_percentile(
+            hip_x={s: hip_x[s] for s in ("L", "R")},
+            hip_z={s: hip_z[s] for s in ("L", "R")},
+            hip={s: angles[f"hip_{s}"] for s in ("L", "R")},
+            knee={s: angles[f"knee_{s}"] for s in ("L", "R")},
+            ankle={s: angles[f"ankle_{s}"] for s in ("L", "R")},
+            percentile=5.0)
+    else:
+        n_win = len(angles["hip_L"]) if loop else min(int(max_steps), len(angles["hip_L"]))
+        belt_z = min(float(np.min(angles["mh_z_L"][:n_win])),
+                     float(np.min(angles["mh_z_R"][:n_win]))) / 1000.0
+    rig.set_treadmill_height(belt_z + TREADMILL_PENETRATION_M)
 
     # Start both limbs at the target's first pose so the ankle angles match at
     # t=0 (the target is then reachable and moving), with the hips at the GT.
@@ -139,6 +152,7 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
         hip_R=tgt["hip_R"], knee_R=tgt["knee_R"], dt_ms=DT_MS,
         hip_x_L=hip_x["L"], hip_z_L=hip_z["L"],
         hip_x_R=hip_x["R"], hip_z_R=hip_z["R"],
+        loop=loop,
     )
 
     agent = Agent(registry=reg, lr_mu=0.03, lr_sigma_ctrl=0.005,
@@ -162,7 +176,8 @@ def run_personalization(reference_path: str = DEFAULT_REFERENCE,
                         loss_stop: float = 0.05,
                         loss_window: int = 30,
                         verbose: bool = True,
-                        log_every: int = 20) -> dict:
+                        log_every: int = 20,
+                        belt_mode: str = "dataset") -> dict:
     """
     Full experiment: build the loop, run the two-stage PERSONA optimization,
     write the validation figure, the CSV/npz logs, and return the acceptance dict.
@@ -178,7 +193,7 @@ def run_personalization(reference_path: str = DEFAULT_REFERENCE,
     personalizer, loader = build_personalizer(
         reference_path=reference_path, max_steps=n_steps,
         eps_pose=eps_pose, pose_hold_steps=pose_hold_steps,
-        loss_stop=loss_stop, loss_window=loss_window, **sizes)
+        loss_stop=loss_stop, loss_window=loss_window, belt_mode=belt_mode, **sizes)
     personalizer.verbose = verbose
     personalizer.log_every = log_every
 

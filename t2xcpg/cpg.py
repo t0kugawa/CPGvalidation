@@ -135,12 +135,15 @@ class L2CPG(CPGAdapter):
 
         d_e_L, d_f_L = 0.0, 0.0
         d_e_R, d_f_R = 0.0, 0.0
+        plastic: Dict[str, Dict[str, float]] = {"delta": {}, "n": {}}
 
         if "L" in self.legs:
-            self.legs["L"].update_plastic_weights(t_before, self.current_time_ms)
+            plastic["delta"].update(self.legs["L"].update_plastic_weights(t_before, self.current_time_ms))
+            plastic["n"].update(self.legs["L"].plastic_counts)
             d_e_L, d_f_L = self.legs["L"].get_muscle_drives(self.dt_ms, self.current_time_ms)
         if "R" in self.legs:
-            self.legs["R"].update_plastic_weights(t_before, self.current_time_ms)
+            plastic["delta"].update(self.legs["R"].update_plastic_weights(t_before, self.current_time_ms))
+            plastic["n"].update(self.legs["R"].plastic_counts)
             d_e_R, d_f_R = self.legs["R"].get_muscle_drives(self.dt_ms, self.current_time_ms)
 
         out = CPGOutput(
@@ -148,7 +151,8 @@ class L2CPG(CPGAdapter):
             mus_F_L=d_f_L,
             mus_E_R=d_e_R,
             mus_F_R=d_f_R,
-            t_ms=self.current_time_ms
+            t_ms=self.current_time_ms,
+            extra={"plastic": plastic},
         )
         return out
 

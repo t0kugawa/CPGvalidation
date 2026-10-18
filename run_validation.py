@@ -1,13 +1,18 @@
 """
-20-second full-framework validation run:
+Full-framework validation run (2 minutes of simulated time by default):
   * builds the closed loop (bilateral CPG + MuJoCo rig + mocap target),
   * runs PERSONA personalization inside the loop,
   * renders an oblique-view HUD movie (mp4),
-  * writes the run log and the validation figures (tracking, learning,
-    parameter distribution shift, Fisher matrix).
+  * writes the run log (run_log.csv, run.h5) with the CPG afferents (CUT/Ia/Ib),
+    the muscle drives, the joint angles and the STDP weight-recorder trace,
+  * writes the validation figures (tracking, model_vs_target, learning, sensory,
+    STDP, parameter distribution shift, Fisher/metric heat-map, influence).
 
-Usage (headless):
-    MUJOCO_GL=osmesa python run_validation.py --duration-s 20 --view oblique_view
+The target trajectory loops, so a run longer than the reference trial keeps
+walking. Usage (headless server run):
+    MUJOCO_GL=osmesa python run_validation.py --final --no-render --out <dir>
+Quick iteration:
+    MUJOCO_GL=osmesa python run_validation.py --fast --out <dir>
 """
 import argparse
 import os
@@ -38,7 +43,7 @@ from t2xcpg.cfg import POPULATIONS_FINAL
 def run(duration_s, view, width, height, fps, out_dir,
         w_scale, ref_hz, belt_mps, belt_start_s, belt_ramp_s,
         n_rg, n_mn, n_int, n_aff, n_bs, render=True, budget_s=None,
-        pose_max_s=1.0):
+        pose_max_s=1.0, belt_mode="dataset"):
     os.makedirs(out_dir, exist_ok=True)
     steps = int(round(duration_s / (DT_MS / 1000.0)))
     n_frames = int(round(duration_s * fps))
@@ -48,11 +53,13 @@ def run(duration_s, view, width, height, fps, out_dir,
         reference_path=DEFAULT_REFERENCE,
         n_rg=n_rg, n_mn=n_mn, n_int=n_int, n_aff=n_aff, n_bs=n_bs,
         max_steps=steps, eps_pose=0.10, pose_hold_steps=3,
-        loss_stop=1e-4, loss_window=20, w_scale=w_scale, ref_hz=ref_hz)
+        loss_stop=1e-4, loss_window=20, w_scale=w_scale, ref_hz=ref_hz,
+        belt_mode=belt_mode, loop=True)
     pers.belt_mps = float(belt_mps)
     pers.belt_start_step = int(round(belt_start_s / (DT_MS / 1000.0)))
     pers.belt_ramp_steps = max(1, int(round(belt_ramp_s / (DT_MS / 1000.0))))
     pers.log_every = 100
+    pers.stdp_every = 20
     agent = pers.agent
     rig = pers.rig
     renderer = LegRenderer(rig.model, rig.data, width=width, height=height) if render else None
@@ -91,7 +98,9 @@ def run(duration_s, view, width, height, fps, out_dir,
         status["run_log.csv"] = f"ERROR {e}"
     try:
         save_run(os.path.join(out_dir, "run.h5"), log, agent,
-                 meta={"duration_s": float(duration_s), "dt_ms": float(DT_MS)})
+                 meta={"duration_s": float(duration_s), "dt_ms": float(DT_MS),
+                       "belt_mode": str(belt_mode), "belt_z": float(rig.belt_z),
+                       "n_steps": int(len(log.time_ms))})
         status["run.h5"] = "ok"
     except Exception as e:
         status["run.h5"] = f"ERROR {e}"
@@ -99,7 +108,9 @@ def run(duration_s, view, width, height, fps, out_dir,
     rep = ValidationReport()
     for name, fn in (("tracking", rep.plot_tracking),
                      ("model_vs_target", rep.plot_model_vs_target),
-                     ("learning", rep.plot_learning)):
+                     ("learning", rep.plot_learning),
+                     ("sensory", rep.plot_sensory),
+                     ("stdp", rep.plot_stdp)):
         try:
             fn(log)
             status[f"{name}.png"] = "ok"
@@ -128,7 +139,8 @@ def run(duration_s, view, width, height, fps, out_dir,
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--duration-s", type=float, default=20.0)
+    ap.add_argument("--duration-s", type=float, default=120.0,
+                    help="simulated duration in seconds (2 minutes for the server run)")
     ap.add_argument("--view", type=str, default="oblique_view")
     ap.add_argument("--fps", type=int, default=40)
     ap.add_argument("--width", type=int, default=1920)
@@ -151,6 +163,8 @@ if __name__ == "__main__":
                     help="cap on the settling (pose) stage, in seconds")
     ap.add_argument("--final", action="store_true",
                     help="full cpg_2legs_fast population sizes")
+    ap.add_argument("--belt", type=str, default="dataset", choices=("dataset", "model"),
+                    help="belt placement: dataset ground vs model-derived target-foot lowest surface")
     ap.add_argument("--fast", action="store_true",
                     help="quick low-res short run for iteration")
     args = ap.parse_args()
@@ -167,4 +181,4 @@ if __name__ == "__main__":
     run(args.duration_s, args.view, args.width, args.height, args.fps, args.out,
         args.w_scale, args.ref_hz, args.belt_mps, args.belt_start_s, args.belt_ramp_s,
         args.n_rg, args.n_mn, args.n_int, args.n_aff, args.n_bs, render=not args.no_render,
-        budget_s=args.budget_s, pose_max_s=args.pose_max_s)
+        budget_s=args.budget_s, pose_max_s=args.pose_max_s, belt_mode=args.belt)

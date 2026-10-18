@@ -288,6 +288,31 @@ class Leg:
         self._apply_belt(lo + TREADMILL_PENETRATION_M)
         return self.belt_z
 
+    def target_foot_lowest_percentile(self, hip_x, hip_z, hip, knee, ankle,
+                                      percentile: float = 5.0) -> float:
+        """
+        Sweeps the target limb through the trial's hip/joint trajectory using
+        forward kinematics only (no dynamics, no contact) and returns the given
+        percentile of its foot's lowest surface height (m). This is the
+        model-derived alternative to placing the belt at the dataset's ground.
+        `hip_x`/`hip_z`/`hip`/`knee`/`ankle` map side -> per-frame array.
+        """
+        lows = []
+        for s in SIDES:
+            hip_adr = self.model.jnt_qposadr[self.j_hip_ref[s]]
+            knee_adr = self.model.jnt_qposadr[self.j_knee_ref[s]]
+            ankle_adr = self.model.jnt_qposadr[self.j_ankle_ref[s]]
+            for i in range(len(np.asarray(ankle[s]))):
+                self.data.qpos[hip_adr] = float(hip[s][i])
+                self.data.qpos[knee_adr] = float(knee[s][i])
+                self.data.qpos[ankle_adr] = float(ankle[s][i])
+                self.set_target_hip_position(s, float(hip_x[s][i]), float(hip_z[s][i]))
+                mujoco.mj_kinematics(self.model, self.data)
+                lows.append(self._foot_lowest_z(self.ref_foot_geoms[s]))
+        if not lows:
+            return float(self.model.geom_pos[self.treadmill_gid, 2])
+        return float(np.percentile(np.asarray(lows), percentile))
+
     def set_limb_lengths(self, prefix: str, side: str, thigh: float,
                          shank: float, foot: float):
         """

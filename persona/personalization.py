@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any, List
+from typing import Any, Dict, List
 
 import numpy as np
 
@@ -17,10 +17,13 @@ class MocapTargetDriver:
     """
     def __init__(self, ankle_L, ankle_R, dt_ms: float = 10.0, pose=None,
                  hip_L=None, knee_L=None, hip_R=None, knee_R=None,
-                 hip_x_L=None, hip_z_L=None, hip_x_R=None, hip_z_R=None):
+                 hip_x_L=None, hip_z_L=None, hip_x_R=None, hip_z_R=None,
+                 loop: bool = True):
         self.ankle_L = np.asarray(ankle_L, dtype=np.float64)
         self.ankle_R = np.asarray(ankle_R, dtype=np.float64)
         self.dt_ms = float(dt_ms)
+        self.loop = bool(loop)
+        self.period_ms = float(len(self.ankle_L)) * self.dt_ms
         self.hip_L = None if hip_L is None else np.asarray(hip_L, dtype=np.float64)
         self.knee_L = None if knee_L is None else np.asarray(knee_L, dtype=np.float64)
         self.hip_R = None if hip_R is None else np.asarray(hip_R, dtype=np.float64)
@@ -37,7 +40,10 @@ class MocapTargetDriver:
     def _at(self, arr, t_ms):
         if arr is None:
             return None
-        i = int(round(float(t_ms) / self.dt_ms))
+        t = float(t_ms)
+        if self.loop and self.period_ms > 0.0:
+            t = t % self.period_ms
+        i = int(round(t / self.dt_ms))
         i = min(max(i, 0), len(arr) - 1)
         return float(arr[i])
 
@@ -62,55 +68,107 @@ class MocapTargetDriver:
 @dataclass
 class RunLog:
     time_ms: List[float] = field(default_factory=list)
+    stage: List[str] = field(default_factory=list)
+
+    # Tracked output vs target (rad) and the PERSONA learning signals
     ankle_model_L: List[float] = field(default_factory=list)
     ankle_model_R: List[float] = field(default_factory=list)
     ankle_target_L: List[float] = field(default_factory=list)
     ankle_target_R: List[float] = field(default_factory=list)
     loss: List[float] = field(default_factory=list)
     advantage: List[float] = field(default_factory=list)
+    adv_L: List[float] = field(default_factory=list)
+    adv_R: List[float] = field(default_factory=list)
+
+    # Locomotion phase (model: contact-driven; ref: geometric)
     phase_L: List[str] = field(default_factory=list)
     phase_R: List[str] = field(default_factory=list)
-    stage: List[str] = field(default_factory=list)
+    phase_ref_L: List[str] = field(default_factory=list)
+    phase_ref_R: List[str] = field(default_factory=list)
+
+    # Muscle drives
     mus_E_L: List[float] = field(default_factory=list)
     mus_F_L: List[float] = field(default_factory=list)
     mus_E_R: List[float] = field(default_factory=list)
     mus_F_R: List[float] = field(default_factory=list)
+
+    # Cutaneous afferents (Hz)
     cut_L: List[float] = field(default_factory=list)
+    cut_R: List[float] = field(default_factory=list)
+
+    # Ia afferents (spindle: length m, stretch velocity m/s, rate Hz)
+    ia_len_E_L: List[float] = field(default_factory=list)
+    ia_vel_E_L: List[float] = field(default_factory=list)
     ia_rate_E_L: List[float] = field(default_factory=list)
+    ia_len_F_L: List[float] = field(default_factory=list)
+    ia_vel_F_L: List[float] = field(default_factory=list)
+    ia_rate_F_L: List[float] = field(default_factory=list)
+    ia_len_E_R: List[float] = field(default_factory=list)
+    ia_vel_E_R: List[float] = field(default_factory=list)
+    ia_rate_E_R: List[float] = field(default_factory=list)
+    ia_len_F_R: List[float] = field(default_factory=list)
+    ia_vel_F_R: List[float] = field(default_factory=list)
+    ia_rate_F_R: List[float] = field(default_factory=list)
+
+    # Ib afferents (Golgi tendon organ: activation, tendon force N, rate Hz)
+    ib_act_E_L: List[float] = field(default_factory=list)
+    ib_force_E_L: List[float] = field(default_factory=list)
     ib_rate_E_L: List[float] = field(default_factory=list)
-    ankle_ref_L: List[float] = field(default_factory=list)
-    ankle_ref_R: List[float] = field(default_factory=list)
-    knee_model_L: List[float] = field(default_factory=list)
-    knee_model_R: List[float] = field(default_factory=list)
+    ib_act_F_L: List[float] = field(default_factory=list)
+    ib_force_F_L: List[float] = field(default_factory=list)
+    ib_rate_F_L: List[float] = field(default_factory=list)
+    ib_act_E_R: List[float] = field(default_factory=list)
+    ib_force_E_R: List[float] = field(default_factory=list)
+    ib_rate_E_R: List[float] = field(default_factory=list)
+    ib_act_F_R: List[float] = field(default_factory=list)
+    ib_force_F_R: List[float] = field(default_factory=list)
+    ib_rate_F_R: List[float] = field(default_factory=list)
+
+    # Joint angles (rad): controlled model and kinematic target
     hip_model_L: List[float] = field(default_factory=list)
     hip_model_R: List[float] = field(default_factory=list)
-    ia_rate_F_L: List[float] = field(default_factory=list)
+    knee_model_L: List[float] = field(default_factory=list)
+    knee_model_R: List[float] = field(default_factory=list)
+    hip_ref_L: List[float] = field(default_factory=list)
+    hip_ref_R: List[float] = field(default_factory=list)
+    knee_ref_L: List[float] = field(default_factory=list)
+    knee_ref_R: List[float] = field(default_factory=list)
+    ankle_ref_L: List[float] = field(default_factory=list)
+    ankle_ref_R: List[float] = field(default_factory=list)
+
+    # Contact / foot diagnostics
     contact_m_L: List[float] = field(default_factory=list)
     contact_m_R: List[float] = field(default_factory=list)
     contact_ref_L: List[float] = field(default_factory=list)
     contact_ref_R: List[float] = field(default_factory=list)
-    phase_ref_L: List[str] = field(default_factory=list)
-    phase_ref_R: List[str] = field(default_factory=list)
-    knee_ref_L: List[float] = field(default_factory=list)
-    knee_ref_R: List[float] = field(default_factory=list)
-    hip_ref_L: List[float] = field(default_factory=list)
-    hip_ref_R: List[float] = field(default_factory=list)
-    foot_z_m_L: List[float] = field(default_factory=list)
-    foot_z_m_R: List[float] = field(default_factory=list)
     foot_x_m_L: List[float] = field(default_factory=list)
     foot_x_m_R: List[float] = field(default_factory=list)
+    foot_z_m_L: List[float] = field(default_factory=list)
+    foot_z_m_R: List[float] = field(default_factory=list)
     foot_z_ref_L: List[float] = field(default_factory=list)
     foot_z_ref_R: List[float] = field(default_factory=list)
 
+    # STDP weight-recorder trace (populated by the loop, h5-only)
+    stdp: Dict[str, Any] = field(default_factory=dict)
+
     _NUMERIC = ("time_ms", "ankle_model_L", "ankle_model_R", "ankle_target_L",
-                "ankle_target_R", "loss", "advantage", "mus_E_L", "mus_F_L",
-                "mus_E_R", "mus_F_R", "cut_L", "ia_rate_E_L", "ib_rate_E_L",
-                "ankle_ref_L", "ankle_ref_R", "knee_model_L", "knee_model_R",
-                "hip_model_L", "hip_model_R", "ia_rate_F_L",
+                "ankle_target_R", "loss", "advantage", "adv_L", "adv_R",
+                "mus_E_L", "mus_F_L", "mus_E_R", "mus_F_R",
+                "cut_L", "cut_R",
+                "ia_len_E_L", "ia_vel_E_L", "ia_rate_E_L",
+                "ia_len_F_L", "ia_vel_F_L", "ia_rate_F_L",
+                "ia_len_E_R", "ia_vel_E_R", "ia_rate_E_R",
+                "ia_len_F_R", "ia_vel_F_R", "ia_rate_F_R",
+                "ib_act_E_L", "ib_force_E_L", "ib_rate_E_L",
+                "ib_act_F_L", "ib_force_F_L", "ib_rate_F_L",
+                "ib_act_E_R", "ib_force_E_R", "ib_rate_E_R",
+                "ib_act_F_R", "ib_force_F_R", "ib_rate_F_R",
+                "hip_model_L", "hip_model_R", "knee_model_L", "knee_model_R",
+                "hip_ref_L", "hip_ref_R", "knee_ref_L", "knee_ref_R",
+                "ankle_ref_L", "ankle_ref_R",
                 "contact_m_L", "contact_m_R", "contact_ref_L", "contact_ref_R",
-                "knee_ref_L", "knee_ref_R", "hip_ref_L", "hip_ref_R",
-                "foot_z_m_L", "foot_z_m_R", "foot_z_ref_L", "foot_z_ref_R",
-                "foot_x_m_L", "foot_x_m_R")
+                "foot_x_m_L", "foot_x_m_R", "foot_z_m_L", "foot_z_m_R",
+                "foot_z_ref_L", "foot_z_ref_R")
     _STR = ("phase_L", "phase_R", "phase_ref_L", "phase_ref_R", "stage")
 
     def finalize(self) -> "RunLog":
@@ -151,6 +209,7 @@ class Personalizer:
                  loss_window: int = 30,
                  max_steps: int = 1000,
                  log_every: int = 20,
+                 stdp_every: int = 100,
                  verbose: bool = True,
                  belt_mps: float = 0.2,
                  belt_start_step: int = 20,
@@ -167,6 +226,7 @@ class Personalizer:
         self.loss_window = int(loss_window)
         self.max_steps = int(max_steps)
         self.log_every = int(log_every)
+        self.stdp_every = int(stdp_every)
         self.verbose = bool(verbose)
         self.belt_mps = float(belt_mps)
         self.belt_start_step = int(belt_start_step)
@@ -184,6 +244,28 @@ class Personalizer:
             f"| drive E/F {log.mus_E_L[i]:.2f}/{log.mus_F_L[i]:.2f} "
             f"| CUT {log.cut_L[i]:.0f} Ia {log.ia_rate_E_L[i]:.0f} Ib {log.ib_rate_E_L[i]:.0f}",
             flush=True)
+
+    def _log_plastic(self, log: RunLog, extra: dict, t_ms: float):
+        """
+        Records the STDP weight-recorder trace: per step the mean weight change
+        and the number of updates the recorders saw, plus (every `stdp_every`
+        steps) the live weight distribution of each plastic projection.
+        """
+        st = log.stdp
+        if "delta" not in st:
+            st.update({"delta": {}, "n": {}, "sample_time_ms": [],
+                       "weight_mean": {}, "weight_min": {}, "weight_max": {}})
+        plastic = extra.get("plastic") or {}
+        for key, val in (plastic.get("delta") or {}).items():
+            st["delta"].setdefault(key, []).append(float(val))
+        for key, val in (plastic.get("n") or {}).items():
+            st["n"].setdefault(key, []).append(int(val))
+        if self.stdp_every > 0 and len(log.stage) % self.stdp_every == 0:
+            st["sample_time_ms"].append(float(t_ms))
+            for key, s in self.registry.sample_plastic_weight_stats().items():
+                st["weight_mean"].setdefault(key, []).append(s["mean"])
+                st["weight_min"].setdefault(key, []).append(s["min"])
+                st["weight_max"].setdefault(key, []).append(s["max"])
 
     def run(self, step_hook=None, wall_clock_s: float | None = None,
             pose_max_steps: int = 0) -> RunLog:
@@ -230,45 +312,72 @@ class Personalizer:
             )
 
             log.time_ms.append(self.cpg.current_time_ms)
+            log.stage.append(stage)
             log.ankle_model_L.append(cpg_in.ankle_angle_m_L)
             log.ankle_model_R.append(cpg_in.ankle_angle_m_R)
             log.ankle_target_L.append(tgt_L)
             log.ankle_target_R.append(tgt_R)
             log.loss.append(float(res["loss"]))
-            log.advantage.append(float(np.mean(res["advantage_vector"])))
+            adv = np.asarray(res["advantage_vector"], dtype=np.float64).ravel()
+            log.advantage.append(float(np.mean(adv)) if adv.size else 0.0)
+            log.adv_L.append(float(adv[0]) if adv.size > 0 else 0.0)
+            log.adv_R.append(float(adv[1]) if adv.size > 1 else 0.0)
             log.phase_L.append(cpg_in.phase_L)
             log.phase_R.append(cpg_in.phase_R)
-            log.stage.append(stage)
+            log.phase_ref_L.append(cpg_in.phase_ref_L)
+            log.phase_ref_R.append(cpg_in.phase_ref_R)
             log.mus_E_L.append(cpg_out.mus_E_L)
             log.mus_F_L.append(cpg_out.mus_F_L)
             log.mus_E_R.append(cpg_out.mus_E_R)
             log.mus_F_R.append(cpg_out.mus_F_R)
             log.cut_L.append(cpg_in.cut_L)
+            log.cut_R.append(cpg_in.cut_R)
+            log.ia_len_E_L.append(cpg_in.ia_len_E_L)
+            log.ia_vel_E_L.append(cpg_in.ia_vel_E_L)
             log.ia_rate_E_L.append(cpg_in.ia_rate_E_L)
+            log.ia_len_F_L.append(cpg_in.ia_len_F_L)
+            log.ia_vel_F_L.append(cpg_in.ia_vel_F_L)
+            log.ia_rate_F_L.append(cpg_in.ia_rate_F_L)
+            log.ia_len_E_R.append(cpg_in.ia_len_E_R)
+            log.ia_vel_E_R.append(cpg_in.ia_vel_E_R)
+            log.ia_rate_E_R.append(cpg_in.ia_rate_E_R)
+            log.ia_len_F_R.append(cpg_in.ia_len_F_R)
+            log.ia_vel_F_R.append(cpg_in.ia_vel_F_R)
+            log.ia_rate_F_R.append(cpg_in.ia_rate_F_R)
+            log.ib_act_E_L.append(cpg_in.ib_act_E_L)
+            log.ib_force_E_L.append(cpg_in.ib_force_E_L)
             log.ib_rate_E_L.append(cpg_in.ib_rate_E_L)
-            log.ankle_ref_L.append(cpg_in.ankle_angle_ref_L)
-            log.ankle_ref_R.append(cpg_in.ankle_angle_ref_R)
-            log.knee_model_L.append(cpg_in.knee_angle_m_L)
-            log.knee_model_R.append(cpg_in.knee_angle_m_R)
+            log.ib_act_F_L.append(cpg_in.ib_act_F_L)
+            log.ib_force_F_L.append(cpg_in.ib_force_F_L)
+            log.ib_rate_F_L.append(cpg_in.ib_rate_F_L)
+            log.ib_act_E_R.append(cpg_in.ib_act_E_R)
+            log.ib_force_E_R.append(cpg_in.ib_force_E_R)
+            log.ib_rate_E_R.append(cpg_in.ib_rate_E_R)
+            log.ib_act_F_R.append(cpg_in.ib_act_F_R)
+            log.ib_force_F_R.append(cpg_in.ib_force_F_R)
+            log.ib_rate_F_R.append(cpg_in.ib_rate_F_R)
             log.hip_model_L.append(cpg_in.hip_angle_m_L)
             log.hip_model_R.append(cpg_in.hip_angle_m_R)
-            log.ia_rate_F_L.append(cpg_in.ia_rate_F_L)
+            log.knee_model_L.append(cpg_in.knee_angle_m_L)
+            log.knee_model_R.append(cpg_in.knee_angle_m_R)
+            log.hip_ref_L.append(cpg_in.hip_angle_ref_L)
+            log.hip_ref_R.append(cpg_in.hip_angle_ref_R)
+            log.knee_ref_L.append(cpg_in.knee_angle_ref_L)
+            log.knee_ref_R.append(cpg_in.knee_angle_ref_R)
+            log.ankle_ref_L.append(cpg_in.ankle_angle_ref_L)
+            log.ankle_ref_R.append(cpg_in.ankle_angle_ref_R)
             log.contact_m_L.append(cpg_in.contact_m_L)
             log.contact_m_R.append(cpg_in.contact_m_R)
             log.contact_ref_L.append(cpg_in.contact_ref_L)
             log.contact_ref_R.append(cpg_in.contact_ref_R)
-            log.phase_ref_L.append(cpg_in.phase_ref_L)
-            log.phase_ref_R.append(cpg_in.phase_ref_R)
-            log.knee_ref_L.append(cpg_in.knee_angle_ref_L)
-            log.knee_ref_R.append(cpg_in.knee_angle_ref_R)
-            log.hip_ref_L.append(cpg_in.hip_angle_ref_L)
-            log.hip_ref_R.append(cpg_in.hip_angle_ref_R)
-            log.foot_z_m_L.append(cpg_in.foot_z_m_L)
-            log.foot_z_m_R.append(cpg_in.foot_z_m_R)
             log.foot_x_m_L.append(cpg_in.foot_x_m_L)
             log.foot_x_m_R.append(cpg_in.foot_x_m_R)
+            log.foot_z_m_L.append(cpg_in.foot_z_m_L)
+            log.foot_z_m_R.append(cpg_in.foot_z_m_R)
             log.foot_z_ref_L.append(cpg_in.foot_z_ref_L)
             log.foot_z_ref_R.append(cpg_in.foot_z_ref_R)
+            self._log_plastic(log, getattr(cpg_out, "extra", None) or {},
+                              self.cpg.current_time_ms)
 
             if step_hook is not None:
                 step_hook(step, log, cpg_in, cpg_out, stage)
@@ -292,5 +401,13 @@ class Personalizer:
 
             if wall_clock_s is not None and time.monotonic() - t_start >= wall_clock_s:
                 break
+
+        if log.stdp:
+            log.stdp["time_ms"] = np.asarray(log.time_ms, dtype=np.float64)
+            log.stdp["sample_time_ms"] = np.asarray(log.stdp["sample_time_ms"], dtype=np.float64)
+            for grp in ("delta", "n", "weight_mean", "weight_min", "weight_max"):
+                log.stdp[grp] = {k: np.asarray(v, dtype=np.float64)
+                                 for k, v in log.stdp[grp].items()}
+            log.stdp["final_weights"] = self.registry.final_plastic_weights()
 
         return log.finalize()

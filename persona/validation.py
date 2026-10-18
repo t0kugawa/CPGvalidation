@@ -150,10 +150,17 @@ class ValidationReport:
         axes[0].plot(t, log.loss, color="tab:brown")
         axes[0].set_ylabel("loss")
         axes[0].grid(alpha=0.3)
-        axes[1].plot(t, log.advantage, color="tab:blue")
+        axes[1].plot(t, log.advantage, color="tab:blue", label="mean advantage")
+        adv_l = getattr(log, "adv_L", None)
+        adv_r = getattr(log, "adv_R", None)
+        if adv_l is not None and len(adv_l):
+            axes[1].plot(t, adv_l, color="tab:red", lw=0.8, alpha=0.8, label="A L (left ankle)")
+        if adv_r is not None and len(adv_r):
+            axes[1].plot(t, adv_r, color="tab:green", lw=0.8, alpha=0.8, label="A R (right ankle)")
         axes[1].axhline(0.0, color="k", ls=":", alpha=0.6)
         axes[1].set_xlabel("time [s]")
         axes[1].set_ylabel("advantage")
+        axes[1].legend(fontsize=8)
         axes[1].grid(alpha=0.3)
         self.figures["learning"] = fig
         return fig
@@ -291,6 +298,115 @@ class ValidationReport:
         fig.colorbar(im, ax=ax, label="Cov(Δθ)")
         fig.tight_layout()
         self.figures["metric"] = fig
+        return fig
+
+    def plot_sensory(self, log):
+        """
+        Afferent traffic and muscle drives: CUT, Ia (length- and
+        velocity-derived rate), Ib (force/activation-derived rate) and the
+        extensor/flexor muscle drives, for both limbs.
+        """
+        t = np.asarray(log.time_ms) / 1000.0
+
+        def col(name):
+            v = getattr(log, name, None)
+            return None if v is None or not len(v) else np.asarray(v, dtype=float)
+
+        fig, axes = plt.subplots(4, 1, figsize=(13, 12), sharex=True)
+        for c, lab, style in (("L", "left", "-"), ("R", "right", "--")):
+            v = col(f"cut_{c}")
+            if v is not None:
+                axes[0].plot(t, v, style, label=f"CUT {lab}", lw=1.0)
+        axes[0].set_ylabel("CUT [Hz]")
+        axes[0].set_title("Cutaneous afferents (plantar contact)")
+        axes[0].legend(fontsize=8)
+        axes[0].grid(alpha=0.3)
+
+        for c, lab, style in (("L", "left", "-"), ("R", "right", "--")):
+            for m, mlab in (("E", "ext"), ("F", "flex")):
+                v = col(f"ia_rate_{m}_{c}")
+                if v is not None:
+                    axes[1].plot(t, v, style, lw=1.0, label=f"Ia {mlab} {lab}")
+        axes[1].set_ylabel("Ia rate [Hz]")
+        axes[1].set_title("Ia (muscle spindle: length + stretch velocity)")
+        axes[1].legend(fontsize=7, ncol=2)
+        axes[1].grid(alpha=0.3)
+
+        for c, lab, style in (("L", "left", "-"), ("R", "right", "--")):
+            for m, mlab in (("E", "ext"), ("F", "flex")):
+                v = col(f"ib_rate_{m}_{c}")
+                if v is not None:
+                    axes[2].plot(t, v, style, lw=1.0, label=f"Ib {mlab} {lab}")
+        axes[2].set_ylabel("Ib rate [Hz]")
+        axes[2].set_title("Ib (Golgi tendon organ: tendon force + activation)")
+        axes[2].legend(fontsize=7, ncol=2)
+        axes[2].grid(alpha=0.3)
+
+        for c, lab, style in (("L", "left", "-"), ("R", "right", "--")):
+            for m, mlab in (("E", "ext"), ("F", "flex")):
+                v = col(f"mus_{m}_{c}")
+                if v is not None:
+                    axes[3].plot(t, v, style, lw=1.0, label=f"mus {mlab} {lab}")
+        axes[3].set_ylabel("muscle drive")
+        axes[3].set_xlabel("time [s]")
+        axes[3].set_title("Muscle drives sent to MuJoCo")
+        axes[3].legend(fontsize=7, ncol=2)
+        axes[3].grid(alpha=0.3)
+
+        fig.tight_layout()
+        self.figures["sensory"] = fig
+        return fig
+
+    def plot_stdp(self, log):
+        """
+        STDP trace from the weight recorders and the live synapse weights:
+        mean weight per plastic projection, the per-step mean weight change and
+        the number of STDP updates per step.
+        """
+        stdp = getattr(log, "stdp", None) or {}
+        if not stdp or not stdp.get("weight_mean"):
+            return None
+        t = np.asarray(log.time_ms) / 1000.0
+        fig, axes = plt.subplots(3, 1, figsize=(13, 10), sharex=False)
+
+        def legend(ax):
+            h, _ = ax.get_legend_handles_labels()
+            if h:
+                ax.legend(fontsize=7)
+
+        ts = np.asarray(stdp.get("sample_time_ms", []), dtype=float) / 1000.0
+        for key, vals in (stdp.get("weight_mean") or {}).items():
+            axes[0].plot(ts[:len(vals)], np.asarray(vals, dtype=float), lw=1.0,
+                         label=f"{key} (mean)")
+            lo = np.asarray(stdp.get("weight_min", {}).get(key, []), dtype=float)
+            hi = np.asarray(stdp.get("weight_max", {}).get(key, []), dtype=float)
+            if lo.size and hi.size:
+                axes[0].fill_between(ts[:len(lo)], lo, hi, alpha=0.10)
+        axes[0].set_ylabel("synaptic weight")
+        axes[0].set_title("STDP weights (mean over each plastic projection; band = min..max)")
+        legend(axes[0])
+        axes[0].grid(alpha=0.3)
+
+        for key, vals in (stdp.get("delta") or {}).items():
+            v = np.asarray(vals, dtype=float)
+            axes[1].plot(t[:len(v)], v, lw=0.8, label=f"{key}")
+        axes[1].set_xlabel("time [s]")
+        axes[1].set_ylabel("mean Δw / step")
+        axes[1].set_title("STDP weight-recorder: mean weight change per step")
+        legend(axes[1])
+        axes[1].grid(alpha=0.3)
+
+        for key, vals in (stdp.get("n") or {}).items():
+            v = np.asarray(vals, dtype=float)
+            axes[2].plot(t[:len(v)], v, lw=0.8, label=f"{key}")
+        axes[2].set_xlabel("time [s]")
+        axes[2].set_ylabel("updates / step")
+        axes[2].set_title("STDP update count per step (weight-recorder events)")
+        legend(axes[2])
+        axes[2].grid(alpha=0.3)
+
+        fig.tight_layout()
+        self.figures["stdp"] = fig
         return fig
 
     def save_all(self, path):

@@ -45,6 +45,7 @@ class Leg:
         self.w_scale = float(w_scale)
         self.ref_hz = float(ref_hz)
         self.plastic_projections: list[str] = []
+        self.plastic_counts: dict[str, int] = {}
 
         # Create Noise Recorder for this leg
         self.noise_recorder = NoiseRecorder(f"noise_{leg_name}")
@@ -251,11 +252,17 @@ class Leg:
     def update_plastic_weights(self, t_before: float, t_now: float):
         """
         Samples STDP weight changes from the weight recorders and records them
-        as ordinary noise features in this leg's NoiseRecorder.
+        as ordinary noise features in this leg's NoiseRecorder. Returns the
+        per-projection mean deltas (the STDP learning signal) and stores the
+        per-projection update counts for logging.
         """
         deltas = self.registry.sample_plastic_weight_deltas(t_before, t_now)
+        counts = self.registry.last_plastic_counts()
+        self.plastic_counts = {}
         for key in self.plastic_projections:
             self.noise_recorder.record_direct(key, t_now, "weight", deltas.get(key, 0.0))
+            self.plastic_counts[key] = int(counts.get(key, 0))
+        return deltas
 
     def _build_connections(self):
         leg = self.leg

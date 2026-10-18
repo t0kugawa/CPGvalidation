@@ -20,6 +20,10 @@ class Registry:
         self.population_nodes: Dict[str, nest.NodeCollection] = {}
         self.noise_recorders: Dict[str, NoiseRecorder] = {}
         self._synapses: Dict[str, Any] = {}
+        self._plastic_prev_mean: Dict[str, float] = {}
+        self._plastic_counts: Dict[str, int] = {}
+        self._plastic_cache_key: float | None = None
+        self._plastic_cache: Dict[str, float] = {}
 
     def register_noise_recorder(self, recorder: NoiseRecorder):
         self.noise_recorders[recorder.name] = recorder
@@ -103,12 +107,14 @@ class Registry:
             for key, cfg in self.connection_cfgs.items()
         }
 
-    def sample_plastic_weight_deltas(self, t_before: float, t_now: float) -> Dict[str, float]:
+    def read_plastic_events(self, clear: bool = True) -> Dict[str, Dict[str, np.ndarray]]:
         """
-        Mean per-synapse weight change observed by each plastic projection's
-        NEST weight_recorder within the last step, keyed by projection key.
+        Drains each plastic projection's NEST weight_recorder and returns the
+        events accumulated since the previous call ({key: {"times", "weights"}}).
+        With `clear` the recorder is emptied afterwards so a long run neither
+        grows memory without bound nor re-scans the whole history every step.
         """
-        out: Dict[str, float] = {}
+        out: Dict[str, Dict[str, np.ndarray]] = {}
         for key, cfg in self.connection_cfgs.items():
             wr = cfg.weight_recorder
             if wr is None:
@@ -118,14 +124,80 @@ class Registry:
                 weights = np.asarray(ev.get("weights", []), dtype=np.float64)
                 times = np.asarray(ev.get("times", []), dtype=np.float64)
             except Exception:
-                out[key] = 0.0
-                continue
+                weights = np.empty(0, dtype=np.float64)
+                times = np.empty(0, dtype=np.float64)
+            if clear:
+                try:
+                    wr.set({"n_events": 0})
+                except Exception:
+                    pass
+            out[key] = {"times": times, "weights": weights}
+        return out
+
+    def sample_plastic_weight_deltas(self, t_before: float, t_now: float) -> Dict[str, float]:
+        """
+        Mean per-synapse weight change each plastic projection's weight_recorder
+        observed within the last step, keyed by projection key. The recorder is
+        drained (and cleared) so the cost per step is proportional to the new
+        events only; repeated calls within one step (one per limb) reuse the
+        drained result instead of finding the recorders empty.
+        """
+        key_now = float(t_now)
+        if self._plastic_cache_key == key_now:
+            return dict(self._plastic_cache)
+        events = self.read_plastic_events(clear=True)
+        out: Dict[str, float] = {}
+        counts: Dict[str, int] = {}
+        for key, ev in events.items():
+            weights = ev["weights"]
+            counts[key] = int(weights.size)
             if weights.size == 0:
                 out[key] = 0.0
                 continue
-            mask = times >= float(t_before)
-            window = weights[mask] if mask.any() else weights
-            out[key] = float(np.mean(window) - np.mean(weights))
+            current = float(np.mean(weights))
+            previous = self._plastic_prev_mean.get(key)
+            out[key] = 0.0 if previous is None else current - previous
+            self._plastic_prev_mean[key] = current
+        self._plastic_counts = counts
+        self._plastic_cache_key = key_now
+        self._plastic_cache = out
+        return dict(out)
+
+    def last_plastic_counts(self) -> Dict[str, int]:
+        """Number of STDP weight updates each projection recorded last step."""
+        return dict(self._plastic_counts)
+
+    def sample_plastic_weight_stats(self) -> Dict[str, Dict[str, float]]:
+        """
+        Current weight distribution (mean/min/max) of every plastic projection,
+        read from the live synapse collections. Used to log the STDP weight
+        trajectory itself (the recorders only report the updates).
+        """
+        out: Dict[str, Dict[str, float]] = {}
+        for key, cfg in self.connection_cfgs.items():
+            if cfg.weight_recorder is None:
+                continue
+            try:
+                w = np.asarray(self.synapses(key).get("weight"), dtype=np.float64)
+            except Exception:
+                continue
+            if w.size:
+                out[key] = {"mean": float(w.mean()), "min": float(w.min()),
+                            "max": float(w.max())}
+        return out
+
+    def final_plastic_weights(self) -> Dict[str, np.ndarray]:
+        """Snapshot of every plastic projection's weight vector (end of run)."""
+        out: Dict[str, np.ndarray] = {}
+        for key, cfg in self.connection_cfgs.items():
+            if cfg.weight_recorder is None:
+                continue
+            try:
+                w = np.asarray(self.synapses(key).get("weight"), dtype=np.float64)
+            except Exception:
+                continue
+            if w.size:
+                out[key] = w
         return out
 
     def get(self, name: str) -> nest.NodeCollection:
@@ -169,6 +241,9 @@ class Registry:
     def apply_explored_parameters(self, sampled_values: Dict[str, float]):
         """
         Applies exploratory values to active NEST populations and synapses where supported.
+        TODO(perf): this per-step re-sampling + `set()` of every neuron and every
+        synapse dominates the step cost at full population sizes (~1.5 s/step);
+        the exploration is required for personalization, so it is left in place.
         """
         # Apply to populations
         for pop_name, pop in self.population_cfgs.items():

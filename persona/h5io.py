@@ -1,69 +1,108 @@
 """HDF5 persistence for a personalisation/validation run.
 
-One file holds everything a reader needs to reproduce the figures:
-the per-step log arrays, the parameter mean/spread histories, the per-step
-influence, and scalar metadata.
+One file holds everything a reader needs to reproduce the figures and evaluate
+the run:
+  * log/    — per-step arrays (angles, muscle drives, CUT/Ia/Ib afferents,
+              phases, contacts, foot positions, loss and advantage),
+  * stdp/   — the STDP weight-recorder trace (per-step mean delta and update
+              count, sampled live weight distribution, final weight vectors),
+  * agent/  — the parameter mean/spread histories, the per-step influence, the
+              advantage/error vectors and the final Fisher metric matrix.
 """
 import numpy as np
 import h5py
 
-_SCALAR_LOG = [
-    "time_ms", "ankle_model_L", "ankle_model_R", "ankle_target_L",
-    "ankle_target_R", "loss", "advantage", "mus_E_L", "mus_F_L",
-    "mus_E_R", "mus_F_R", "cut_L", "ia_rate_E_L", "ib_rate_E_L",
-    "ankle_ref_L", "ankle_ref_R", "knee_model_L", "knee_model_R",
-    "hip_model_L", "hip_model_R", "ia_rate_F_L",
-    "contact_m_L", "contact_m_R", "contact_ref_L", "contact_ref_R",
-    "knee_ref_L", "knee_ref_R", "hip_ref_L", "hip_ref_R",
-    "foot_z_m_L", "foot_z_m_R", "foot_z_ref_L", "foot_z_ref_R",
-]
-_STR_LOG = ["phase_L", "phase_R", "phase_ref_L", "phase_ref_R", "stage"]
+
+def _channel_names(log):
+    cls = type(log)
+    return list(getattr(cls, "_NUMERIC", ())), list(getattr(cls, "_STR", ()))
 
 
 def save_run(path, log, agent, meta=None):
+    numeric, string = _channel_names(log)
     with h5py.File(path, "w") as f:
         for k, v in (meta or {}).items():
             f.attrs[k] = v
+
         g = f.create_group("log")
-        for k in _SCALAR_LOG:
+        for k in numeric:
             v = getattr(log, k, None)
             if v is not None and len(v):
                 g.create_dataset(k, data=np.asarray(v, dtype=float))
-        for k in _STR_LOG:
+        for k in string:
             v = getattr(log, k, None)
             if v is not None and len(v):
                 g.create_dataset(k, data=np.asarray(v, dtype=h5py.string_dtype()))
+
+        stdp = getattr(log, "stdp", None) or {}
+        sg = f.create_group("stdp")
+        for grp in ("delta", "n", "weight_mean", "weight_min", "weight_max",
+                    "final_weights"):
+            if grp not in stdp:
+                continue
+            gg = sg.create_group(grp)
+            for k, v in stdp[grp].items():
+                gg.create_dataset(k, data=np.asarray(v, dtype=float))
+        for k in ("time_ms", "sample_time_ms"):
+            if k in stdp:
+                sg.create_dataset(k, data=np.asarray(stdp[k], dtype=float))
+
         hist = getattr(agent, "history", {}) or {}
         ag = f.create_group("agent")
-        for grp in ("means", "sigmas_ctrl"):
+        for grp in ("means", "sigmas_ctrl", "sigmas_param"):
             gg = ag.create_group(grp)
             for k, v in hist.get(grp, {}).items():
                 gg.create_dataset(k, data=np.asarray(v, dtype=float))
-        infl = hist.get("influence")
-        if infl is not None and len(infl):
-            ag.create_dataset("influence", data=np.asarray(infl, dtype=float))
-        ag.attrs["param_names"] = list(getattr(agent.strategy, "param_names", []))
-        ag.attrs["all_names"] = list(getattr(agent.strategy, "all_names", []))
+        for grp in ("influence",):
+            v = hist.get(grp)
+            if v is not None and len(v):
+                ag.create_dataset(grp, data=np.asarray(v, dtype=float))
+        for grp in ("loss", "advantage_vector", "error_vector"):
+            v = hist.get(grp)
+            if v is not None and len(v):
+                ag.create_dataset(grp, data=np.asarray(v, dtype=float))
+        strategy = getattr(agent, "strategy", None)
+        if strategy is not None:
+            ag.attrs["param_names"] = list(getattr(strategy, "param_names", []))
+            ag.attrs["all_names"] = list(getattr(strategy, "all_names", []))
+            try:
+                ag.create_dataset("fisher",
+                                  data=np.asarray(strategy.compute_correlation_matrix(),
+                                                  dtype=float))
+                ag.create_dataset("feature_scales",
+                                  data=np.asarray(strategy.feature_scales(), dtype=float))
+            except Exception:
+                pass
 
 
 def load_run(path):
     """Return (data, meta); data['log'] holds arrays, data['agent'] the histories."""
-    out = {"log": {}, "agent": {"means": {}, "sigmas_ctrl": {}}}
+    out = {"log": {}, "stdp": {}, "agent": {"means": {}, "sigmas_ctrl": {},
+                                            "sigmas_param": {}}}
     with h5py.File(path, "r") as f:
         meta = {k: f.attrs[k] for k in f.attrs}
-        if "log" in f:
-            for k, v in f["log"].items():
+        for top in ("log", "stdp"):
+            if top not in f:
+                continue
+            for k, v in f[top].items():
+                if isinstance(v, h5py.Group):
+                    out[top].setdefault(k, {})
+                    for kk, vv in v.items():
+                        out[top][k][kk] = vv[()]
+                    continue
                 arr = v[()]
                 if getattr(arr, "dtype", None) is not None and arr.dtype.kind in ("S", "O"):
                     arr = np.array([x.decode() if isinstance(x, bytes) else x for x in arr])
-                out["log"][k] = arr
+                out[top][k] = arr
         if "agent" in f:
-            for grp in ("means", "sigmas_ctrl"):
+            for grp in ("means", "sigmas_ctrl", "sigmas_param"):
                 if grp in f["agent"]:
                     for k, v in f["agent"][grp].items():
                         out["agent"][grp][k] = v[()]
-            if "influence" in f["agent"]:
-                out["agent"]["influence"] = f["agent"]["influence"][()]
+            for grp in ("influence", "loss", "advantage_vector", "error_vector",
+                        "fisher", "feature_scales"):
+                if grp in f["agent"]:
+                    out["agent"][grp] = f["agent"][grp][()]
             out["agent"]["param_names"] = list(f["agent"].attrs.get("param_names", []))
             out["agent"]["all_names"] = list(f["agent"].attrs.get("all_names", []))
     return out, meta

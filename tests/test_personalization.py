@@ -55,3 +55,15 @@ def test_pose_stage_is_capped(nest_kernel):
     log = pers.run(pose_max_steps=5)
     assert log.stage[0] == "pose"
     assert log.stage[5] == "track"
+
+
+def test_driver_loops_trajectory():
+    looped = MocapTargetDriver(ankle_L=[0.1, 0.2, 0.3], ankle_R=[0.1, 0.2, 0.3],
+                               dt_ms=10.0, loop=True)
+    assert np.isclose(looped.target(0.0)["target_ankle_L"], 0.1)
+    assert np.isclose(looped.target(30.0)["target_ankle_L"], 0.1)
+    assert np.isclose(looped.target(40.0)["target_ankle_L"], 0.2)
+
+    clamped = MocapTargetDriver(ankle_L=[0.1, 0.2, 0.3], ankle_R=[0.1, 0.2, 0.3],
+                                dt_ms=10.0, loop=False)
+    assert np.isclose(clamped.target(100.0)["target_ankle_L"], 0.3)
