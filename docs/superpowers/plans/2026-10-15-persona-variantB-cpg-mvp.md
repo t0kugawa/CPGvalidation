@@ -119,6 +119,43 @@
   (`Registry.apply_explored_parameters`), which dominates the step cost but is
   required for personalization.
 
+## Decisions recorded 2026-10-18 (d): long-run (120 s) readiness audit
+
+- **Spike recorders are read *and* cleared every step.** The RGE/RGF recorders were
+  created and connected but never read or cleared, so every rhythm-generator spike
+  stayed in memory for the whole run. `Leg.get_rg_rates` now reads `n_events` and
+  clears them (the `cpg_2legs_fast` `new_spikes` constant-cost pattern) and returns
+  the normalised RGE/RGF activity, which is logged as `rg_e_L/R`, `rg_f_L/R` and
+  plotted in a new `plot_sensory` panel. All four per-leg spike recorders
+  (`rec_muse`, `rec_musf`, `rec_rge`, `rec_rgf`) are now bounded.
+- **`NoiseRecorder.samples` is a bounded deque** (`MAX_SAMPLES`). It is write-only
+  (`flush_distribution` has no caller) and grew ~28 samples/step.
+- **Remaining linear consumer:** `Agent.history` (`means`, `sigmas_ctrl`,
+  `sigmas_param`, `influence`, `error_vector`, `advantage_vector`, ~221 parameters),
+  ≈16 kB/step. Measured over a 1550-step full-size run: RSS 403 MB after build →
+  448.8 MB at step 1550. The growth decelerates (early slope 41.5 kB/step, late slope
+  18.0 kB/step — the late slope is the history, the early slope also includes allocator
+  warm-up), projecting **≈640–760 MB RSS at 12000 steps**. Affordable, so the history
+  is kept as-is (the figures plot the whole trajectory).
+- **Step rate:** 1550 steps inside a 700 s budget = **≈0.45 s/step** at `--final` sizes,
+  so 12000 steps ≈ **≈90 min** wall on this box. (The earlier `--budget-s 30` smoke test
+  read 0.79 s/step because one-time start-up dominates a 30 s window.)
+- **Joint limits *are* enforced.** MuJoCo 3.14.0 reports `jnt_limited = True` for all
+  16 hinge joints (`limited="auto"` + a non-default `range`); the ankle range is
+  `[-1.0, 2.6]`. The limit constraint is **soft**, so a strong muscle drive overshoots
+  it — the dataset-belt run reached **+2.947 rad** (a 0.35 rad violation). This is a
+  constraint-violation magnitude, not a missing limit.
+- **Observed closed-loop drift (RatA Lfast T1, 4 s, fast populations, `dataset` belt):**
+  `cut_rge_L` STDP grows monotonically **14.3 → 27.9** (1.95×) with 1862 updates,
+  while the `ia_*` projections stay ≈ 11.7–11.9. With `Wmax = 120` the CUT→RGE
+  projection will saturate during a 120 s run; expect the extensor drive to sit near
+  1.0. Watch `stdp/weight_mean/cut_rge_*` in the 2-minute outputs.
+- **Loss within the tracking stage is flat** (≈ 1.18–1.23 over the last 3 s, after the
+  stage 1→2 step raises it from the pose-stage level of ≈ 0.31). Personalization does
+  move the parameters (STDP `lambda` up to ±28 %, `a` ±12 % in 300 steps) but has no
+  measurable effect on the error: the loss is dominated by the saturated ankle
+  (limitation C1), not by the STDP hyper-parameters.
+
 ## Review Focus
 
 1. **A parameter that does not affect the error** — its perturbation does not covary with `A`: `influence()` ≈ 0 and its step ≈ 0 (must not drift to bounds). → Task 1/2.

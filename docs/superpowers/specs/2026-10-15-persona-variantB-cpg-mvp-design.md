@@ -267,3 +267,15 @@ muscle path off the bone axis so the tendons are visible when they shorten.
   `pose_hold_steps` consecutive steps with `max(|ankle_model − ankle_target|) < eps_pose`
   (or when `pose_max_steps` is reached). It gates the stage transition, never the
   optimization. `TODO(perf)` marks `Registry.apply_explored_parameters`.
+- **V21** Long-run (12000-step) readiness: all four per-leg spike recorders are read
+  **and cleared** each step (RGE/RGF activity is returned by `Leg.get_rg_rates` and
+  logged as `rg_*`), and `NoiseRecorder.samples` is a bounded deque. The only
+  remaining linear consumer is `Agent.history` (≈16 kB/step); measured RSS is 403 MB
+  after build and 448.8 MB at step 1550, projecting ≈640–760 MB at 12000 steps, and the
+  measured step rate at `--final` sizes is ≈0.45 s/step (≈90 min for 12000 steps).
+  MuJoCo 3.14.0 enforces the joint limits (`jnt_limited=True`, soft), so the observed
+  +2.947 rad is a constraint violation, not a missing limit. In the 4 s `dataset`-belt
+  run the `cut_rge_L` STDP weight grows 14.3 → 27.9 monotonically (Wmax = 120) while the
+  `ia_*` weights stay ≈ 11.7–11.9, and the tracking-stage loss is flat at ≈ 1.2:
+  personalization moves the STDP hyper-parameters but cannot move the loss, which the
+  saturated ankle (C1) dominates.
