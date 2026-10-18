@@ -1,0 +1,32 @@
+# Python dependencies for CPGvalidation (server install).
+#
+# python -m pip install -r requirements.txt
+#
+# Note: NEST is provided here as the `nest-simulator` pip wheel (3.10.0).
+# If the server already ships NEST via conda or a source build, drop that line
+# and use the existing installation instead.
+#
+# Headless MuJoCo rendering (offscreen video) also needs the OS-level GL stack,
+# not just pip packages: set MUJOCO_GL=osmesa and install the OSMesa/EGL
+# libraries (e.g. `apt-get install libosmesa6 libgl1`). Leave MUJOCO_GL unset
+# (`--no-render`) if the server has no GL.
+
+# --- simulation core ---
+nest-simulator==3.10.0
+mujoco==3.14.0
+
+# --- numerics / data ---
+numpy==2.5.3
+scipy==1.18.1
+pandas==3.0.6
+h5py==3.16.0
+
+# --- plotting / rendering / video ---
+matplotlib==3.11.2
+imageio==2.38.0
+imageio-ffmpeg==0.6.0
+pillow==12.3.0
+
+# --- dev tools ---
+pytest==9.1.1
+ruff==0.17.0

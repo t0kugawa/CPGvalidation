@@ -38,12 +38,13 @@
               material="grid_mat"
               surfacevel="-0.3 0 0 0 0 0"
               contype="1" conaffinity="1"
-              condim="3" friction="1.2 0.01 0.0002"/>
+              condim="3" friction="1.2 0.01 0.0002"
+              solref="0.02 1" solimp="0.9 0.95 0.001"/>
 
         <!-- ============================================================ -->
         <!--                      CONTROLLED HINDLIMB L                   -->
         <!-- ============================================================ -->
-        <body name="pelvis_m_L" pos="0 0.050 0.075">
+        <body name="pelvis_m_L" pos="0 0.050 0.075" mocap="true">
             <geom name="pelvis_m_geom_L" type="capsule" fromto="-0.015 0 0 0.015 0 0" size="0.010" rgba="0.35 0.35 0.4 1"/>
             <body name="thigh_m_L" pos="0 0 0">
                 <joint name="hip_m_L" type="hinge" axis="0 1 0" range="-1.57 1.05" damping="0.003"/>
@@ -54,7 +55,7 @@
                     <site name="sol_origin_m_L" pos="-0.026 0.007 -0.012" size="0.0012" material="muscle_sol"/>
                     <site name="ta_origin_m_L" pos="-0.020 -0.007 -0.014" size="0.0012" material="muscle_ta"/>
                     <body name="foot_m_L" pos="-0.028 0 -0.024">
-                        <joint name="ankle_m_L" type="hinge" axis="0 1 0" range="-0.8 1.4" damping="0.001" frictionloss="0.0005"/>
+                        <joint name="ankle_m_L" type="hinge" axis="0 1 0" range="-0.8 2.1" damping="0.001" frictionloss="0.0005"/>
                         <geom name="foot_m_geom_L" type="capsule" fromto="-0.008 0 0.004 0.022 0 -0.004" size="0.0045" rgba="0.85 0.45 0.25 1" contype="2" conaffinity="1"/>
                         <site name="sol_insert_m_L" pos="-0.009 0.007 0.003" size="0.0012" material="muscle_sol"/>
                         <site name="ta_insert_m_L" pos="0.012 -0.007 0.004" size="0.0012" material="muscle_ta"/>
@@ -80,7 +81,7 @@
         <!-- ============================================================ -->
         <!--                      CONTROLLED HINDLIMB R                   -->
         <!-- ============================================================ -->
-        <body name="pelvis_m_R" pos="0 -0.050 0.075">
+        <body name="pelvis_m_R" pos="0 -0.050 0.075" mocap="true">
             <geom name="pelvis_m_geom_R" type="capsule" fromto="-0.015 0 0 0.015 0 0" size="0.010" rgba="0.35 0.35 0.4 1"/>
             <body name="thigh_m_R" pos="0 0 0">
                 <joint name="hip_m_R" type="hinge" axis="0 1 0" range="-1.57 1.05" damping="0.003"/>
@@ -91,7 +92,7 @@
                     <site name="sol_origin_m_R" pos="-0.026 -0.007 -0.012" size="0.0012" material="muscle_sol"/>
                     <site name="ta_origin_m_R" pos="-0.020 0.007 -0.014" size="0.0012" material="muscle_ta"/>
                     <body name="foot_m_R" pos="-0.028 0 -0.024">
-                        <joint name="ankle_m_R" type="hinge" axis="0 1 0" range="-0.8 1.4" damping="0.001" frictionloss="0.0005"/>
+                        <joint name="ankle_m_R" type="hinge" axis="0 1 0" range="-0.8 2.1" damping="0.001" frictionloss="0.0005"/>
                         <geom name="foot_m_geom_R" type="capsule" fromto="-0.008 0 0.004 0.022 0 -0.004" size="0.0045" rgba="0.85 0.45 0.25 1" contype="2" conaffinity="1"/>
                         <site name="sol_insert_m_R" pos="-0.009 -0.007 0.003" size="0.0012" material="muscle_sol"/>
                         <site name="ta_insert_m_R" pos="0.012 0.007 0.004" size="0.0012" material="muscle_ta"/>
@@ -117,19 +118,23 @@
         <!-- ============================================================ -->
         <!--                       TARGET HINDLIMB L                      -->
         <!-- ============================================================ -->
-        <body name="pelvis_ref_L" pos="0 0.150 0.075">
+        <!-- Mocap base: the hip is placed each frame at the dataset's GT
+             position (approach A). Link lengths are the trial's per-side mean
+             segment lengths (L: thigh 30.2 / shank 35.7 / foot 21.3 mm) while
+             the rest DIRECTIONS are preserved (see loader/mocap.py rest angles). -->
+        <body name="pelvis_ref_L" pos="0 0.150 0.065" mocap="true">
             <geom name="pelvis_ref_geom_L" type="capsule" fromto="-0.015 0 0 0.015 0 0" size="0.010" rgba="0.3 0.35 0.4 0.75"/>
             <body name="thigh_ref_L" pos="0 0 0">
                 <joint name="hip_ref_L" type="hinge" axis="0 1 0" range="-1.57 1.05" damping="0.003"/>
-                <geom name="thigh_ref_geom_L" type="capsule" fromto="0 0 0 0.012 0 -0.032" size="0.0075" material="bone_mat_ref"/>
-                <body name="shank_ref_L" pos="0.012 0 -0.032">
+                <geom name="thigh_ref_geom_L" type="capsule" fromto="0 0 0 0.01006 0 -0.02683" size="0.0075" material="bone_mat_ref"/>
+                <body name="shank_ref_L" pos="0.01006 0 -0.02683">
                     <joint name="knee_ref_L" type="hinge" axis="0 1 0" range="-1.22 1.54" damping="0.003"/>
-                    <geom name="shank_ref_geom_L" type="capsule" fromto="0 0 0 -0.028 0 -0.024" size="0.006" material="bone_mat_ref"/>
-                    <body name="foot_ref_L" pos="-0.028 0 -0.024">
-                        <joint name="ankle_ref_L" type="hinge" axis="0 1 0" range="-0.8 1.4" damping="0.001" frictionloss="0.0005"/>
-                        <geom name="foot_ref_geom_L" type="capsule" fromto="-0.008 0 0.004 0.022 0 -0.004" size="0.0045" material="bone_mat_ref"/>
-                        <site name="paw_contact_ref_L" pos="0.008 0 -0.0045" size="0.003" rgba="0 0.8 1 0.6"/>
-                        <body name="toe_ref_L" pos="0.022 0 -0.004">
+                    <geom name="shank_ref_geom_L" type="capsule" fromto="0 0 0 -0.02502 0 -0.02144" size="0.006" material="bone_mat_ref"/>
+                    <body name="foot_ref_L" pos="-0.02502 0 -0.02144">
+                        <joint name="ankle_ref_L" type="hinge" axis="0 1 0" range="-0.8 2.1" damping="0.001" frictionloss="0.0005"/>
+                        <geom name="foot_ref_geom_L" type="capsule" fromto="-0.0074 0 0.0037 0.0204 0 -0.0037" size="0.0045" material="bone_mat_ref"/>
+                        <site name="paw_contact_ref_L" pos="0.0074 0 -0.0042" size="0.003" rgba="0 0.8 1 0.6"/>
+                        <body name="toe_ref_L" pos="0.0204 0 -0.0037">
                             <joint name="toe_ref_jnt_L" type="hinge" axis="0 1 0" range="-0.3 0.8" damping="0.001"/>
                             <geom name="toe_ref_geom_L" type="capsule" fromto="0 0 0 0.012 0 -0.002" size="0.0035" material="bone_mat_ref"/>
                             <site name="toe_tip_ref_L" pos="0.012 0 -0.002" size="0.002" rgba="0 0.8 1 0.6"/>
@@ -142,19 +147,21 @@
         <!-- ============================================================ -->
         <!--                       TARGET HINDLIMB R                      -->
         <!-- ============================================================ -->
-        <body name="pelvis_ref_R" pos="0 -0.150 0.075">
+        <!-- Mocap base (dataset GT); link lengths = trial per-side means for R
+             (thigh 33.5 / shank 39.6 / foot 22.2 mm). -->
+        <body name="pelvis_ref_R" pos="0 -0.150 0.065" mocap="true">
             <geom name="pelvis_ref_geom_R" type="capsule" fromto="-0.015 0 0 0.015 0 0" size="0.010" rgba="0.3 0.35 0.4 0.75"/>
             <body name="thigh_ref_R" pos="0 0 0">
                 <joint name="hip_ref_R" type="hinge" axis="0 1 0" range="-1.57 1.05" damping="0.003"/>
-                <geom name="thigh_ref_geom_R" type="capsule" fromto="0 0 0 0.012 0 -0.032" size="0.0075" material="bone_mat_ref"/>
-                <body name="shank_ref_R" pos="0.012 0 -0.032">
+                <geom name="thigh_ref_geom_R" type="capsule" fromto="0 0 0 0.01161 0 -0.03096" size="0.0075" material="bone_mat_ref"/>
+                <body name="shank_ref_R" pos="0.01161 0 -0.03096">
                     <joint name="knee_ref_R" type="hinge" axis="0 1 0" range="-1.22 1.54" damping="0.003"/>
-                    <geom name="shank_ref_geom_R" type="capsule" fromto="0 0 0 -0.028 0 -0.024" size="0.006" material="bone_mat_ref"/>
-                    <body name="foot_ref_R" pos="-0.028 0 -0.024">
-                        <joint name="ankle_ref_R" type="hinge" axis="0 1 0" range="-0.8 1.4" damping="0.001" frictionloss="0.0005"/>
-                        <geom name="foot_ref_geom_R" type="capsule" fromto="-0.008 0 0.004 0.022 0 -0.004" size="0.0045" material="bone_mat_ref"/>
-                        <site name="paw_contact_ref_R" pos="0.008 0 -0.0045" size="0.003" rgba="0 0.8 1 0.6"/>
-                        <body name="toe_ref_R" pos="0.022 0 -0.004">
+                    <geom name="shank_ref_geom_R" type="capsule" fromto="0 0 0 -0.02783 0 -0.02385" size="0.006" material="bone_mat_ref"/>
+                    <body name="foot_ref_R" pos="-0.02783 0 -0.02385">
+                        <joint name="ankle_ref_R" type="hinge" axis="0 1 0" range="-0.8 2.1" damping="0.001" frictionloss="0.0005"/>
+                        <geom name="foot_ref_geom_R" type="capsule" fromto="-0.0078 0 0.0039 0.0215 0 -0.0039" size="0.0045" material="bone_mat_ref"/>
+                        <site name="paw_contact_ref_R" pos="0.0078 0 -0.0044" size="0.003" rgba="0 0.8 1 0.6"/>
+                        <body name="toe_ref_R" pos="0.0215 0 -0.0039">
                             <joint name="toe_ref_jnt_R" type="hinge" axis="0 1 0" range="-0.3 0.8" damping="0.001"/>
                             <geom name="toe_ref_geom_R" type="capsule" fromto="0 0 0 0.012 0 -0.002" size="0.0035" material="bone_mat_ref"/>
                             <site name="toe_tip_ref_R" pos="0.012 0 -0.002" size="0.002" rgba="0 0.8 1 0.6"/>
@@ -192,26 +199,26 @@
     <actuator>
         <!-- Controlled leg L muscles + non-ankle joint servos -->
         <muscle name="sol_m_L" tendon="sol_tendon_m_L"
-                lengthrange="0.030 0.056" force="3.8" scale="200"
+                lengthrange="0.0027 0.0195" force="8.0" scale="200"
                 lmin="0.5" lmax="1.6" vmax="10" fpmax="0.5" fvmax="1.2"
-                timeconst="0.001 0.001" ctrlrange="0 1" forcerange="-10 10"/>
+                timeconst="0.010 0.010" ctrlrange="0 1" forcerange="-10 10"/>
         <muscle name="ta_m_L" tendon="ta_tendon_m_L"
-                lengthrange="0.022 0.040" force="2.8" scale="200"
+                lengthrange="0.0005 0.0248" force="2.8" scale="200"
                 lmin="0.5" lmax="1.6" vmax="10" fpmax="0.5" fvmax="1.2"
-                timeconst="0.001 0.001" ctrlrange="0 1" forcerange="-10 10"/>
+                timeconst="0.010 0.010" ctrlrange="0 1" forcerange="-10 10"/>
         <position name="hip_m_ctrl_L" joint="hip_m_L" kp="1.0" kv="0.02" ctrlrange="-1.57 1.05"/>
         <position name="knee_m_ctrl_L" joint="knee_m_L" kp="1.0" kv="0.02" ctrlrange="-1.22 1.54"/>
         <position name="toe_m_ctrl_L" joint="toe_m_jnt_L" kp="2.0" kv="0.02" ctrlrange="-0.3 0.8"/>
 
         <!-- Controlled leg R muscles + non-ankle joint servos -->
         <muscle name="sol_m_R" tendon="sol_tendon_m_R"
-                lengthrange="0.030 0.056" force="3.8" scale="200"
+                lengthrange="0.0027 0.0195" force="8.0" scale="200"
                 lmin="0.5" lmax="1.6" vmax="10" fpmax="0.5" fvmax="1.2"
-                timeconst="0.001 0.001" ctrlrange="0 1" forcerange="-10 10"/>
+                timeconst="0.010 0.010" ctrlrange="0 1" forcerange="-10 10"/>
         <muscle name="ta_m_R" tendon="ta_tendon_m_R"
-                lengthrange="0.022 0.040" force="2.8" scale="200"
+                lengthrange="0.0005 0.0248" force="2.8" scale="200"
                 lmin="0.5" lmax="1.6" vmax="10" fpmax="0.5" fvmax="1.2"
-                timeconst="0.001 0.001" ctrlrange="0 1" forcerange="-10 10"/>
+                timeconst="0.010 0.010" ctrlrange="0 1" forcerange="-10 10"/>
         <position name="hip_m_ctrl_R" joint="hip_m_R" kp="1.0" kv="0.02" ctrlrange="-1.57 1.05"/>
         <position name="knee_m_ctrl_R" joint="knee_m_R" kp="1.0" kv="0.02" ctrlrange="-1.22 1.54"/>
         <position name="toe_m_ctrl_R" joint="toe_m_jnt_R" kp="2.0" kv="0.02" ctrlrange="-0.3 0.8"/>
@@ -219,13 +226,13 @@
         <!-- Target leg L servos -->
         <position name="hip_ref_ctrl_L" joint="hip_ref_L" kp="1.0" kv="0.02" ctrlrange="-1.57 1.05"/>
         <position name="knee_ref_ctrl_L" joint="knee_ref_L" kp="1.0" kv="0.02" ctrlrange="-1.22 1.54"/>
-        <position name="ankle_ref_ctrl_L" joint="ankle_ref_L" kp="1.0" kv="0.05" ctrlrange="-0.8 1.4"/>
+        <position name="ankle_ref_ctrl_L" joint="ankle_ref_L" kp="1.0" kv="0.05" ctrlrange="-0.8 2.1"/>
         <position name="toe_ref_ctrl_L" joint="toe_ref_jnt_L" kp="0.1" kv="0.005" ctrlrange="-0.3 0.8"/>
 
         <!-- Target leg R servos -->
         <position name="hip_ref_ctrl_R" joint="hip_ref_R" kp="1.0" kv="0.02" ctrlrange="-1.57 1.05"/>
         <position name="knee_ref_ctrl_R" joint="knee_ref_R" kp="1.0" kv="0.02" ctrlrange="-1.22 1.54"/>
-        <position name="ankle_ref_ctrl_R" joint="ankle_ref_R" kp="1.0" kv="0.05" ctrlrange="-0.8 1.4"/>
+        <position name="ankle_ref_ctrl_R" joint="ankle_ref_R" kp="1.0" kv="0.05" ctrlrange="-0.8 2.1"/>
         <position name="toe_ref_ctrl_R" joint="toe_ref_jnt_R" kp="0.1" kv="0.005" ctrlrange="-0.3 0.8"/>
     </actuator>
 

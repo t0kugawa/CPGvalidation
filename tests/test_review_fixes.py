@@ -99,16 +99,6 @@ def test_acceptance_ignores_pose_stage():
     assert res["angle_coverage"] == 1.0
 
 
-# --- Important: target fitted into the ankle joint range ---
-
-def test_fit_to_joint_range():
-    from personalize import fit_to_joint_range
-    a = np.linspace(-2.5, -0.5, 100)
-    b = fit_to_joint_range(a)
-    assert b.min() >= -0.8 - 1e-9 and b.max() <= 1.4 + 1e-9
-    assert np.corrcoef(a, b)[0, 1] > 0.99
-
-
 # --- Critical 1: entry point calls run_personalization with n_steps ---
 
 def test_main_passes_n_steps(monkeypatch):

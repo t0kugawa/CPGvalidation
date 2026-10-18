@@ -16,7 +16,8 @@ class MocapTargetDriver:
     are optional (default to the rig's procedural reference when omitted).
     """
     def __init__(self, ankle_L, ankle_R, dt_ms: float = 10.0, pose=None,
-                 hip_L=None, knee_L=None, hip_R=None, knee_R=None):
+                 hip_L=None, knee_L=None, hip_R=None, knee_R=None,
+                 hip_x_L=None, hip_z_L=None, hip_x_R=None, hip_z_R=None):
         self.ankle_L = np.asarray(ankle_L, dtype=np.float64)
         self.ankle_R = np.asarray(ankle_R, dtype=np.float64)
         self.dt_ms = float(dt_ms)
@@ -24,6 +25,10 @@ class MocapTargetDriver:
         self.knee_L = None if knee_L is None else np.asarray(knee_L, dtype=np.float64)
         self.hip_R = None if hip_R is None else np.asarray(hip_R, dtype=np.float64)
         self.knee_R = None if knee_R is None else np.asarray(knee_R, dtype=np.float64)
+        self.hip_x_L = None if hip_x_L is None else np.asarray(hip_x_L, dtype=np.float64)
+        self.hip_z_L = None if hip_z_L is None else np.asarray(hip_z_L, dtype=np.float64)
+        self.hip_x_R = None if hip_x_R is None else np.asarray(hip_x_R, dtype=np.float64)
+        self.hip_z_R = None if hip_z_R is None else np.asarray(hip_z_R, dtype=np.float64)
         if pose is None:
             self._pose = (float(self.ankle_L[0]), float(self.ankle_R[0]))
         else:
@@ -47,6 +52,10 @@ class MocapTargetDriver:
             "target_knee_L": self._at(self.knee_L, t_ms),
             "target_hip_R": self._at(self.hip_R, t_ms),
             "target_knee_R": self._at(self.knee_R, t_ms),
+            "target_hipx_L": self._at(self.hip_x_L, t_ms),
+            "target_hipz_L": self._at(self.hip_z_L, t_ms),
+            "target_hipx_R": self._at(self.hip_x_R, t_ms),
+            "target_hipz_R": self._at(self.hip_z_R, t_ms),
         }
 
 
@@ -184,12 +193,12 @@ class Personalizer:
                 frac = min(1.0, (step - self.belt_start_step + 1) / self.belt_ramp_steps)
                 self.rig.set_treadmill_surfacevel(self.belt_mps * frac)
             if stage == "pose":
-                tgt_L, tgt_R = self.target_driver.pose()
-                rig_kwargs = {"target_ankle_L": tgt_L, "target_ankle_R": tgt_R}
+                # Hold the whole target (incl. the mocap hip base) at t=0.
+                rig_kwargs = self.target_driver.target(0.0)
             else:
                 rig_kwargs = self.target_driver.target(self.cpg.current_time_ms)
-                tgt_L = rig_kwargs["target_ankle_L"]
-                tgt_R = rig_kwargs["target_ankle_R"]
+            tgt_L = rig_kwargs["target_ankle_L"]
+            tgt_R = rig_kwargs["target_ankle_R"]
 
             actions = self.agent.sample_actions()
             self.registry.apply_explored_parameters(actions)

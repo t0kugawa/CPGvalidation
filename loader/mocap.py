@@ -51,50 +51,64 @@ def _marker_columns(side: str, marker: str) -> list[str]:
     return [f"{marker}_{side}_{ax}" for ax in ("x", "y", "z")]
 
 
-def _angle_between(v1: np.ndarray, v2: np.ndarray) -> np.ndarray:
-    n1 = np.linalg.norm(v1, axis=-1)
-    n2 = np.linalg.norm(v2, axis=-1)
-    denom = np.where((n1 * n2) > 1e-12, n1 * n2, 1.0)
-    cos = np.clip(np.sum(v1 * v2, axis=-1) / denom, -1.0, 1.0)
-    ang = np.arccos(cos)
-    # Signed angle in the sagittal (x-z) plane for flexion/extension.
-    cross_y = v1[..., 2] * v2[..., 0] - v1[..., 0] * v2[..., 2]
-    return np.where(cross_y < 0.0, -ang, ang)
+# Rest-pose segment directions (rad) of the TARGET limb in
+# dual_rat_hindlimb.xml, i.e. the sagittal orientation of each link in its own
+# rest frame: thigh fromto (0.012, -0.032); shank fromto (-0.028, -0.024);
+# ankle->metatarsal (toe-base) offset (0.022, -0.004). The target limb's link
+# LENGTHS are set from the trial's own segment lengths, but these DIRECTIONS
+# (hence the rest angles) are preserved. Keep in sync with the XML.
+THIGH_REST_ANG = float(np.arctan2(-0.032, 0.012))
+SHANK_REST_ANG = float(np.arctan2(-0.024, -0.028))
+FOOT_REST_ANG = float(np.arctan2(-0.004, 0.022))
 
 
-def markers_to_angles(df: pd.DataFrame, rest_pose: Dict[str, float] | None) -> Dict[str, np.ndarray]:
+def _marker_xyz(df: pd.DataFrame, side: str, marker: str) -> np.ndarray:
+    cols = _marker_columns(side, marker)
+    missing = [c for c in cols if c not in df.columns]
+    if missing:
+        raise ValueError(f"Missing marker columns {missing} for {marker}_{side}")
+    arr = df[cols].to_numpy(dtype=np.float64)
+    if not np.all(np.isfinite(arr)):
+        raise ValueError(f"Non-finite marker values for {marker}_{side}")
+    return arr
+
+
+def markers_to_angles(df: pd.DataFrame) -> Dict[str, np.ndarray]:
     """
-    Converts marker coordinates (mm) into per-side joint angles (rad) using
-    planar sagittal marker triples: hip = angle(IC->GT, GT->KN),
-    knee = angle(GT->KN, KN->EA), ankle = angle(KN->EA, EA->MH).
-    When a rest_pose is given, the rest-pose angle is subtracted (zero-aligned).
+    Point-based rigid-bone reconstruction of the target limb.
+
+    The articulated chain is built from the marker points themselves: the
+    absolute sagittal (x-z) orientation of each segment (thigh GT->KN, shank
+    KN->EA, foot EA->MH) is mapped to the rig's hinge angles so the target limb
+    reproduces the marker chain. Unlike unsigned segment-to-segment interior
+    angles, this preserves orientation and sign, and yields the true relative
+    joint angles (θ_hip = θ_thigh_rest - φ_thigh, θ_knee = (θ_shank_rest -
+    φ_shank) - θ_hip, θ_ankle = (θ_foot_rest - φ_foot) - θ_hip - θ_knee).
+
+    Also returns the hip (GT) position `hip_x_{side}`/`hip_z_{side}` in mm so the
+    target limb's base can track the dataset; the mapping is absolute, referenced
+    to the rig's rest directions.
     """
     out: Dict[str, np.ndarray] = {}
     for side in SIDES:
-        pts = {}
-        for marker in MARKERS:
-            cols = _marker_columns(side, marker)
-            missing = [c for c in cols if c not in df.columns]
-            if missing:
-                raise ValueError(f"Missing marker columns {missing} for {marker}_{side}")
-            arr = df[cols].to_numpy(dtype=np.float64)
-            if not np.all(np.isfinite(arr)):
-                raise ValueError(f"Non-finite marker values for {marker}_{side}")
-            pts[marker] = arr
+        gt = _marker_xyz(df, side, "GT")
+        kn = _marker_xyz(df, side, "KN")
+        ea = _marker_xyz(df, side, "EA")
+        mh = _marker_xyz(df, side, "MH")
 
-        thigh = pts["GT"] - pts["IC"]
-        shank = pts["KN"] - pts["GT"]
-        foot = pts["EA"] - pts["KN"]
-        toe = pts["MH"] - pts["EA"]
+        phi_thigh = np.arctan2(kn[:, 2] - gt[:, 2], kn[:, 0] - gt[:, 0])
+        phi_shank = np.arctan2(ea[:, 2] - kn[:, 2], ea[:, 0] - kn[:, 0])
+        phi_foot = np.arctan2(mh[:, 2] - ea[:, 2], mh[:, 0] - ea[:, 0])
 
-        hip = _angle_between(thigh, shank)
-        knee = _angle_between(shank, foot)
-        ankle = _angle_between(foot, toe)
+        hip = THIGH_REST_ANG - phi_thigh
+        knee = (SHANK_REST_ANG - phi_shank) - hip
+        ankle = (FOOT_REST_ANG - phi_foot) - hip - knee
 
-        for joint, arr in (("hip", hip), ("knee", knee), ("ankle", ankle)):
-            if rest_pose is not None and f"{joint}_{side}" in rest_pose:
-                arr = arr - float(rest_pose[f"{joint}_{side}"])
-            out[f"{joint}_{side}"] = arr
+        out[f"hip_{side}"] = hip
+        out[f"knee_{side}"] = knee
+        out[f"ankle_{side}"] = ankle
+        out[f"hip_x_{side}"] = gt[:, 0]
+        out[f"hip_z_{side}"] = gt[:, 2]
 
     return out
 
@@ -104,13 +118,12 @@ class MocapLoader:
     Loads a Zenodo mocap trial, extracts per-side joint angles, and resamples
     them to the simulation timestep.
     """
-    def __init__(self, path: str, rest_pose: Dict[str, float] | None = None,
-                 dt_ms: float = 10.0, sample_hz: float = 500.0):
+    def __init__(self, path: str, dt_ms: float = 10.0, sample_hz: float = 500.0):
         self.path = path
         self.dt_ms = float(dt_ms)
         self.df = pd.read_csv(path)
         self.meta = decode_trial_name(path)
-        self.angles = markers_to_angles(self.df, rest_pose)
+        self.angles = markers_to_angles(self.df)
         self._t_ms = np.arange(len(self.df)) * (1000.0 / sample_hz)
         self._resampled = self._resample()
 

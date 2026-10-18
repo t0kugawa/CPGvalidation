@@ -71,12 +71,12 @@ def run(duration_s, view, width, height, fps, out_dir,
             rig.set_treadmill_surfacevel(belt_mps * frac)
 
         if stage == "pose":
-            tgt_L, tgt_R = driver.pose()
-            rig_kwargs = {"target_ankle_L": tgt_L, "target_ankle_R": tgt_R}
+            # Hold the whole target (incl. the mocap hip base) at t=0.
+            rig_kwargs = driver.target(0.0)
         else:
             rig_kwargs = driver.target(cpg.current_time_ms)
-            tgt_L = rig_kwargs["target_ankle_L"]
-            tgt_R = rig_kwargs["target_ankle_R"]
+        tgt_L = rig_kwargs["target_ankle_L"]
+        tgt_R = rig_kwargs["target_ankle_R"]
 
         actions = agent.sample_actions()
         reg.apply_explored_parameters(actions)

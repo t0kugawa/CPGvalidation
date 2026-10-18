@@ -26,3 +26,4 @@ fastrun/
 *.mp4
 run_output/
 h5out/
+test_results/

@@ -19,38 +19,13 @@ from t2xcpg.cpg import L2CPG
 from model.leg import Leg as MuJoCo_Leg
 from loader.mocap import MocapLoader, treadmill_surfacevel
 from loader.stats import StatsLoader, LocomotionMetrics
+from model.model_cfg import TREADMILL_PENETRATION_M
 from persona.parameter import reset_rng_stream
 
 DT_MS = 10.0
-SIM_REST_ANKLE = 0.3
 
 DEFAULT_REFERENCE = "data/zenodo/DatasetMotionCaputure/RatA/RatA_x1p50_Lfast/RatA_x1p50_Lfast_T1.csv"
 DEFAULT_STATS = "data/zenodo/DatasetStatisticalAnalysis/StatisticalDataTable.csv"
-
-
-def align_to_sim(ankle: np.ndarray, sim_rest: float = SIM_REST_ANKLE) -> np.ndarray:
-    """
-    Zero-aligns a mocap ankle trajectory to the MuJoCo rest pose: the trial's
-    initial pose maps to the sim's rest ankle angle.
-    """
-    a = np.asarray(ankle, dtype=np.float64)
-    return a - a[0] + sim_rest
-
-
-def fit_to_joint_range(traj: np.ndarray, lo: float = -0.8, hi: float = 1.4) -> np.ndarray:
-    """
-    Linearly maps a trajectory into the joint range [lo, hi] when its
-    excursion exceeds (or is mis-centred within) the achievable range, so the
-    target is physically realisable. Preserves shape (monotone affine map).
-    """
-    a = np.asarray(traj, dtype=np.float64)
-    amin, amax = float(a.min()), float(a.max())
-    if amax - amin <= (hi - lo) and lo <= amin and amax <= hi:
-        return a.copy()
-    span = amax - amin
-    if span < 1e-12:
-        return np.full_like(a, 0.5 * (lo + hi))
-    return lo + (a - amin) * (hi - lo) / span
 
 
 def acceptance_from_log(log,
@@ -74,18 +49,6 @@ def acceptance_from_log(log,
     return biological_acceptance({}, stats, err,
                                  phase_mask=np.ones(err.shape, dtype=bool),
                                  margin=margin, coverage=coverage)
-
-
-def reachable(ankle: np.ndarray, lo: float = -0.6, hi: float = 0.30) -> np.ndarray:
-    """
-    Maps a mocap ankle trajectory into a reachable band [lo, hi] (inside the
-    joint limit) so the target is physically trackable. Preserves shape.
-    """
-    a = np.asarray(ankle, dtype=np.float64)
-    amin, amax = float(a.min()), float(a.max())
-    if amax - amin < 1e-9:
-        return np.full_like(a, 0.5 * (lo + hi))
-    return lo + (a - amin) * (hi - lo) / (amax - amin)
 
 
 def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
@@ -124,31 +87,53 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
     rig = MuJoCo_Leg(mujoco_cfg=os.path.join(BASE_DIR, "dual_rat_hindlimb.xml"),
                      dt_ms=DT_MS)
 
-    loader = MocapLoader(reference_path, rest_pose=None, dt_ms=DT_MS)
+    loader = MocapLoader(reference_path, dt_ms=DT_MS)
     slow, fast = treadmill_surfacevel(loader.meta)
     belt = fast if loader.meta.condition != "T" else slow
     rig.set_treadmill_surfacevel(belt)
     angles = loader.resample()
+
+    # Approach A: the target limb is driven straight from the dataset points —
+    # absolute segment orientations (-> rig hinge angles, already in range) and a
+    # mocap hip base tracking the GT marker. No range rescaling / zero-alignment.
+    hip_x = {s: (angles[f"hip_x_{s}"] - np.mean(angles[f"hip_x_{s}"])) / 1000.0
+             for s in ("L", "R")}
+    hip_z = {s: angles[f"hip_z_{s}"] / 1000.0 for s in ("L", "R")}
     tgt = {
-        "ankle_L": reachable(align_to_sim(angles["ankle_L"]), -0.6, 0.30),
-        "ankle_R": reachable(align_to_sim(angles["ankle_R"]), -0.6, 0.30),
-        "hip_L": fit_to_joint_range(angles["hip_L"], -1.57, 1.05),
-        "knee_L": fit_to_joint_range(angles["knee_L"], -1.22, 1.54),
-        "hip_R": fit_to_joint_range(angles["hip_R"], -1.57, 1.05),
-        "knee_R": fit_to_joint_range(angles["knee_R"], -1.22, 1.54),
+        "ankle_L": np.asarray(angles["ankle_L"], dtype=np.float64),
+        "ankle_R": np.asarray(angles["ankle_R"], dtype=np.float64),
+        "hip_L": np.asarray(angles["hip_L"], dtype=np.float64),
+        "knee_L": np.asarray(angles["knee_L"], dtype=np.float64),
+        "hip_R": np.asarray(angles["hip_R"], dtype=np.float64),
+        "knee_R": np.asarray(angles["knee_R"], dtype=np.float64),
     }
-    # Option 2a: start both limbs at the target's first pose so the ankle
-    # angles match at t=0 (the target is then reachable and moving).
+
+    # Place the belt at the dataset's ground over the window the run actually
+    # traverses: the driver clamps at the trial end, so frames past the step
+    # budget are never reached. Use the lowest point the target feet reach there.
+    n_win = min(int(max_steps), len(angles["hip_L"]))
+    win = {k: np.asarray(v)[:n_win] for k, v in angles.items()}
+    prof = rig.preview_ref_foot_z(
+        {s: hip_x[s][:n_win] for s in ("L", "R")},
+        {s: hip_z[s][:n_win] for s in ("L", "R")}, win)
+    foot_z = np.concatenate([prof["L"], prof["R"]])
+    rig.set_treadmill_height(float(np.percentile(foot_z, 5)) + TREADMILL_PENETRATION_M)
+
+    # Start both limbs at the target's first pose so the ankle angles match at
+    # t=0 (the target is then reachable and moving), with the hips at the GT.
     rig.reset(pose={
         "L": {"hip": float(tgt["hip_L"][0]), "knee": float(tgt["knee_L"][0]),
               "ankle": float(tgt["ankle_L"][0])},
         "R": {"hip": float(tgt["hip_R"][0]), "knee": float(tgt["knee_R"][0]),
               "ankle": float(tgt["ankle_R"][0])},
-    })
+    }, hip_pos={"L": (float(hip_x["L"][0]), float(hip_z["L"][0])),
+                "R": (float(hip_x["R"][0]), float(hip_z["R"][0]))})
     driver = MocapTargetDriver(
         ankle_L=tgt["ankle_L"], ankle_R=tgt["ankle_R"],
         hip_L=tgt["hip_L"], knee_L=tgt["knee_L"],
         hip_R=tgt["hip_R"], knee_R=tgt["knee_R"], dt_ms=DT_MS,
+        hip_x_L=hip_x["L"], hip_z_L=hip_z["L"],
+        hip_x_R=hip_x["R"], hip_z_R=hip_z["R"],
     )
 
     agent = Agent(registry=reg, lr_mu=0.03, lr_sigma_ctrl=0.005,

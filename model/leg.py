@@ -40,6 +40,7 @@ class Leg:
         self.model = mujoco.MjModel.from_xml_path(self.xml_path)
         self.data = mujoco.MjData(self.model)
         self.physics_dt = self.model.opt.timestep
+        self._belt_z = None
 
         self.j_hip_m = {s: self._jid(f"hip_m_{s}") for s in SIDES}
         self.j_knee_m = {s: self._jid(f"knee_m_{s}") for s in SIDES}
@@ -79,6 +80,27 @@ class Leg:
             s: [self._gid(f"foot_ref_geom_{s}"), self._gid(f"toe_ref_geom_{s}")]
             for s in SIDES
         }
+
+        # Target-limb mocap bases: the hip (pelvis_ref_*) is placed each frame at
+        # the dataset's GT position, so the target limb reproduces the trial.
+        # TODO(option-B): a future version may instead place an independent mocap
+        # body at EVERY marker (IC/GT/KN/EA/MH) to reproduce the recorded points
+        # exactly, rather than the articulated rigid-bone chain (approach A).
+        self.ref_pelvis = {
+            s: mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, f"pelvis_ref_{s}")
+            for s in SIDES
+        }
+        self.ref_mocap = {s: int(self.model.body_mocapid[self.ref_pelvis[s]]) for s in SIDES}
+        self.ref_base_y = {s: float(self.model.body_pos[self.ref_pelvis[s], 1]) for s in SIDES}
+        # Controlled-limb mocap bases: the model hip also tracks the dataset GT so
+        # both limbs live in the dataset frame (non-ankle joints already follow the
+        # target trajectory per spec D9), keeping their feet at comparable heights.
+        self.model_pelvis = {
+            s: mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, f"pelvis_m_{s}")
+            for s in SIDES
+        }
+        self.model_mocap = {s: int(self.model.body_mocapid[self.model_pelvis[s]]) for s in SIDES}
+        self.model_base_y = {s: float(self.model.body_pos[self.model_pelvis[s], 1]) for s in SIDES}
         self.model_foot_geoms = {
             s: [gid for gid in range(self.model.ngeom)
                 if int(self.model.geom_bodyid[gid]) in set(self.foot_bodies[s])]
@@ -162,17 +184,59 @@ class Leg:
         return abs(float(f[0]))
 
     def _foot_lowest_z(self, geoms) -> float:
-        """Lowest surface point (m) of the given foot/toe geoms."""
+        """
+        Lowest surface point (m) of the given foot/toe geoms, in world coords.
+        For capsules (the foot/toe geoms) the true lowest point is the lower
+        `fromto` endpoint minus the radius, not the geom centre minus the radius
+        (which overestimates the height of a tilted capsule by up to its half
+        length).
+        """
         lo = np.inf
         for gid in geoms:
-            lo = min(lo, float(self.data.geom_xpos[gid, 2]) - float(self.model.geom_size[gid, 0]))
+            r = float(self.model.geom_size[gid, 0])
+            if self.model.geom_type[gid] == mujoco.mjtGeom.mjGEOM_CAPSULE:
+                axis = self.data.geom_xmat[gid].reshape(3, 3)[:, 2]
+                hl = float(self.model.geom_size[gid, 1])
+                z = float(self.data.geom_xpos[gid, 2]) - hl * abs(float(axis[2]))
+                lo = min(lo, z - r)
+            else:
+                lo = min(lo, float(self.data.geom_xpos[gid, 2]) - r)
         return float(lo) if np.isfinite(lo) else 0.0
 
-    def reset(self, pose=None):
+    def preview_ref_foot_z(self, hip_x, hip_z, angles, stride: int = 3) -> dict:
+        """
+        Forward-kinematic sweep of the target limbs over a trial trajectory,
+        returning the per-frame lowest surface height of each target foot (m).
+        Used to place the belt at the dataset's ground so the target foot
+        contacts. `hip_x` / `hip_z` are dicts {side: array (m)}; `angles` is the
+        resampled angle dict. Returns {side: np.ndarray}.
+        """
+        n = len(angles["hip_L"])
+        qpos_save = self.data.qpos.copy()
+        mocap_save = self.data.mocap_pos.copy()
+        idx = list(range(0, n, max(1, stride)))
+        prof = {s: np.empty(len(idx), dtype=np.float64) for s in SIDES}
+        for k, i in enumerate(idx):
+            for s in SIDES:
+                self.set_target_hip_position(s, float(hip_x[s][i]), float(hip_z[s][i]))
+                for jid, key in ((self.j_hip_ref[s], "hip"), (self.j_knee_ref[s], "knee"),
+                                 (self.j_ankle_ref[s], "ankle")):
+                    self.data.qpos[self.model.jnt_qposadr[jid]] = float(angles[f"{key}_{s}"][i])
+            mujoco.mj_forward(self.model, self.data)
+            for s in SIDES:
+                prof[s][k] = self._foot_lowest_z(self.ref_foot_geoms[s])
+        self.data.qpos[:] = qpos_save
+        self.data.mocap_pos[:] = mocap_save
+        mujoco.mj_forward(self.model, self.data)
+        return prof
+
+    def reset(self, pose=None, hip_pos=None):
         """
         Resets the simulation. If `pose` (dict with hip/knee/ankle per side) is
         given, the controlled limbs start from that pose so they match the
-        target limbs; otherwise the default stance pose is used.
+        target limbs; otherwise the default stance pose is used. `hip_pos`
+        (dict {side: (x_m, z_m)}) places the target limbs' mocap bases at the
+        dataset GT for the initial frame.
         """
         mujoco.mj_resetData(self.model, self.data)
         self.time_ms = 0.0
@@ -190,11 +254,41 @@ class Leg:
                 (self.j_ankle_ref[s], p["ankle"]),
             ):
                 self.data.qpos[self.model.jnt_qposadr[jid]] = float(val)
+        if hip_pos is not None:
+            for s in SIDES:
+                if s in hip_pos:
+                    self.set_target_hip_position(s, float(hip_pos[s][0]), float(hip_pos[s][1]))
 
         mujoco.mj_forward(self.model, self.data)
+        # `_level_treadmill` calls mj_setConst, which resets data (incl. qpos) to
+        # the reference configuration, so preserve the pose across it.
+        qpos_keep = self.data.qpos.copy()
+        mocap_keep = self.data.mocap_pos.copy()
         self._level_treadmill()
+        self.data.qpos[:] = qpos_keep
+        self.data.mocap_pos[:] = mocap_keep
         # Re-apply after moving the plane so contacts start settled.
         mujoco.mj_forward(self.model, self.data)
+
+    def set_target_hip_position(self, side: str, x_m: float, z_m: float):
+        """
+        Places both limbs' hip bases at (x, z) in world (each keeps its own
+        lateral offset): the target limb's mocap base reproduces the dataset GT,
+        and the controlled limb's base follows it so the two limbs share a frame.
+        """
+        for mocap_id, base_y in ((self.ref_mocap[side], self.ref_base_y[side]),
+                                 (self.model_mocap[side], self.model_base_y[side])):
+            if mocap_id < 0:
+                continue
+            self.data.mocap_pos[mocap_id, 0] = float(x_m)
+            self.data.mocap_pos[mocap_id, 1] = base_y
+            self.data.mocap_pos[mocap_id, 2] = float(z_m)
+
+    def set_treadmill_height(self, z_m: float):
+        """Places the belt surface at an explicit world height (m)."""
+        self._belt_z = float(z_m)
+        self.model.geom_pos[self.treadmill_gid, 2] = self._belt_z
+        mujoco.mj_setConst(self.model, self.data)
 
     def _level_treadmill(self):
         """
@@ -202,14 +296,16 @@ class Leg:
         lowest surface point of the TARGET limbs' feet plus a small penetration
         (`TREADMILL_PENETRATION_M`), so a resting contact (and thus a stance
         phase) is actually generated. A positive gap would suppress contact
-        entirely. Returns the plane height used.
+        entirely. Returns the plane height used. If an explicit belt height was
+        set with `set_treadmill_height`, that value is used instead.
         """
+        if self._belt_z is not None:
+            self.model.geom_pos[self.treadmill_gid, 2] = self._belt_z
+            mujoco.mj_setConst(self.model, self.data)
+            return self._belt_z
         lo = np.inf
         for s in SIDES:
-            for gid in self.ref_foot_geoms[s]:
-                z = float(self.data.geom_xpos[gid, 2])
-                r = float(self.model.geom_size[gid, 0])
-                lo = min(lo, z - r)
+            lo = min(lo, self._foot_lowest_z(self.ref_foot_geoms[s]))
         if not np.isfinite(lo):
             return float(self.model.geom_pos[self.treadmill_gid, 2])
         plane_z = lo + TREADMILL_PENETRATION_M
@@ -245,11 +341,17 @@ class Leg:
              target_hip_L: float | None = None,
              target_knee_L: float | None = None,
              target_hip_R: float | None = None,
-             target_knee_R: float | None = None) -> CPGInput:
+             target_knee_R: float | None = None,
+             target_hipx_L: float | None = None,
+             target_hipz_L: float | None = None,
+             target_hipx_R: float | None = None,
+             target_hipz_R: float | None = None) -> CPGInput:
         """
         Applies muscle drives, servos non-ankle joints to the target trajectory,
         steps physics for dt_ms, and populates CPGInput for both controlled legs.
         Hip/knee targets default to the procedural reference when not supplied.
+        When `target_hipx_*`/`target_hipz_*` are supplied, the target limb's mocap
+        base tracks the dataset GT position (approach A).
         """
         self.contract_muscles(cpg_output)
 
@@ -260,12 +362,18 @@ class Leg:
         target_hip = {"L": target_hip_L, "R": target_hip_R}
         target_knee = {"L": target_knee_L, "R": target_knee_R}
         target_ankle = {"L": target_ankle_L, "R": target_ankle_R}
+        target_hipx = {"L": target_hipx_L, "R": target_hipx_R}
+        target_hipz = {"L": target_hipz_L, "R": target_hipz_R}
 
         for s in SIDES:
             hip_ref, knee_ref, ankle_ref = ref[s]
             hip_s = hip_ref if target_hip[s] is None else float(target_hip[s])
             knee_s = knee_ref if target_knee[s] is None else float(target_knee[s])
             ankle_s = ankle_ref if target_ankle[s] is None else float(target_ankle[s])
+
+            # Target limb base tracks the dataset GT (approach A).
+            if target_hipx[s] is not None and target_hipz[s] is not None:
+                self.set_target_hip_position(s, target_hipx[s], target_hipz[s])
 
             # Controlled limb: non-ankle joints servoed to the target limb's pose.
             self.data.ctrl[self.act_hip_m[s]] = hip_s
