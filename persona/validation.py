@@ -312,7 +312,7 @@ class ValidationReport:
             v = getattr(log, name, None)
             return None if v is None or not len(v) else np.asarray(v, dtype=float)
 
-        fig, axes = plt.subplots(4, 1, figsize=(13, 12), sharex=True)
+        fig, axes = plt.subplots(5, 1, figsize=(13, 14), sharex=True)
         for c, lab, style in (("L", "left", "-"), ("R", "right", "--")):
             v = col(f"cut_{c}")
             if v is not None:
@@ -344,14 +344,25 @@ class ValidationReport:
 
         for c, lab, style in (("L", "left", "-"), ("R", "right", "--")):
             for m, mlab in (("E", "ext"), ("F", "flex")):
-                v = col(f"mus_{m}_{c}")
+                v = col(f"rg_{m.lower()}_{c}")
                 if v is not None:
-                    axes[3].plot(t, v, style, lw=1.0, label=f"mus {mlab} {lab}")
-        axes[3].set_ylabel("muscle drive")
+                    axes[3].plot(t, v, style, lw=1.0, label=f"RG {mlab} {lab}")
+        axes[3].set_ylabel("RG activity")
         axes[3].set_xlabel("time [s]")
-        axes[3].set_title("Muscle drives sent to MuJoCo")
+        axes[3].set_title("Rhythm-generator population activity (read + cleared each step)")
         axes[3].legend(fontsize=7, ncol=2)
         axes[3].grid(alpha=0.3)
+
+        for c, lab, style in (("L", "left", "-"), ("R", "right", "--")):
+            for m, mlab in (("E", "ext"), ("F", "flex")):
+                v = col(f"mus_{m}_{c}")
+                if v is not None:
+                    axes[4].plot(t, v, style, lw=1.0, label=f"mus {mlab} {lab}")
+        axes[4].set_ylabel("muscle drive")
+        axes[4].set_xlabel("time [s]")
+        axes[4].set_title("Muscle drives sent to MuJoCo")
+        axes[4].legend(fontsize=7, ncol=2)
+        axes[4].grid(alpha=0.3)
 
         fig.tight_layout()
         self.figures["sensory"] = fig

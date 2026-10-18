@@ -92,6 +92,12 @@ class RunLog:
     mus_E_R: List[float] = field(default_factory=list)
     mus_F_R: List[float] = field(default_factory=list)
 
+    # Rhythm-generator population activity [0, 1]
+    rg_e_L: List[float] = field(default_factory=list)
+    rg_f_L: List[float] = field(default_factory=list)
+    rg_e_R: List[float] = field(default_factory=list)
+    rg_f_R: List[float] = field(default_factory=list)
+
     # Cutaneous afferents (Hz)
     cut_L: List[float] = field(default_factory=list)
     cut_R: List[float] = field(default_factory=list)
@@ -154,6 +160,7 @@ class RunLog:
     _NUMERIC = ("time_ms", "ankle_model_L", "ankle_model_R", "ankle_target_L",
                 "ankle_target_R", "loss", "advantage", "adv_L", "adv_R",
                 "mus_E_L", "mus_F_L", "mus_E_R", "mus_F_R",
+                "rg_e_L", "rg_f_L", "rg_e_R", "rg_f_R",
                 "cut_L", "cut_R",
                 "ia_len_E_L", "ia_vel_E_L", "ia_rate_E_L",
                 "ia_len_F_L", "ia_vel_F_L", "ia_rate_F_L",
@@ -330,6 +337,11 @@ class Personalizer:
             log.mus_F_L.append(cpg_out.mus_F_L)
             log.mus_E_R.append(cpg_out.mus_E_R)
             log.mus_F_R.append(cpg_out.mus_F_R)
+            rg = (getattr(cpg_out, "extra", None) or {}).get("rg") or {}
+            log.rg_e_L.append(float(rg.get("rg_e_L", 0.0)))
+            log.rg_f_L.append(float(rg.get("rg_f_L", 0.0)))
+            log.rg_e_R.append(float(rg.get("rg_e_R", 0.0)))
+            log.rg_f_R.append(float(rg.get("rg_f_R", 0.0)))
             log.cut_L.append(cpg_in.cut_L)
             log.cut_R.append(cpg_in.cut_R)
             log.ia_len_E_L.append(cpg_in.ia_len_E_L)

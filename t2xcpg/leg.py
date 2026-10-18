@@ -372,7 +372,23 @@ class Leg:
         self.noise_recorder.observe("mus_f", current_time_ms, "act", drive_f)
         return drive_e, drive_f
 
-    def _drive(self, spikes: int, dt_ms: float) -> float:
+    def _drive(self, spikes: int, dt_ms: float, n: int | None = None) -> float:
         ref_hz = getattr(self, "ref_hz", 100.0)
-        max_spikes = max(1.0, self.n_mn * ref_hz * (dt_ms / 1000.0))
+        count = self.n_mn if n is None else int(n)
+        max_spikes = max(1.0, count * ref_hz * (dt_ms / 1000.0))
         return float(np.clip(spikes / max_spikes, 0.0, 1.0))
+
+    def get_rg_rates(self, dt_ms: float,
+                     current_time_ms: float = 0.0) -> Tuple[float, float]:
+        """
+        Normalized RGE/RGF population activity in [0, 1] from the spikes the
+        rhythm-generator recorders saw this step. The recorders are read then
+        cleared (`cpg_2legs_fast`'s constant-cost pattern), so both the cost and
+        the memory stay bounded over a long run.
+        """
+        n_e = len(self.rec_rge.get("events")["times"])
+        n_f = len(self.rec_rgf.get("events")["times"])
+        self.rec_rge.set({"n_events": 0})
+        self.rec_rgf.set({"n_events": 0})
+        return (self._drive(n_e, dt_ms, self.n_rg),
+                self._drive(n_f, dt_ms, self.n_rg))

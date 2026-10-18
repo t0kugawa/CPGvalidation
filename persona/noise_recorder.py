@@ -1,5 +1,6 @@
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Deque, Dict, List
+from collections import deque
 import numpy as np
 
 
@@ -16,11 +17,13 @@ class NoiseRecorder:
     Monitors and records noise producer fluctuations (e.g. STDP weight changes,
     Poisson rate fluctuations, input jitter). Exposes current step changes and
     historical statistics so Strategy / FisherMatrix can treat noise as an
-    ordinary parameter affecting reward.
+    ordinary parameter affecting reward. `samples` is a bounded rolling window
+    (`MAX_SAMPLES`) so a long run does not accumulate it without bound.
     """
     def __init__(self, name: str):
         self.name = name
-        self.samples: List[NoiseSample] = []
+        self.MAX_SAMPLES = 50000
+        self.samples: Deque[NoiseSample] = deque(maxlen=self.MAX_SAMPLES)
         self._last_values: Dict[tuple, float] = {}
         self._step_deltas: Dict[str, float] = {}
 
@@ -58,7 +61,6 @@ class NoiseRecorder:
         Returns recent noise producer deltas for the current step.
         """
         return dict(self._step_deltas)
-
     def flush_distribution(self, window: float, now: float) -> Dict[str, dict]:
         """
         Computes mean and stddev of fluctuations within the given time window.

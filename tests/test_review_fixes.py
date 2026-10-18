@@ -207,6 +207,29 @@ def test_joint_ranges_cover_loader_clamp():
             assert hi >= JOINT_RANGES[j][1] - 1e-9, (s, j, hi)
 
 
+def test_noise_recorder_samples_are_bounded():
+    from persona.noise_recorder import NoiseRecorder
+
+    nr = NoiseRecorder("x")
+    for i in range(nr.MAX_SAMPLES + 100):
+        nr.record_direct("p", float(i), "weight", 1.0)
+    assert len(nr.samples) == nr.MAX_SAMPLES
+    assert np.isclose(nr.get_latest_step_deltas()["noise_p_weight"], 1.0)
+
+
+def test_rg_recorders_are_read_and_cleared(nest_kernel):
+    import nest
+
+    reg = Registry()
+    leg = CPG_Leg("L", reg, n_rg=8, n_mn=8, n_int=6, n_aff=6)
+    nest.Simulate(50.0)
+    assert leg.rec_rge.get("events")["times"].size > 0, "RGE must have spiked"
+    rg_e, rg_f = leg.get_rg_rates(10.0, 50.0)
+    assert 0.0 <= rg_e <= 1.0 and 0.0 <= rg_f <= 1.0
+    assert leg.rec_rge.get("events")["times"].size == 0
+    assert leg.rec_rgf.get("events")["times"].size == 0
+
+
 def test_target_foot_lowest_percentile():
     leg = Leg(mujoco_cfg="dual_rat_hindlimb.xml", dt_ms=10.0)
     n = 20
@@ -228,7 +251,8 @@ def test_run_log_has_full_channel_set(nest_kernel):
     pers.stdp_every = 4
     log = pers.run()
     for name in ("cut_R", "ia_rate_E_R", "ia_len_F_R", "ib_force_F_L",
-                 "ib_act_E_R", "adv_L", "adv_R", "hip_ref_R", "knee_model_R"):
+                 "ib_act_E_R", "adv_L", "adv_R", "hip_ref_R", "knee_model_R",
+                 "rg_e_L", "rg_f_R"):
         assert hasattr(log, name), name
         assert len(getattr(log, name)) == len(log.time_ms), name
     assert log.stdp["delta"], "plastic projections must be logged"
