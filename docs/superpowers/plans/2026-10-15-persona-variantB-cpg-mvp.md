@@ -16,9 +16,36 @@
 - `OPENBLAS_NUM_THREADS=1` (and OMP/MKL/NUMEXPR = 1) must be set before numpy import (a 322×322 solve is 1305 ms multi-thread vs 1.7 ms single).
 - Do NOT modify `tinycpg/`, `memcpg/`, or `persona.py`.
 - Keep `TODO(advantage)` / `TODO(fisher)` comment hooks.
-- Optimised set: every connection **weight**, every **rate**, Izhikevich `a,b,c,d`. Exclude **only** connection `p` and σ_param.
+- Optimised set: every **static** connection weight, every **rate**, Izhikevich
+  `a,b,c,d`, and the **STDP hyper-parameters** of `CUT→RGE` / `Ia→RG`. Exclude
+  the STDP weight itself (owned by plasticity), connection `p`, and σ_param.
 - Reward/output vector `y = [ankle_model_L, ankle_model_R]`.
 - Ib pathway stays. Reference values from `cpg_2legs_fast` per spec §5.4; Ib/Renshaw keep project values.
+
+## Decisions recorded 2026-10-18 (supersede earlier text in this plan)
+
+- **A1 / D10** Marker→angle = point-based rigid-bone reconstruction (approach A):
+  absolute segment orientations from each marker pair (`GT→KN`, `KN→EA`,
+  `EA→MH`), **unwrapped** over time, no rest-pose zero alignment.
+- **A2 / A5** `CUT→RGE` is **STDP**; the earlier "static" wording is superseded.
+- **A3 / B2** Connection `p` is a structural constant, never registered or sampled.
+- **A4** Add the `cpg_2legs_fast` base drive (`BASE_DRIVE_W/HZ/P`) wired through
+  the PERSONA registry. **Rate value to confirm** — `cpg_2legs_fast` has
+  `BASE_DRIVE_HZ = 2.0`, the request said 20 Hz.
+- **A6** `w_scale = 1.0` everywhere (unscaled §5.4 reference values).
+- **A7** `Ia→RG` = 12.0 / p 0.40 (reference `IA2RG_W`/`IA2RG_P`).
+- **A8** Noise features are **scored** like ordinary parameters.
+- **A9** Per-component, per-phase moving-average baselines (left stance vs left
+  swing, independently of the right leg); output and target share one smoothing
+  filter.
+- **B4** PERSONA optimizes a plastic projection's STDP hyper-parameters only,
+  never its weight.
+- **B6** Acceptance key renamed `duty_factor_in_distribution`.
+- **B7** `stride_length` removed, `TODO(stride_length)` left in `loader/stats.py`.
+- **A10** `run_validation` reuses `Personalizer.run` through a step hook.
+- **Bug** SynapseCollections are captured only once the network is complete
+  (`Registry.finalize_connections`); NEST recycles ConnectionObject handles while
+  `nest.Connect` is still being called.
 
 ## Review Focus
 
@@ -254,7 +281,7 @@ Expected: FAIL.
 
 - [ ] **Step 3: Implement**
 
-Rewrite `Leg._build_populations` / `_build_connections` per spec §5.3–§5.4: remove direct `rg_e→rg_f`/`rg_f→rg_e` and `in_e→m_e`/`in_f→m_f`; add `rg_e→in_e` (W_RG2INE=12, p=P_RG_RECIP_E=0.15), `in_e→rg_f` (W_INE2RGF=−8), `rg_f→in_f` (W_RG2INF=18, p=P_RG_RECIP_F=0.30), `in_f→rg_e` (W_INF2RGE=−48), `rg_e→m_e`/`rg_f→m_f` (W_RG2MN=2.75), self-recurrence (W_RG_REC_E=4.0/F=5.5, P_RG_REC=0.12), Ia wires (IA2RG_W=12/IA2RG_P=0.4, W_IA_IN2INT=6, W_IA_INT2ANT=−10, W_IA2IN=6/P_IA2IN=0.25), CUT (W_CUT2RGE_STATIC=14/P=0.35, W_CUT2INE=6/P=0.30), M→mus (W_M2MUS=1/P_M2MUS=0.8), BS `BS_REGULAR_HZ=60`, base drive 1.0/2.0/0.10. Keep Ib (project values) and Renshaw; rename the commissural/BS keys in `cpg.py` to reference names; izh params per spec (exc/inh/RG-F bursting). Set each `Connection.key` to the reference name.
+Rewrite `Leg._build_populations` / `_build_connections` per spec §5.3–§5.4: remove direct `rg_e→rg_f`/`rg_f→rg_e` and `in_e→m_e`/`in_f→m_f`; add `rg_e→in_e` (W_RG2INE=12, p=P_RG_RECIP_E=0.15), `in_e→rg_f` (W_INE2RGF=−8), `rg_f→in_f` (W_RG2INF=18, p=P_RG_RECIP_F=0.30), `in_f→rg_e` (W_INF2RGE=−48), `rg_e→m_e`/`rg_f→m_f` (W_RG2MN=2.75), self-recurrence (W_RG_REC_E=4.0/F=5.5, P_RG_REC=0.12), Ia wires (IA2RG_W=12/IA2RG_P=0.4, W_IA_IN2INT=6, W_IA_INT2ANT=−10, W_IA2IN=6/P_IA2IN=0.25), CUT (`CUT→RGE` **STDP** seeded at W=14/P=0.35, `CUT→InE` W_CUT2INE=6/P=0.30), M→mus (W_M2MUS=1/P_M2MUS=0.8), BS `BS_REGULAR_HZ=60`, base drive 1.0/2.0/0.10. Keep Ib (project values) and Renshaw; rename the commissural/BS keys in `cpg.py` to reference names; izh params per spec (exc/inh/RG-F bursting). Set each `Connection.key` to the reference name.
 
 - [ ] **Step 4: Run to verify pass**
 

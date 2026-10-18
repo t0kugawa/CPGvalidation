@@ -123,11 +123,15 @@ persona/  Registry ◀── t2xcpg/ (CPG: populations+connections, all register
   component-wise vector form (human partner will specify). Leave this comment
   at every place error/advantage is computed (`Agent.step`,
   `FisherMatrix.compute_advantage`/`compute_natural_gradient_step`).
-- **Per-leg phase (D11):** the two ankle components are contralateral, so the
-  advantage baseline is keyed to each leg's own phase, taken from that leg's
-  CUT contact (stance = contact). `Agent.step`/`PhaseBaselines` gain a
-  per-component phase API; Stage 1 (static pose) uses a single neutral baseline
-  until locomotion starts.
+- **Per-leg phase (D11):** the two ankle components are contralateral, so each
+  component keeps its **own** moving-average baseline per phase — the left
+  ankle in stance is compared with the left ankle's previous stance, the right
+  ankle in swing with the right ankle's previous swing, and so on. Phase comes
+  from that leg's CUT contact (stance = contact). Stage 1 (static pose) uses a
+  single neutral baseline until locomotion starts.
+- **Matched filtering:** model output and target are passed through the same
+  moving average (`smooth_kernel_size` steps) before the error is formed, so
+  the filter introduces no differential lag between them.
 
 **Fisher / Strategy.** `F = ` empirical **correlation** matrix over a rolling
 window of the feature-perturbation history. Features = parameters + noise tags.
@@ -156,9 +160,9 @@ Sherman–Morrison inverse or a pruned subspace can replace this.
 - STDP synaptic weight changes — subscribed via a NEST `weight_recorder` on
   each plastic projection, sampled per step.
 Their deltas enter the perturbation feature vector, so the Fisher couples them
-to reward automatically. Noise features have **no** `score` term (they are not
-sampled actions): they influence the step only through `F⁻¹`, exactly as
-specified ("strategy considering noise as an ordinary parameter").
+to reward automatically. Noise features are **scored** exactly like ordinary
+parameters (they carry a `score` term and influence both `F⁻¹` and the step),
+following "strategy considering noise as an ordinary parameter".
 
 **Agent API (kept stable).** `sample_actions()`, `apply` via registry,
 `step(output, target, phase) → dict`, `history` logs. Add `loss` to history.
@@ -231,11 +235,16 @@ Motion capture 500 Hz, low-pass 20 Hz; 5 Wistar rats (RatA..RatE).
   0.2 m/s; tied = both belts 0.2 m/s; split-belt fast = ratio × 12 m/min
   (0.3 / 0.35 / 0.4 m/s). The MuJoCo treadmill `surfacevel` is set accordingly
   (one plane for tied; two half-planes for split-belt, deferred beyond MVP).
-- **Marker → angle (D10):** planar sagittal angles from marker triples —
-  hip = angle(IC→GT vs GT→KN), knee = angle(GT→KN vs KN→EA),
-  ankle = angle(KN→EA vs EA→MH); sign/zero aligned to the sim rest pose by
-  subtracting the rest-pose offset. Produces per-side hip/knee/ankle rad
-  trajectories resampled to the sim `dt`.
+- **Marker → angle (D10):** point-based rigid-bone reconstruction. Each
+  segment's absolute sagittal (x-z) orientation is taken from its own marker
+  pair — thigh `GT→KN`, shank `KN→EA`, foot `EA→MH` — and mapped to the rig's
+  hinge angles: `θ_hip = θ_thigh_rest − φ_thigh`,
+  `θ_knee = (θ_shank_rest − φ_shank) − θ_hip`,
+  `θ_ankle = (θ_foot_rest − φ_foot) − θ_hip − θ_knee`. The orientation signals
+  are unwrapped over time so a segment crossing ±π cannot produce a 2π jump.
+  The `GT` (hip) position is returned in mm so the target limb's base tracks the
+  dataset. Unlike unsigned interior angles this preserves orientation and sign
+  and needs no rest-pose zero alignment.
 - **MVP target:** RatA, one clean trial (default: a `T` tied trial); the L/R
   ankle trajectories drive the two target limbs.
 - Stats: read `StatisticalDataTable.csv` (duty factor, double support, step/
@@ -264,11 +273,12 @@ Two-stage, loss-tracked:
 - Loss curve + phase-separated baselines/advantages.
 - Parameter `μ`/`σ_ctrl`/`σ_param` trajectories and Fisher/influence weights.
 - **Biological plausibility (acceptance):**
-  - *Global parameters* (duty factor, double support, step length, stride
-    length, synergy contributions): the model's point must fall inside the
-    distribution of the 5 Zenodo rats — a scatter/cluster plot; the model is
-    acceptable if it lands in one of the clusters (or the single unified cluster
-    if the rats are homogeneous).
+  - *Duty factor* (and double support): the model's point must fall inside the
+    distribution of the 5 Zenodo rats. The acceptance key is
+    `duty_factor_in_distribution` because this is currently the only statistic
+    checked; step length is not yet available and stride length is deferred
+    (`TODO(stride_length)` — it needs real horizontal foot positions over a
+    complete cycle, not an ankle-angle excursion).
   - *Angles:* the model's joint angle must stay within a **5% margin for 70% of
     the locomotion phase** (thresholds configurable later).
 
@@ -313,20 +323,30 @@ Two-stage, loss-tracked:
   XML. *Highest-impact call; confirm.*
 - **D2** `F` is the **correlation** matrix (standardized columns, ridge), not
   raw covariance.
-- **D3** Objective is **loss** (minimize); `advantage = baseline_loss - loss`.
+- **D3** Objective is **loss** (minimize); per output component
+  `advantage_i = baseline_i(phase_i) − loss_i`. Each component keeps its own
+  moving-average baseline for **stance** and for **swing**, so the left ankle is
+  compared against its own previous stance when in stance, independently of the
+  right leg. Model output and target pass through the same moving-average
+  filter (matched lag).
 - **D4** Vector error/advantage **scalarized** for the MVP, with `TODO` hooks.
 - **D5** Two-stage run (initial-pose dwell → tracking) with loss early-stop.
 - **D6** Output/reward vector = `[ankle_L, ankle_R]` only (no EMG/ muscle
   target data exists). Statistical locomotion parameters are validation-only.
 - **D7** Target limbs are driven by mocap-derived joint angles.
-- **D8** Noise features = Poisson rate deltas + STDP weight deltas.
+- **D8** Noise features = Poisson rate deltas + STDP weight deltas, **scored**
+  in the influence metric alongside the ordinary parameters.
 - **D9** Non-ankle joints held to the target trajectory (ankle-only MVP).
-- **D10** Marker→angle = planar marker-triple sagittal angles, sign/zero aligned
-  to the sim rest pose.
+- **D10** Marker→angle = point-based rigid-bone reconstruction from each
+  segment's own marker pair (`GT→KN`, `KN→EA`, `EA→MH`), absolute segment
+  orientations mapped to rig hinge angles and **unwrapped** over time; no
+  rest-pose zero alignment.
 - **D11** Phase is per-leg, from each leg's CUT contact; Stage 1 uses a neutral
   baseline.
 - **D12** STDP on sensory input pathways (`CUT→RGE`, `Ia→RG`); all other
-  synapses static (weights still optimized).
+  synapses static. PERSONA optimizes a plastic projection's STDP
+  hyper-parameters (`tau_plus`, `lambda`, `alpha`, `mu_plus`, `mu_minus`,
+  `Wmax`), never its weight; connection probability `p` is not optimized.
 
 ## 10. Resolved questions (human partner, 2026-10-14)
 

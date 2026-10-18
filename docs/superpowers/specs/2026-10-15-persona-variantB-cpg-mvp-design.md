@@ -74,8 +74,10 @@ loop: a = μ + σ_ctrl·ε  →  apply(a)  →  nest+MuJoCo  →  y = [ankleL, a
 
 - **Output** `y = [ankle_model_L, ankle_model_R]` (the tracked output);
   target `y*`.
-- **Error / advantage**: `E = |y* − y|` (2-vector); per-leg phase baseline `b`
-  (moving average); `A = b − E` (2-vector reward advantage).
+- **Error / advantage**: `E = |y* − y|` (2-vector); each component keeps its
+  **own** phase baseline `b_i(phase_i)` (moving average), so `A_i = b_i − E_i`
+  compares the left ankle in stance with its own previous stance, independently
+  of the right leg. Model output and target share one moving-average filter.
 - **Record** the pair `(Δθ_k, A_k)` each step in a rolling window `W`:
   `Δθ = a − μ` (the exploration perturbation), `A` the advantage above.
 - **Impact / influence:** `G = (1/W)·ΔΘcT Ac = Cov(Δθ, A)` (shape `n_θ × 2`);
@@ -89,7 +91,8 @@ loop: a = μ + σ_ctrl·ε  →  apply(a)  →  nest+MuJoCo  →  y = [ankleL, a
 - **σ_ctrl**: sampling std, updated by the policy-gradient variance rule.
 - **σ_param**: see §5.5.
 - **Noise features**: latest Poisson-rate deltas and STDP-weight deltas appended
-  as extra columns of `θ` (scored with their empirical perturbation std).
+  as extra columns of `θ` and **scored** like ordinary parameters (empirical
+  perturbation std), so they contribute to both `F⁻¹` and the step.
 - **Rank note:** `F` is ridge-regularised; a short window (`W < 3`) returns a
   zero step.
 
@@ -113,7 +116,7 @@ Ipsilateral (per leg):
 - Ib (project addition, keeps): `GTO→InIb-E/F → {M⊣, antagonist M exc,
   contralateral-phase RG exc}`, with Ia/CPG convergence onto InIb.
 - Renshaw (scheme only, no reference): `M→R→⊣M`, `R⊣Ia-IN`.
-- CUT: `CUT→RGE (static)`, `CUT→InE`.
+- CUT: `CUT→RGE (STDP)`, `CUT→InE`.
 Commissural per `cpg_2legs_fast` (`P_COMM_F=0.22,W_COMM_F_INH=−20`;
 `P_COMM_E=0.10,W_COMM_E_INH=−8`).
 
@@ -137,6 +140,15 @@ Commissural per `cpg_2legs_fast` (`P_COMM_F=0.22,W_COMM_F_INH=−20`;
 - `cut→rg_e` = `W_CUT2RGE_STATIC` = 14.0 (`P_CUT2RGE_STATIC=0.35`)
 - `cut→in_e` = `W_CUT2INE` = 6.0 (`P_CUT2INE=0.30`)
 - BS `BS_REGULAR_HZ` = 60.0; base `BASE_DRIVE_W/HZ/P` = 1.0/2.0/0.10
+
+**Plastic projections (D12).** `CUT→RGE` and `Ia→RG` use STDP. A plastic
+projection's **weight is owned by STDP** and is only seeded; PERSONA optimizes
+the STDP hyper-parameters (`tau_plus`, `lambda`, `alpha`, `mu_plus`, `mu_minus`,
+`Wmax`) instead. Connection probability `p` is a static structural constant and
+is never sampled or optimized.
+
+**Note:** the values above are the *unscaled* `cpg_2legs_fast` reference, so
+`w_scale = 1.0` in every run (A6).
 - izh exc `a .02 b .2 c −65 d 8`; izh inh `a .1 b .2 c −65 d 2`;
   RG-F bursting `c −55 d 4`
 
@@ -152,8 +164,10 @@ population dispersion during a run.
 
 ### 5.6 Optimised parameter set
 
-Optimise: every connection **weight**, every **rate**, Izhikevich `a,b,c,d`.
-**Exclude only connection `p` and σ_param** (see §5.5).
+Optimise: every **static** connection weight, every **rate**, Izhikevich
+`a,b,c,d`, and the **STDP hyper-parameters** of the plastic projections
+(`CUT→RGE`, `Ia→RG`). Exclude the STDP weight itself (owned by plasticity),
+connection `p`, and σ_param (see §5.5).
 
 ### 5.7 Render — XML / `model/render.py`
 
@@ -191,13 +205,16 @@ muscle path off the bone axis so the tendons are visible when they shorten.
 - **V1** Metric = policy (score) Fisher `E[score·scoreᵀ] + λ_F I`,
   `score_i = Δθ_i/σ_ctrl,i²`.
 - **V2** Gradient/impact = `Cov(Δθ, A)` — the per-parameter covariance with the
-  reward advantage `A = phase_baseline(E) − E`; `influence() = |Cov(Δθ, A)|`.
+  reward advantage `A_i = b_i(phase_i) − E_i`, each component baselined against
+  its own previous same-phase loss; `influence() = |Cov(Δθ, A)|`.
 - **V3** Step `Δμ = η·F⁻¹·g` (natural gradient; diagonal case `Δμ_i = Cov(Δθ_i,ΣA)`);
   ascent on the advantage = descent on error; drift-free for inert parameters.
-- **V4** Optimise connection weights + rates + Izh `a,b,c,d`; exclude only
-  connection `p` and σ_param.
+- **V4** Optimise static connection weights + rates + Izh `a,b,c,d` + the
+  hyper-parameters of the plastic (STDP) projections; exclude the STDP weight,
+  connection `p`, and σ_param.
 - **V5** σ_param held fixed for the MVP (`TODO(sigma_param)`); `sign(adv)` hack
   removed.
 - **V6** `cpg_2legs_fast` topology authoritative; remove scheme direct half-centre
-  and `InE/InF→MN`.
-- **V7** Reference names/values per §5.4; Ib/Renshaw keep project values.
+  and `InE/InF→MN`. `CUT→RGE` is STDP, not static.
+- **V7** Reference names/values per §5.4; Ib/Renshaw keep project values; runs
+  use the unscaled reference values (`w_scale = 1.0`).
