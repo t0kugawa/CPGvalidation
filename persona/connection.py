@@ -18,7 +18,6 @@ class Connection:
     p: float = 0.5
     noise_recorder_id: str | None = None
     extra_syn_spec: Dict[str, Any] = field(default_factory=dict)
-    synapse_collection: Any = None
     key: str | None = None
     weight_recorder: Any = None
 

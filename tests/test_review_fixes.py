@@ -28,6 +28,26 @@ def test_params_have_independent_rng():
 
 # --- Critical 2: STDP weight deltas reach the noise recorder during a step ---
 
+def test_synaptic_parameters_reach_the_right_projection(nest_kernel):
+    reg = Registry()
+    bs = BrainStem(registry=reg, n_bs=6, bs_e_hz=20.0, bs_f_hz=20.0)
+    ll = CPG_Leg("L", reg, n_rg=6, n_mn=6, n_int=5, n_aff=5)
+    lr = CPG_Leg("R", reg, n_rg=6, n_mn=6, n_int=5, n_aff=5)
+    L2CPG(registry=reg, bs=bs, legs={"L": ll, "R": lr}, dt_ms=10.0)
+    params = reg.get_all_optimizable_params()
+    explored = {n: p.sample_exploration() for n, p in params.items()}
+    reg.apply_explored_parameters(explored)
+    for key, cfg in reg.connection_cfgs.items():
+        col = reg.synapses(key)
+        got = {round(float(w), 6) for w in col.get("weight")}
+        if cfg.model == "static_synapse":
+            want = round(float(explored[f"conn_{key}_weight"]), 6)
+            assert got == {want}, f"{key}: explored weight not applied"
+        else:
+            seed = round(float(cfg.extra_syn_spec["weight"]), 6)
+            assert got == {seed}, f"{key}: STDP weight must not be overwritten"
+
+
 def test_stdp_weight_deltas_recorded_in_step(nest_kernel):
     reg = Registry()
     bs = BrainStem(registry=reg, n_bs=6, bs_e_hz=20.0, bs_f_hz=20.0)

@@ -62,6 +62,8 @@ class Leg:
         self.rec_rge = create_spike_recorder(self.rg_e)
         self.rec_rgf = create_spike_recorder(self.rg_f)
 
+        self.registry.finalize_connections()
+
     def _param(self, name: str, mean: float, sigma_param: float = 0.05,
                sigma_ctrl: float = 0.1, min_val: float = -100.0, max_val: float = 100.0) -> PersonaParam:
         return PersonaParam(

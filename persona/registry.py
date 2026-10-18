@@ -18,8 +18,8 @@ class Registry:
         self.population_cfgs: Dict[str, Population] = {}
         self.connection_cfgs: Dict[str, Connection] = {}
         self.population_nodes: Dict[str, nest.NodeCollection] = {}
-        self.synapse_collections: Dict[str, Any] = {}
         self.noise_recorders: Dict[str, NoiseRecorder] = {}
+        self._synapses: Dict[str, Any] = {}
 
     def register_noise_recorder(self, recorder: NoiseRecorder):
         self.noise_recorders[recorder.name] = recorder
@@ -69,16 +69,39 @@ class Registry:
 
         syn_spec = cfg.sample_syn_spec(explored_params=explored_params)
         nest.Connect(src_nodes, tgt_nodes, conn_spec=conn_spec, syn_spec=syn_spec)
-        # nest.Connect returns None in NEST 3, so fetch the SynapseCollection
-        # explicitly; without it no synaptic parameter could ever be applied.
-        syn_col = nest.GetConnections(source=src_nodes, target=tgt_nodes,
-                                      synapse_model=cfg.model)
 
-        cfg.synapse_collection = syn_col
         conn_key = cfg.key if cfg.key is not None else f"{cfg.source}_{cfg.target}"
         self.connection_cfgs[conn_key] = cfg
-        self.synapse_collections[conn_key] = syn_col
-        return syn_col
+        return conn_key
+
+    def synapses(self, conn_key: str) -> Any:
+        """
+        SynapseCollection for one projection. NEST recycles its ConnectionObject
+        handles whenever new connections are created, so a collection captured
+        before the network was complete can silently resolve to unrelated
+        synapses; `finalize_connections` re-captures them once construction is
+        done, and this falls back to a fresh query otherwise.
+        """
+        col = self._synapses.get(conn_key)
+        if col is None:
+            cfg = self.connection_cfgs[conn_key]
+            col = nest.GetConnections(source=self.get(cfg.source),
+                                      target=self.get(cfg.target),
+                                      synapse_model=cfg.model)
+            self._synapses[conn_key] = col
+        return col
+
+    def finalize_connections(self):
+        """
+        Captures one SynapseCollection per projection; call once the network is
+        fully built (after the last nest.Connect).
+        """
+        self._synapses = {
+            key: nest.GetConnections(source=self.get(cfg.source),
+                                     target=self.get(cfg.target),
+                                     synapse_model=cfg.model)
+            for key, cfg in self.connection_cfgs.items()
+        }
 
     def sample_plastic_weight_deltas(self, t_before: float, t_now: float) -> Dict[str, float]:
         """
@@ -166,14 +189,14 @@ class Registry:
 
         # Apply to connections (synapses)
         for conn_key, conn in self.connection_cfgs.items():
-            syn_col = self.synapse_collections.get(conn_key)
-            if syn_col is None:
-                continue
+            updates = {}
             for p_name in conn.parameters.keys():
                 full_key = f"conn_{conn_key}_{p_name}"
                 if full_key in sampled_values:
-                    val = float(sampled_values[full_key])
-                    try:
-                        syn_col.set({p_name: val})
-                    except Exception:
-                        pass
+                    updates[p_name] = float(sampled_values[full_key])
+            if not updates:
+                continue
+            try:
+                self.synapses(conn_key).set(updates)
+            except Exception:
+                pass

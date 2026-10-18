@@ -35,6 +35,7 @@ class L2CPG(CPGAdapter):
         # Build Brainstem drives and Commissural Cross-Connections
         self._build_bs_connections()
         self._build_commissural_connections(p_comm=p_comm)
+        self.registry.finalize_connections()
 
     def _param(self, name: str, mean: float, sigma_param: float = 0.05,
                sigma_ctrl: float = 0.1, min_val: float = -100.0, max_val: float = 100.0) -> PersonaParam:
