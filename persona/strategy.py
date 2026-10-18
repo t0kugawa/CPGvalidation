@@ -5,23 +5,25 @@ import numpy as np
 
 @dataclass
 class PhaseBaselines:
+    """
+    Per-output-component, per-phase moving-average baselines. Each output
+    component keeps its own baseline for "stance" and for "swing", so the
+    advantage of the left ankle during stance is measured against the left
+    ankle's previous stance, independently of the right leg's phase.
+    """
     alpha: float = 0.95
-    _baselines: Dict[object, np.ndarray] = field(default_factory=dict)
+    _baselines: Dict[tuple, float] = field(default_factory=dict)
 
-    def get_baseline(self, phase_key: object, dim: int) -> np.ndarray:
-        b = self._baselines.get(phase_key)
-        if b is None or len(b) != dim:
-            b = np.zeros(dim, dtype=np.float64)
-            self._baselines[phase_key] = b
-        return b
+    def get_baseline(self, component: int, phase: str) -> float:
+        return float(self._baselines.get((int(component), str(phase)), 0.0))
 
-    def update(self, phase_key: object, loss_vector: np.ndarray):
-        v = np.asarray(loss_vector, dtype=np.float64)
-        b = self._baselines.get(phase_key)
-        if b is None or len(b) != len(v):
-            self._baselines[phase_key] = v.copy()
+    def update(self, component: int, phase: str, loss: float):
+        key = (int(component), str(phase))
+        b = self._baselines.get(key)
+        if b is None:
+            self._baselines[key] = float(loss)
         else:
-            self._baselines[phase_key] = self.alpha * b + (1.0 - self.alpha) * v
+            self._baselines[key] = self.alpha * b + (1.0 - self.alpha) * float(loss)
 
 
 class FisherMatrix:
@@ -76,13 +78,26 @@ class FisherMatrix:
         self.all_names = self.param_names + self.noise_names
         self.n_total = len(self.all_names)
 
+    @staticmethod
+    def _per_component_phases(phase: object, n: int) -> list:
+        if isinstance(phase, str):
+            return [phase] * n
+        seq = [str(p) for p in phase]
+        if len(seq) == n:
+            return seq
+        return [seq[0]] * n if seq else ["stance"] * n
+
     def compute_advantage(self, loss_vector: np.ndarray, phase: object) -> np.ndarray:
+        """
+        Per-component advantage A_i = baseline_i(phase_i) − loss_i, each
+        component baselined against its own previous same-phase loss.
+        """
         loss = np.asarray(loss_vector, dtype=np.float64)
-        base = self.baselines.get_baseline(phase, len(loss))
-        # TODO(advantage): component-wise vector advantage (see spec §5.1) —
-        # currently baseline − loss for the scalarized loss.
-        advantage = base - loss
-        self.baselines.update(phase, loss)
+        phases = self._per_component_phases(phase, len(loss))
+        advantage = np.empty_like(loss)
+        for i in range(len(loss)):
+            advantage[i] = self.baselines.get_baseline(i, phases[i]) - loss[i]
+            self.baselines.update(i, phases[i], loss[i])
         return advantage
 
     def record_step(self,

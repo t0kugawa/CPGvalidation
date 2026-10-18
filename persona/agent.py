@@ -45,6 +45,7 @@ class Agent:
             self.kernel = np.array([1.0])
 
         self.output_buffer: List[np.ndarray] = []
+        self.target_buffer: List[np.ndarray] = []
 
         # Current step state
         self.current_actions: Dict[str, float] = {}
@@ -72,21 +73,28 @@ class Agent:
             self.current_actions[name] = param.sample_exploration()
         return dict(self.current_actions)
 
+    def _smooth(self, signal: np.ndarray, buffer: List[np.ndarray]) -> np.ndarray:
+        buf_arr = np.asarray(signal, dtype=np.float64)
+        buffer.append(buf_arr)
+        if len(buffer) > self.smooth_kernel_size:
+            buffer.pop(0)
+        return np.mean(np.array(buffer), axis=0)
+
     def preprocess_signal(self, raw_signal: np.ndarray, zero_shift: float = 0.0) -> np.ndarray:
         """
-        Preprocesses output or reference signal:
+        Preprocesses the model output signal:
         1. Zero-point shift
-        2. Moving average based on convolution matrix
+        2. Moving average over the last `smooth_kernel_size` steps
         """
         sig = np.asarray(raw_signal, dtype=np.float64) - zero_shift
-        self.output_buffer.append(sig)
-        if len(self.output_buffer) > self.smooth_kernel_size:
-            self.output_buffer.pop(0)
+        return self._smooth(sig, self.output_buffer)
 
-        # Apply moving average across the buffer
-        buf_arr = np.array(self.output_buffer)
-        smoothed = np.mean(buf_arr, axis=0)
-        return smoothed
+    def preprocess_target(self, raw_target: np.ndarray) -> np.ndarray:
+        """
+        Applies the same moving average to the target so output and target
+        share one filter (no differential lag between the two signals).
+        """
+        return self._smooth(raw_target, self.target_buffer)
 
     def compute_vector_error(self, output: np.ndarray, target: np.ndarray) -> np.ndarray:
         """
@@ -113,12 +121,12 @@ class Agent:
         """
         self.current_step += 1
         smoothed_out = self.preprocess_signal(output, zero_shift=zero_shift)
-        tgt = np.asarray(target, dtype=np.float64)
+        smoothed_tgt = self.preprocess_target(target)
 
         # Vector error and scalarized loss
         # TODO(advantage): component-wise vector error/advantage (spec §5.1);
         # currently the loss is scalar (mean of the error vector).
-        error_vec = self.compute_vector_error(smoothed_out, tgt)
+        error_vec = self.compute_vector_error(smoothed_out, smoothed_tgt)
         loss = float(np.mean(error_vec))
 
         # Normalize phase: str broadcasts to one key per output component;
