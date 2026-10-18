@@ -47,6 +47,45 @@
   (`Registry.finalize_connections`); NEST recycles ConnectionObject handles while
   `nest.Connect` is still being called.
 
+## Decisions recorded 2026-10-18 (b): target-limb + learning-rule fixes
+
+- **Target limb = kinematic mirror, no collision.** The target limb's foot/toe
+  geoms carry the `<default contype=0 conaffinity=0>`, so they never contact; the
+  target phase is a **geometric** classification (`foot_z_ref <= belt_z + CONTACT_Z_EPS`),
+  not a contact force. `Leg._contact_force_ref` / `_contact_force_ref` removed.
+  `contact_ref_*` is now a 0/1 geometric stance indicator (validation only).
+  Confirmed `phase_ref`/`contact_ref` are validation-only: the loop passes the
+  **model** `phase_L/R` into the advantage (`personalization.py`).
+- **Belt = the dataset's ground, one plane for both limbs.** `belt_z = min over the
+  run window of the foot-marker (MH) height` (dataset frame, /1000) + `TREADMILL_PENETRATION_M`.
+  It is read from the dataset, not derived from the target limb's rig geometry (that
+  reconstruction carries a ~2–3 mm fixed-length bias).
+- **Output limb is built at the target's size (per side).** For each side, the
+  loader's sagittal (x-z) mean segment lengths (thigh/shank/foot) are applied to both
+  the controlled (`m`) and target (`ref`) limbs with `Leg.set_limb_lengths`, which
+  rescales body offsets, geom pos/size and site pos while **preserving the rest
+  directions**. L/R lengths are kept exactly as recorded (no symmetrisation).
+- **Unwrap + physiological clamp.** `markers_to_angles` unwraps each segment
+  direction over time (removes the 2π branch cuts) and clamps each joint to
+  `JOINT_RANGES`; the rig's hip/knee/ankle ranges (both limbs, both sides) are
+  widened to match, so every target value is reachable by the servo.
+- **B3 fixed.** `Leg.update_plastic_weights` records the sampled STDP delta with
+  `NoiseRecorder.record_direct`; previously it fed a *delta* into `observe_weight`,
+  which differenced it a second time.
+- **B5 fixed.** `PersonaParam.update_controlling_variance` updates `log(sigma_ctrl)`
+  (`grad = ((a-mu)/sigma)^2 - 1`) with a per-step cap, removing the `1/sigma^3`
+  blow-up (observed 1e-3 -> 0.65 in 200 steps).
+- **B7 superseded.** `stride_length_L/R` is back, computed from the controlled
+  foot's horizontal excursion over the detected stance phases (contact cycles),
+  both compared against the Zenodo distributions. Foot x is logged (`foot_x_m_L/R`).
+- **Pose stage capped.** `Personalizer.run` takes `pose_max_steps` so the loop
+  always proceeds to tracking even when contact-driven CPG activity keeps the ankle
+  error above `eps_pose` (`run_validation --pose-max-s`, default 1.0 s).
+- **Wall-clock budget.** `Personalizer.run` takes `wall_clock_s`
+  (`run_validation --budget-s`) so a run fits a server time limit.
+- **MVP scope: RatA only.** `DEFAULT_REFERENCE` is a `RatA` trial; the per-side
+  recorded lengths are used as-is.
+
 ## Review Focus
 
 1. **A parameter that does not affect the error** — its perturbation does not covary with `A`: `influence()` ≈ 0 and its step ≈ 0 (must not drift to bounds). → Task 1/2.

@@ -94,6 +94,13 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
     rig.set_treadmill_surfacevel(belt)
     angles = loader.resample()
 
+    for s in ("L", "R"):
+        thigh = float(np.mean(angles[f"seg_thigh_{s}"])) / 1000.0
+        shank = float(np.mean(angles[f"seg_shank_{s}"])) / 1000.0
+        foot = float(np.mean(angles[f"seg_foot_{s}"])) / 1000.0
+        rig.set_limb_lengths("m", s, thigh, shank, foot)
+        rig.set_limb_lengths("ref", s, thigh, shank, foot)
+
     # Approach A: the target limb is driven straight from the dataset points —
     # absolute segment orientations (-> rig hinge angles, already in range) and a
     # mocap hip base tracking the GT marker. No range rescaling / zero-alignment.
@@ -109,16 +116,13 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
         "knee_R": np.asarray(angles["knee_R"], dtype=np.float64),
     }
 
-    # Place the belt at the dataset's ground over the window the run actually
-    # traverses: the driver clamps at the trial end, so frames past the step
-    # budget are never reached. Use the lowest point the target feet reach there.
+    # The belt is the dataset's ground (treadmill surface) over the window the run
+    # actually traverses — the driver clamps at the trial end. One plane, shared
+    # by both the target and the output limbs.
     n_win = min(int(max_steps), len(angles["hip_L"]))
-    win = {k: np.asarray(v)[:n_win] for k, v in angles.items()}
-    prof = rig.preview_ref_foot_z(
-        {s: hip_x[s][:n_win] for s in ("L", "R")},
-        {s: hip_z[s][:n_win] for s in ("L", "R")}, win)
-    foot_z = np.concatenate([prof["L"], prof["R"]])
-    rig.set_treadmill_height(float(np.percentile(foot_z, 5)) + TREADMILL_PENETRATION_M)
+    ground_mm = min(float(np.min(angles["mh_z_L"][:n_win])),
+                    float(np.min(angles["mh_z_R"][:n_win])))
+    rig.set_treadmill_height(ground_mm / 1000.0 + TREADMILL_PENETRATION_M)
 
     # Start both limbs at the target's first pose so the ankle angles match at
     # t=0 (the target is then reachable and moving), with the hips at the GT.
@@ -187,9 +191,13 @@ def run_personalization(reference_path: str = DEFAULT_REFERENCE,
 
     contact_L = np.asarray([1.0 if p == "stance" else 0.0 for p in log.phase_L])
     contact_R = np.asarray([1.0 if p == "stance" else 0.0 for p in log.phase_R])
+    foot_pos_L = np.column_stack([np.asarray(log.foot_x_m_L), np.zeros(len(log.foot_x_m_L)),
+                                  np.asarray(log.foot_z_m_L)])
+    foot_pos_R = np.column_stack([np.asarray(log.foot_x_m_R), np.zeros(len(log.foot_x_m_R)),
+                                  np.asarray(log.foot_z_m_R)])
     metrics = LocomotionMetrics.from_run(
         np.asarray(log.ankle_model_L), np.asarray(log.ankle_model_R),
-        contact_L, contact_R, DT_MS)
+        contact_L, contact_R, DT_MS, foot_pos_L=foot_pos_L, foot_pos_R=foot_pos_R)
 
     acceptance = acceptance_from_log(log, stats, margin=0.05, coverage=0.70)
 

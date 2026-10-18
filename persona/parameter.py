@@ -80,13 +80,16 @@ class PersonaParam:
                                     sigma_min: float = 1e-3,
                                     sigma_max: float = 2.0):
         """
-        Updates controlling exploration variance using the policy gradient derivation:
-        grad = ((action - mean)^2 - sigma_ctrl^2) / sigma_ctrl^3 * advantage
+        Updates controlling exploration variance using the policy-gradient
+        derivation in log-variance coordinates:
+        d log(sigma) = ((action - mean)^2 / sigma^2 - 1) * advantage
+        which is the same rule as ((action-mean)^2 - sigma^2)/sigma^3 * advantage
+        without the 1/sigma^3 blow-up.
         """
-        denom = max(1e-8, self.sigma_ctrl ** 3)
-        grad = ((action - self.mean) ** 2 - self.sigma_ctrl ** 2) / denom * advantage
-        self.sigma_ctrl += lr_sigma * grad
-        self.sigma_ctrl = float(np.clip(self.sigma_ctrl, sigma_min, sigma_max))
+        sigma = float(np.clip(self.sigma_ctrl, sigma_min, sigma_max))
+        z2 = ((action - self.mean) / sigma) ** 2
+        step = float(np.clip(lr_sigma * (z2 - 1.0) * advantage, -0.25, 0.25))
+        self.sigma_ctrl = float(np.clip(sigma * np.exp(step), sigma_min, sigma_max))
 
     def update_mean(self, delta: float):
         self.mean = float(np.clip(self.mean + delta, self.min, self.max))

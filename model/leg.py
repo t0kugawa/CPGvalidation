@@ -4,7 +4,7 @@ import mujoco
 
 from model.adapter import CPGOutput, CPGInput
 from model.cut import CUTAfferent, IaAfferent, IbAfferent
-from model.model_cfg import TREADMILL_PENETRATION_M
+from model.model_cfg import CONTACT_Z_EPS, TREADMILL_PENETRATION_M
 
 SIDES = ("L", "R")
 
@@ -40,7 +40,8 @@ class Leg:
         self.model = mujoco.MjModel.from_xml_path(self.xml_path)
         self.data = mujoco.MjData(self.model)
         self.physics_dt = self.model.opt.timestep
-        self._belt_z = None
+        self._belt_override = None
+        self.belt_z = None
 
         self.j_hip_m = {s: self._jid(f"hip_m_{s}") for s in SIDES}
         self.j_knee_m = {s: self._jid(f"knee_m_{s}") for s in SIDES}
@@ -168,67 +169,40 @@ class Leg:
                 total += self._contact_force_i(i)
         return total
 
-    def _contact_force_ref(self, side: str) -> float:
-        """Total normal contact force (N) on the TARGET limb's foot/toe geoms."""
-        geoms = set(self.ref_foot_geoms[side])
-        total = 0.0
-        for i in range(self.data.ncon):
-            c = self.data.contact[i]
-            if int(c.geom1) in geoms or int(c.geom2) in geoms:
-                total += self._contact_force_i(i)
-        return total
-
     def _contact_force_i(self, i: int) -> float:
         f = np.zeros(6, dtype=np.float64)
         mujoco.mj_contactForce(self.model, self.data, i, f)
         return abs(float(f[0]))
 
-    def _foot_lowest_z(self, geoms) -> float:
+    def _foot_lowest(self, geoms) -> tuple[float, float]:
         """
-        Lowest surface point (m) of the given foot/toe geoms, in world coords.
-        For capsules (the foot/toe geoms) the true lowest point is the lower
-        `fromto` endpoint minus the radius, not the geom centre minus the radius
-        (which overestimates the height of a tilted capsule by up to its half
-        length).
+        Lowest surface point (x, z) in world coords (m) of the given foot/toe
+        geoms. For capsules the true lowest point is the lower `fromto` endpoint
+        minus the radius, not the geom centre minus the radius (which
+        overestimates the height of a tilted capsule by up to its half length).
         """
         lo = np.inf
+        lo_x = 0.0
         for gid in geoms:
             r = float(self.model.geom_size[gid, 0])
             if self.model.geom_type[gid] == mujoco.mjtGeom.mjGEOM_CAPSULE:
                 axis = self.data.geom_xmat[gid].reshape(3, 3)[:, 2]
                 hl = float(self.model.geom_size[gid, 1])
+                s = 1.0 if float(axis[2]) >= 0.0 else -1.0
+                x = float(self.data.geom_xpos[gid, 0]) + s * hl * float(axis[0])
                 z = float(self.data.geom_xpos[gid, 2]) - hl * abs(float(axis[2]))
-                lo = min(lo, z - r)
             else:
-                lo = min(lo, float(self.data.geom_xpos[gid, 2]) - r)
-        return float(lo) if np.isfinite(lo) else 0.0
+                x = float(self.data.geom_xpos[gid, 0])
+                z = float(self.data.geom_xpos[gid, 2])
+            if z - r < lo:
+                lo = z - r
+                lo_x = x
+        if not np.isfinite(lo):
+            return 0.0, 0.0
+        return float(lo_x), float(lo)
 
-    def preview_ref_foot_z(self, hip_x, hip_z, angles, stride: int = 3) -> dict:
-        """
-        Forward-kinematic sweep of the target limbs over a trial trajectory,
-        returning the per-frame lowest surface height of each target foot (m).
-        Used to place the belt at the dataset's ground so the target foot
-        contacts. `hip_x` / `hip_z` are dicts {side: array (m)}; `angles` is the
-        resampled angle dict. Returns {side: np.ndarray}.
-        """
-        n = len(angles["hip_L"])
-        qpos_save = self.data.qpos.copy()
-        mocap_save = self.data.mocap_pos.copy()
-        idx = list(range(0, n, max(1, stride)))
-        prof = {s: np.empty(len(idx), dtype=np.float64) for s in SIDES}
-        for k, i in enumerate(idx):
-            for s in SIDES:
-                self.set_target_hip_position(s, float(hip_x[s][i]), float(hip_z[s][i]))
-                for jid, key in ((self.j_hip_ref[s], "hip"), (self.j_knee_ref[s], "knee"),
-                                 (self.j_ankle_ref[s], "ankle")):
-                    self.data.qpos[self.model.jnt_qposadr[jid]] = float(angles[f"{key}_{s}"][i])
-            mujoco.mj_forward(self.model, self.data)
-            for s in SIDES:
-                prof[s][k] = self._foot_lowest_z(self.ref_foot_geoms[s])
-        self.data.qpos[:] = qpos_save
-        self.data.mocap_pos[:] = mocap_save
-        mujoco.mj_forward(self.model, self.data)
-        return prof
+    def _foot_lowest_z(self, geoms) -> float:
+        return self._foot_lowest(geoms)[1]
 
     def reset(self, pose=None, hip_pos=None):
         """
@@ -286,8 +260,12 @@ class Leg:
 
     def set_treadmill_height(self, z_m: float):
         """Places the belt surface at an explicit world height (m)."""
-        self._belt_z = float(z_m)
-        self.model.geom_pos[self.treadmill_gid, 2] = self._belt_z
+        self._belt_override = float(z_m)
+        self._apply_belt(self._belt_override)
+
+    def _apply_belt(self, z_m: float):
+        self.belt_z = float(z_m)
+        self.model.geom_pos[self.treadmill_gid, 2] = self.belt_z
         mujoco.mj_setConst(self.model, self.data)
 
     def _level_treadmill(self):
@@ -299,22 +277,53 @@ class Leg:
         entirely. Returns the plane height used. If an explicit belt height was
         set with `set_treadmill_height`, that value is used instead.
         """
-        if self._belt_z is not None:
-            self.model.geom_pos[self.treadmill_gid, 2] = self._belt_z
-            mujoco.mj_setConst(self.model, self.data)
-            return self._belt_z
+        if self._belt_override is not None:
+            self._apply_belt(self._belt_override)
+            return self.belt_z
         lo = np.inf
         for s in SIDES:
             lo = min(lo, self._foot_lowest_z(self.ref_foot_geoms[s]))
         if not np.isfinite(lo):
             return float(self.model.geom_pos[self.treadmill_gid, 2])
-        plane_z = lo + TREADMILL_PENETRATION_M
-        self.model.geom_pos[self.treadmill_gid, 2] = plane_z
-        # MuJoCo bakes static-geom world transforms at compile time; the
-        # geom_pos write above only reaches collision after mj_setConst
-        # (otherwise the belt stays at z=0 and no contact is ever generated).
+        self._apply_belt(lo + TREADMILL_PENETRATION_M)
+        return self.belt_z
+
+    def set_limb_lengths(self, prefix: str, side: str, thigh: float,
+                         shank: float, foot: float):
+        """
+        Rescales one rig limb (`prefix` "m" controlled / "ref" target) to the
+        given sagittal segment lengths (m) while preserving the rest directions,
+        so the output limb matches the target's scale (approach A).
+        """
+        kids = ((f"shank_{prefix}_{side}", thigh), (f"foot_{prefix}_{side}", shank),
+                (f"toe_{prefix}_{side}", foot))
+        ratios = {}
+        for name, target in kids:
+            bid = self._bodyid(name)
+            off = self.model.body_pos[bid].copy()
+            cur = float(np.linalg.norm(off))
+            ratios[name] = float(target) / cur if cur > 0.0 else 1.0
+            self.model.body_pos[bid] = off * ratios[name]
+        ratios[f"thigh_{prefix}_{side}"] = ratios[kids[0][0]]
+        ratios[f"shank_{prefix}_{side}"] = ratios[kids[1][0]]
+        ratios[f"foot_{prefix}_{side}"] = ratios[kids[2][0]]
+        ratios[f"toe_{prefix}_{side}"] = ratios[kids[2][0]]
+        for name, ratio in ratios.items():
+            bid = self._bodyid(name)
+            for gid in range(self.model.ngeom):
+                if int(self.model.geom_bodyid[gid]) == bid:
+                    self.model.geom_pos[gid] *= ratio
+                    self.model.geom_size[gid] *= ratio
+            for sid in range(self.model.nsite):
+                if int(self.model.site_bodyid[sid]) == bid:
+                    self.model.site_pos[sid] *= ratio
         mujoco.mj_setConst(self.model, self.data)
-        return plane_z
+
+    def _bodyid(self, name: str) -> int:
+        i = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, name)
+        if i < 0:
+            raise ValueError(f"Body '{name}' not found")
+        return i
 
     def get_reference_kinematics(self, t_s: float, phase_offset: float = 0.0) -> tuple[float, float, float]:
         """
@@ -394,10 +403,15 @@ class Leg:
         sensory = {}
         for s in SIDES:
             total_contact_force = self._contact_force(s)
-            total_contact_ref = self._contact_force_ref(s)
             cut_hz = self.cut_afferent[s].get_cut_hz(total_contact_force)
             phase = "stance" if total_contact_force > 0.005 else "swing"
-            phase_ref = "stance" if total_contact_ref > 0.005 else "swing"
+
+            foot_x_m, foot_z_m = self._foot_lowest(self.model_foot_geoms[s])
+            foot_z_ref = self._foot_lowest_z(self.ref_foot_geoms[s])
+            ref_contact = (self.belt_z is not None
+                           and foot_z_ref <= self.belt_z + CONTACT_Z_EPS)
+            phase_ref = "stance" if ref_contact else "swing"
+            contact_ref = 1.0 if ref_contact else 0.0
 
             sol_len = float(self.data.ten_length[self.ten_sol[s]])
             sol_vel = float(self.data.ten_velocity[self.ten_sol[s]])
@@ -420,13 +434,10 @@ class Leg:
             q_knee_ref = float(self.data.qpos[self.model.jnt_qposadr[self.j_knee_ref[s]]])
             q_hip_ref = float(self.data.qpos[self.model.jnt_qposadr[self.j_hip_ref[s]]])
 
-            foot_z_m = self._foot_lowest_z(self.model_foot_geoms[s])
-            foot_z_ref = self._foot_lowest_z(self.ref_foot_geoms[s])
-
             sensory[s] = dict(
                 cut=cut_hz, phase=phase, phase_ref=phase_ref,
-                contact=total_contact_force, contact_ref=total_contact_ref,
-                foot_z_m=foot_z_m, foot_z_ref=foot_z_ref,
+                contact=total_contact_force, contact_ref=contact_ref,
+                foot_x_m=foot_x_m, foot_z_m=foot_z_m, foot_z_ref=foot_z_ref,
                 sol_len=sol_len, sol_vel=sol_vel, ta_len=ta_len, ta_vel=ta_vel,
                 ia_rate_e=ia_rate_e, ia_rate_f=ia_rate_f,
                 sol_force=sol_force, ta_force=ta_force,
@@ -452,6 +463,7 @@ class Leg:
             phase_ref_L=L["phase_ref"], phase_ref_R=R["phase_ref"],
             contact_m_L=L["contact"], contact_m_R=R["contact"],
             contact_ref_L=L["contact_ref"], contact_ref_R=R["contact_ref"],
+            foot_x_m_L=L["foot_x_m"], foot_x_m_R=R["foot_x_m"],
             foot_z_m_L=L["foot_z_m"], foot_z_m_R=R["foot_z_m"],
             foot_z_ref_L=L["foot_z_ref"], foot_z_ref_R=R["foot_z_ref"],
             ankle_angle_m_L=L["q_ankle_m"], ankle_angle_ref_L=L["q_ankle_ref"],

@@ -37,7 +37,8 @@ from t2xcpg.cfg import POPULATIONS_FINAL
 
 def run(duration_s, view, width, height, fps, out_dir,
         w_scale, ref_hz, belt_mps, belt_start_s, belt_ramp_s,
-        n_rg, n_mn, n_int, n_aff, n_bs, render=True):
+        n_rg, n_mn, n_int, n_aff, n_bs, render=True, budget_s=None,
+        pose_max_s=1.0):
     os.makedirs(out_dir, exist_ok=True)
     steps = int(round(duration_s / (DT_MS / 1000.0)))
     n_frames = int(round(duration_s * fps))
@@ -68,7 +69,8 @@ def run(duration_s, view, width, height, fps, out_dir,
 
     status = {}
     try:
-        log = pers.run(step_hook=_hook)
+        log = pers.run(step_hook=_hook, wall_clock_s=budget_s,
+                       pose_max_steps=int(round(pose_max_s / (DT_MS / 1000.0))))
     finally:
         if writer is not None:
             try:
@@ -143,6 +145,10 @@ if __name__ == "__main__":
     ap.add_argument("--n-aff", type=int, default=6)
     ap.add_argument("--n-bs", type=int, default=8)
     ap.add_argument("--no-render", action="store_true")
+    ap.add_argument("--budget-s", type=float, default=None,
+                    help="stop after this many seconds of real time (server budget)")
+    ap.add_argument("--pose-max-s", type=float, default=1.0,
+                    help="cap on the settling (pose) stage, in seconds")
     ap.add_argument("--final", action="store_true",
                     help="full cpg_2legs_fast population sizes")
     ap.add_argument("--fast", action="store_true",
@@ -160,4 +166,5 @@ if __name__ == "__main__":
         args.n_bs = POPULATIONS_FINAL["n_bs"]
     run(args.duration_s, args.view, args.width, args.height, args.fps, args.out,
         args.w_scale, args.ref_hz, args.belt_mps, args.belt_start_s, args.belt_ramp_s,
-        args.n_rg, args.n_mn, args.n_int, args.n_aff, args.n_bs, render=not args.no_render)
+        args.n_rg, args.n_mn, args.n_int, args.n_aff, args.n_bs, render=not args.no_render,
+        budget_s=args.budget_s, pose_max_s=args.pose_max_s)

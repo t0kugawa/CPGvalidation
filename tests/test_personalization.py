@@ -42,3 +42,16 @@ def test_stage1_pose_then_stage2_track(nest_kernel):
 def test_early_stop_triggers(nest_kernel):
     log = build_small_personalizer(nest_kernel, loss_stop=1e9, max_steps=40).run()
     assert sum(1 for s in log.stage if s == "track") < 40
+
+
+def test_wall_clock_budget_stops_run(nest_kernel):
+    log = build_small_personalizer(nest_kernel, max_steps=40).run(wall_clock_s=0.0)
+    assert len(log.time_ms) <= 2
+
+
+def test_pose_stage_is_capped(nest_kernel):
+    pers = build_small_personalizer(nest_kernel, max_steps=20, eps_pose=1e-9,
+                                    pose_hold_steps=999)
+    log = pers.run(pose_max_steps=5)
+    assert log.stage[0] == "pose"
+    assert log.stage[5] == "track"

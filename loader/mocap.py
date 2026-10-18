@@ -61,6 +61,15 @@ THIGH_REST_ANG = float(np.arctan2(-0.032, 0.012))
 SHANK_REST_ANG = float(np.arctan2(-0.024, -0.028))
 FOOT_REST_ANG = float(np.arctan2(-0.004, 0.022))
 
+# Physiologically possible sagittal joint excursions (rad). The unwrap removes
+# the 2*pi branch cuts; this bound removes the residual marker glitches. Keep in
+# sync with the target/controlled limb hinge ranges in dual_rat_hindlimb.xml.
+JOINT_RANGES = {
+    "hip": (-1.8, 1.4),
+    "knee": (-1.6, 1.8),
+    "ankle": (-1.0, 2.6),
+}
+
 
 def _marker_xyz(df: pd.DataFrame, side: str, marker: str) -> np.ndarray:
     cols = _marker_columns(side, marker)
@@ -96,19 +105,23 @@ def markers_to_angles(df: pd.DataFrame) -> Dict[str, np.ndarray]:
         ea = _marker_xyz(df, side, "EA")
         mh = _marker_xyz(df, side, "MH")
 
-        phi_thigh = np.arctan2(kn[:, 2] - gt[:, 2], kn[:, 0] - gt[:, 0])
-        phi_shank = np.arctan2(ea[:, 2] - kn[:, 2], ea[:, 0] - kn[:, 0])
-        phi_foot = np.arctan2(mh[:, 2] - ea[:, 2], mh[:, 0] - ea[:, 0])
+        phi_thigh = np.unwrap(np.arctan2(kn[:, 2] - gt[:, 2], kn[:, 0] - gt[:, 0]))
+        phi_shank = np.unwrap(np.arctan2(ea[:, 2] - kn[:, 2], ea[:, 0] - kn[:, 0]))
+        phi_foot = np.unwrap(np.arctan2(mh[:, 2] - ea[:, 2], mh[:, 0] - ea[:, 0]))
 
-        hip = THIGH_REST_ANG - phi_thigh
-        knee = (SHANK_REST_ANG - phi_shank) - hip
-        ankle = (FOOT_REST_ANG - phi_foot) - hip - knee
+        hip = np.clip(THIGH_REST_ANG - phi_thigh, *JOINT_RANGES["hip"])
+        knee = np.clip((SHANK_REST_ANG - phi_shank) - hip, *JOINT_RANGES["knee"])
+        ankle = np.clip((FOOT_REST_ANG - phi_foot) - hip - knee, *JOINT_RANGES["ankle"])
 
         out[f"hip_{side}"] = hip
         out[f"knee_{side}"] = knee
         out[f"ankle_{side}"] = ankle
         out[f"hip_x_{side}"] = gt[:, 0]
         out[f"hip_z_{side}"] = gt[:, 2]
+        out[f"mh_z_{side}"] = mh[:, 2]
+        out[f"seg_thigh_{side}"] = np.hypot(kn[:, 0] - gt[:, 0], kn[:, 2] - gt[:, 2])
+        out[f"seg_shank_{side}"] = np.hypot(ea[:, 0] - kn[:, 0], ea[:, 2] - kn[:, 2])
+        out[f"seg_foot_{side}"] = np.hypot(mh[:, 0] - ea[:, 0], mh[:, 2] - ea[:, 2])
 
     return out
 

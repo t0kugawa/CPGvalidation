@@ -218,3 +218,25 @@ muscle path off the bone axis so the tendons are visible when they shorten.
   and `InE/InF→MN`. `CUT→RGE` is STDP, not static.
 - **V7** Reference names/values per §5.4; Ib/Renshaw keep project values; runs
   use the unscaled reference values (`w_scale = 1.0`).
+- **V8** Target limb is a **kinematic mirror** (no collision, `contype/conaffinity=0`):
+  its phase is geometric (`foot_z_ref <= belt_z + CONTACT_Z_EPS`), `contact_ref_*`
+  is a 0/1 stance indicator, and it is validation-only (the loop uses the model
+  `phase_L/R`).
+- **V9** **Belt = dataset ground**, one plane for both limbs:
+  `min` over the run window of the foot-marker (MH) height (dataset frame, m) plus
+  `TREADMILL_PENETRATION_M`. Not derived from the target limb's rig geometry.
+- **V10** The **output limb is built at the target's size**: per side, the loader's
+  sagittal mean segment lengths are applied to both limbs (`Leg.set_limb_lengths`),
+  preserving the rest directions. L/R lengths stay exactly as recorded.
+- **V11** `markers_to_angles` **unwraps** each segment direction over time and clamps
+  each joint to `JOINT_RANGES`; the rig's hinge ranges (both limbs, both sides) are
+  widened to match so every target angle is reachable.
+- **V12** `stride_length_L/R` are computed from the controlled foot's horizontal
+  excursion over the detected stance phases (contact cycles) and compared against the
+  Zenodo distributions; `step_length_L/R` likewise use foot positions.
+- **V13** σ_ctrl is updated in **log-variance** coordinates with a per-step cap
+  (`grad = ((a-mu)/sigma)^2 - 1`), removing the `1/sigma^3` blow-up.
+- **V14** The settling ("pose") stage has a step cap (`pose_max_steps`) and the run
+  can stop on a wall-clock budget (`wall_clock_s`), so contact-driven CPG activity
+  cannot stall the loop and a run fits a server time limit.
+- **V15** MVP scope is **RatA**; per-side recorded lengths, no symmetrisation.

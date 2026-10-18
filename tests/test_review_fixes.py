@@ -10,6 +10,15 @@ from model.adapter import CPGOutput
 from model.leg import Leg
 
 
+# --- Important: the controlling-variance rule must not diverge ---
+
+def test_controlling_variance_stays_bounded():
+    p = PersonaParam(mean=0.0, sigma_ctrl=1e-3)
+    for _ in range(200):
+        p.update_controlling_variance(p.sample_exploration(), advantage=0.5, lr_sigma=0.005)
+    assert 1e-3 <= p.sigma_ctrl < 0.05
+
+
 # --- Critical 3: per-parameter independent RNG streams ---
 
 def test_params_have_independent_rng():
@@ -151,3 +160,70 @@ def test_main_passes_n_steps(monkeypatch):
     personalize.main(n_steps=7)
     assert captured.get("n_steps") == 7
     assert "max_steps" not in captured
+
+
+# --- Target limb is a kinematic mirror: no collision, geometric phase ---
+
+def _bid(model, name):
+    import mujoco
+    return mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, name)
+
+
+def test_target_phase_ref_is_geometric():
+    leg = Leg(mujoco_cfg="dual_rat_hindlimb.xml", dt_ms=10.0)
+    pose = {s: {"hip": -0.2, "knee": 0.6, "ankle": 0.3} for s in ("L", "R")}
+    out = CPGOutput()
+
+    leg.set_treadmill_height(1.0)
+    leg.reset(pose=pose)
+    ci = leg.step(out, target_ankle_L=0.3, target_ankle_R=0.3)
+    assert ci.phase_ref_L == "stance"
+    assert np.isclose(ci.contact_ref_L, 1.0)
+
+    leg.set_treadmill_height(-1.0)
+    leg.reset(pose=pose)
+    ci = leg.step(out, target_ankle_L=0.3, target_ankle_R=0.3)
+    assert ci.phase_ref_L == "swing"
+    assert np.isclose(ci.contact_ref_L, 0.0)
+
+
+def test_target_has_no_contact_force():
+    leg = Leg(mujoco_cfg="dual_rat_hindlimb.xml", dt_ms=10.0)
+    assert not hasattr(leg, "_contact_force_ref")
+
+
+def test_joint_ranges_cover_loader_clamp():
+    import mujoco
+    from loader.mocap import JOINT_RANGES
+
+    leg = Leg(mujoco_cfg="dual_rat_hindlimb.xml", dt_ms=10.0)
+    for s in ("L", "R"):
+        for j, jid in (("hip", leg.j_hip_ref[s]), ("knee", leg.j_knee_ref[s]),
+                       ("ankle", leg.j_ankle_ref[s]),
+                       ("hip", leg.j_hip_m[s]), ("knee", leg.j_knee_m[s]),
+                       ("ankle", leg.j_ankle_m[s])):
+            lo, hi = (float(x) for x in leg.model.jnt_range[jid])
+            assert lo <= JOINT_RANGES[j][0] + 1e-9, (s, j, lo)
+            assert hi >= JOINT_RANGES[j][1] - 1e-9, (s, j, hi)
+
+
+# --- Output limb is scaled to the target's per-side segment lengths ---
+
+def test_set_limb_lengths_matches_target():
+    leg = Leg(mujoco_cfg="dual_rat_hindlimb.xml", dt_ms=10.0)
+    m = leg.model
+    leg.set_limb_lengths("m", "L", thigh=0.030, shank=0.040, foot=0.025)
+    assert np.isclose(np.linalg.norm(m.body_pos[_bid(m, "shank_m_L")]), 0.030)
+    assert np.isclose(np.linalg.norm(m.body_pos[_bid(m, "foot_m_L")]), 0.040)
+    assert np.isclose(np.linalg.norm(m.body_pos[_bid(m, "toe_m_L")]), 0.025)
+
+
+def test_set_limb_lengths_preserves_rest_direction():
+    leg = Leg(mujoco_cfg="dual_rat_hindlimb.xml", dt_ms=10.0)
+    m = leg.model
+    before = m.body_pos[_bid(m, "shank_m_L")].copy()
+    before /= np.linalg.norm(before)
+    leg.set_limb_lengths("m", "L", thigh=0.030, shank=0.040, foot=0.025)
+    after = m.body_pos[_bid(m, "shank_m_L")].copy()
+    after /= np.linalg.norm(after)
+    assert np.allclose(before, after)

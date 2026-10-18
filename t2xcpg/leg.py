@@ -255,7 +255,7 @@ class Leg:
         """
         deltas = self.registry.sample_plastic_weight_deltas(t_before, t_now)
         for key in self.plastic_projections:
-            self.noise_recorder.observe_weight(key, t_now, deltas.get(key, 0.0))
+            self.noise_recorder.record_direct(key, t_now, "weight", deltas.get(key, 0.0))
 
     def _build_connections(self):
         leg = self.leg

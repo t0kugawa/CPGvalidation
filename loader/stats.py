@@ -45,6 +45,23 @@ def _excursion(signal: np.ndarray) -> float:
     return float(np.ptp(s)) if s.size else 0.0
 
 
+def _stance_excursion(contact: np.ndarray, pos: np.ndarray) -> float:
+    """Mean fore-aft foot travel (mm) over the detected stance phases."""
+    c = np.asarray(contact, dtype=np.float64) > 0.5
+    p = np.asarray(pos, dtype=np.float64)
+    x = p[:, 0] if p.ndim == 2 else p
+    if x.size == 0:
+        return 0.0
+    idx = np.where(c)[0]
+    if idx.size == 0:
+        return float(np.ptp(x) * 1000.0)
+    segments = np.split(idx, np.where(np.diff(idx) > 1)[0] + 1)
+    exc = [float(np.ptp(x[seg])) for seg in segments if seg.size >= 2]
+    if not exc:
+        return 0.0
+    return float(np.mean(exc) * 1000.0)
+
+
 class LocomotionMetrics:
     """
     Locomotion parameters computed from a simulation run. Duty factor and
@@ -66,16 +83,18 @@ class LocomotionMetrics:
                 return float(np.ptp(x) * 1000.0)  # m -> mm
             return _excursion(side_ankle)
 
-        # TODO(stride_length): stride length needs real horizontal foot positions
-        # (a full stride = one complete locomotor cycle), not an ankle-angle
-        # excursion; re-introduce it once foot trajectories are supplied.
-        return {
+        out = {
             "duty_factor_L": _duty_factor(contact_L),
             "duty_factor_R": _duty_factor(contact_R),
             "double_support": _double_support(contact_L, contact_R),
             "step_length_L": _length(ankle_L, foot_pos_L),
             "step_length_R": _length(ankle_R, foot_pos_R),
         }
+        if foot_pos_L is not None:
+            out["stride_length_L"] = _stance_excursion(contact_L, foot_pos_L)
+        if foot_pos_R is not None:
+            out["stride_length_R"] = _stance_excursion(contact_R, foot_pos_R)
+        return out
 
 
 def in_distribution(value: float, dist: np.ndarray, k: float = 2.0) -> bool:

@@ -97,6 +97,8 @@ class RunLog:
     hip_ref_R: List[float] = field(default_factory=list)
     foot_z_m_L: List[float] = field(default_factory=list)
     foot_z_m_R: List[float] = field(default_factory=list)
+    foot_x_m_L: List[float] = field(default_factory=list)
+    foot_x_m_R: List[float] = field(default_factory=list)
     foot_z_ref_L: List[float] = field(default_factory=list)
     foot_z_ref_R: List[float] = field(default_factory=list)
 
@@ -107,7 +109,8 @@ class RunLog:
                 "hip_model_L", "hip_model_R", "ia_rate_F_L",
                 "contact_m_L", "contact_m_R", "contact_ref_L", "contact_ref_R",
                 "knee_ref_L", "knee_ref_R", "hip_ref_L", "hip_ref_R",
-                "foot_z_m_L", "foot_z_m_R", "foot_z_ref_L", "foot_z_ref_R")
+                "foot_z_m_L", "foot_z_m_R", "foot_z_ref_L", "foot_z_ref_R",
+                "foot_x_m_L", "foot_x_m_R")
     _STR = ("phase_L", "phase_R", "phase_ref_L", "phase_ref_R", "stage")
 
     def finalize(self) -> "RunLog":
@@ -182,15 +185,24 @@ class Personalizer:
             f"| CUT {log.cut_L[i]:.0f} Ia {log.ia_rate_E_L[i]:.0f} Ib {log.ib_rate_E_L[i]:.0f}",
             flush=True)
 
-    def run(self, step_hook=None) -> RunLog:
+    def run(self, step_hook=None, wall_clock_s: float | None = None,
+            pose_max_steps: int = 0) -> RunLog:
         """
         Runs the two-stage loop. `step_hook(step, log, cpg_in, cpg_out, stage)`
-        is invoked after every step (e.g. to render a frame).
+        is invoked after every step (e.g. to render a frame). When
+        `wall_clock_s` is given the loop stops once that much real time has
+        elapsed, so a run fits a server time budget regardless of step cost.
+        `pose_max_steps` caps the settling ("pose") stage so the loop always
+        proceeds to tracking even when contact-driven CPG activity keeps the
+        ankle error above `eps_pose`.
         """
+        import time
+        t_start = time.monotonic()
         log = RunLog()
         cpg_in = CPGInput()
         stage = "pose"
         pose_ok = 0
+        pose_steps = 0
 
         for step in range(self.max_steps):
             if step >= self.belt_start_step and hasattr(self.rig, "set_treadmill_surfacevel"):
@@ -253,6 +265,8 @@ class Personalizer:
             log.hip_ref_R.append(cpg_in.hip_angle_ref_R)
             log.foot_z_m_L.append(cpg_in.foot_z_m_L)
             log.foot_z_m_R.append(cpg_in.foot_z_m_R)
+            log.foot_x_m_L.append(cpg_in.foot_x_m_L)
+            log.foot_x_m_R.append(cpg_in.foot_x_m_R)
             log.foot_z_ref_L.append(cpg_in.foot_z_ref_L)
             log.foot_z_ref_R.append(cpg_in.foot_z_ref_R)
 
@@ -267,11 +281,16 @@ class Personalizer:
                 err = max(abs(cpg_in.ankle_angle_m_L - tgt_L),
                           abs(cpg_in.ankle_angle_m_R - tgt_R))
                 pose_ok = pose_ok + 1 if err < self.eps_pose else 0
-                if pose_ok >= self.pose_hold_steps:
+                pose_steps += 1
+                if pose_ok >= self.pose_hold_steps or \
+                        (pose_max_steps and pose_steps >= pose_max_steps):
                     stage = "track"
             else:
                 if len(log.loss) >= self.loss_window and \
                         float(np.mean(log.loss[-self.loss_window:])) < self.loss_stop:
                     break
+
+            if wall_clock_s is not None and time.monotonic() - t_start >= wall_clock_s:
+                break
 
         return log.finalize()

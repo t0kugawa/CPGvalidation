@@ -63,6 +63,8 @@ class CPGInput:
     contact_ref_R: float = 0.0
 
     # Lowest surface point of each limb's foot (m) — ground clearance diagnostic
+    foot_x_m_L: float = 0.0
+    foot_x_m_R: float = 0.0
     foot_z_m_L: float = 0.0
     foot_z_m_R: float = 0.0
     foot_z_ref_L: float = 0.0
