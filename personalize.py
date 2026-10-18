@@ -13,7 +13,7 @@ from persona.registry import Registry
 from persona.agent import Agent
 from persona.personalization import Personalizer, MocapTargetDriver
 from persona.validation import ValidationReport
-from t2xcpg.bs import BrainStem
+from t2xcpg.bs import BrainStem, BaseDrive
 from t2xcpg.leg import Leg as CPG_Leg
 from t2xcpg.cpg import L2CPG
 from model.leg import Leg as MuJoCo_Leg
@@ -77,12 +77,13 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
 
     reg = Registry()
     bs = BrainStem(registry=reg, n_bs=n_bs, bs_e_hz=40.0, bs_f_hz=40.0)
+    base = BaseDrive(registry=reg, n_bs=n_bs, base_hz=2.0)
     leg_l = CPG_Leg("L", reg, n_rg=n_rg, n_mn=n_mn, n_int=n_int, n_aff=n_aff,
                     w_scale=w_scale, ref_hz=ref_hz)
     leg_r = CPG_Leg("R", reg, n_rg=n_rg, n_mn=n_mn, n_int=n_int, n_aff=n_aff,
                     w_scale=w_scale, ref_hz=ref_hz)
     cpg = L2CPG(registry=reg, bs=bs, legs={"L": leg_l, "R": leg_r}, dt_ms=DT_MS,
-                leading_leg="L", leading_gain=1.5)
+                leading_leg="L", leading_gain=1.5, base=base)
 
     rig = MuJoCo_Leg(mujoco_cfg=os.path.join(BASE_DIR, "dual_rat_hindlimb.xml"),
                      dt_ms=DT_MS)

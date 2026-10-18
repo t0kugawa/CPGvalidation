@@ -51,3 +51,34 @@ class BrainStem:
     def set_rates(self, rate_e: float, rate_f: float):
         self.bs_pg_e.set({"rate": float(max(0.0, rate_e))})
         self.bs_pg_f.set({"rate": float(max(0.0, rate_f))})
+
+
+class BaseDrive:
+    """
+    Tonic reticulospinal base drive from `cpg_2legs_fast` (`base_pg -> base_in`
+    projecting bilaterally onto RGE and RGF). The Poisson rate is a PERSONA
+    parameter; the projection weights are ordinary static synapses.
+    """
+    def __init__(self, registry: Registry, n_bs: int = 50,
+                 base_hz: float = 2.0, prefix: str = "BASE"):
+        self.registry = registry
+        self.n_bs = n_bs
+        self.prefix = prefix
+
+        self.p_rate = PersonaParam(mean=base_hz, sigma_param=2.0, sigma_ctrl=5.0,
+                                   min=0.0, max=250.0)
+
+        self.base_pg = nest.Create("poisson_generator", n_bs,
+                                   params={"rate": float(base_hz)})
+        self.base_in = nest.Create("parrot_neuron", n_bs)
+        nest.Connect(self.base_pg, self.base_in, conn_spec={"rule": "one_to_one"})
+
+        self.registry.population_nodes[f"{prefix}_in"] = self.base_in
+
+        pop = Population(model="poisson_generator", n=n_bs,
+                         params={"rate": self.p_rate}, name=f"{prefix}_pg")
+        pop.node_collection = self.base_pg
+        self.registry.population_cfgs[f"{prefix}_pg"] = pop
+
+    def set_rate(self, rate: float):
+        self.base_pg.set({"rate": float(max(0.0, rate))})

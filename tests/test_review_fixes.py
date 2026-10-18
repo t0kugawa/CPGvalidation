@@ -3,7 +3,7 @@ import numpy as np
 from persona.parameter import PersonaParam
 from persona.registry import Registry
 from persona.personalization import RunLog
-from t2xcpg.bs import BrainStem
+from t2xcpg.bs import BrainStem, BaseDrive
 from t2xcpg.leg import Leg as CPG_Leg
 from t2xcpg.cpg import L2CPG
 from model.adapter import CPGOutput
@@ -46,6 +46,19 @@ def test_synaptic_parameters_reach_the_right_projection(nest_kernel):
         else:
             seed = round(float(cfg.extra_syn_spec["weight"]), 6)
             assert got == {seed}, f"{key}: STDP weight must not be overwritten"
+
+
+def test_base_drive_projections(nest_kernel):
+    reg = Registry()
+    bs = BrainStem(registry=reg, n_bs=5, bs_e_hz=40.0, bs_f_hz=40.0)
+    base = BaseDrive(registry=reg, n_bs=5, base_hz=2.0)
+    ll = CPG_Leg("L", reg, n_rg=6, n_mn=6, n_int=5, n_aff=5)
+    lr = CPG_Leg("R", reg, n_rg=6, n_mn=6, n_int=5, n_aff=5)
+    L2CPG(registry=reg, bs=bs, legs={"L": ll, "R": lr}, base=base)
+    keys = {k for k in reg.connection_cfgs if k.startswith("BASE_in_")}
+    assert keys == {"BASE_in_rg_e_L", "BASE_in_rg_f_L",
+                    "BASE_in_rg_e_R", "BASE_in_rg_f_R"}
+    assert "pop_BASE_pg_rate" in reg.get_all_optimizable_params()
 
 
 def test_stdp_weight_deltas_recorded_in_step(nest_kernel):

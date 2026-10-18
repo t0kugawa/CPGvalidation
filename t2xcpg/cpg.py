@@ -5,7 +5,7 @@ from persona.registry import Registry
 from persona.connection import Connection
 from persona.parameter import PersonaParam
 from model.adapter import CPGAdapter, CPGInput, CPGOutput
-from t2xcpg.bs import BrainStem
+from t2xcpg.bs import BrainStem, BaseDrive
 from t2xcpg.leg import Leg
 
 
@@ -23,7 +23,8 @@ class L2CPG(CPGAdapter):
                  dt_ms: float = 10.0,
                  p_comm: float = 0.40,
                  leading_leg: str = "L",
-                 leading_gain: float = 1.5):
+                 leading_gain: float = 1.5,
+                 base: "BaseDrive | None" = None):
         self.registry = registry
         self.bs = bs
         self.legs = legs
@@ -31,9 +32,11 @@ class L2CPG(CPGAdapter):
         self.current_time_ms = 0.0
         self.leading_leg = leading_leg
         self.leading_gain = float(leading_gain)
+        self.base = base
 
         # Build Brainstem drives and Commissural Cross-Connections
         self._build_bs_connections()
+        self._build_base_connections()
         self._build_commissural_connections(p_comm=p_comm)
         self.registry.finalize_connections()
 
@@ -73,6 +76,18 @@ class L2CPG(CPGAdapter):
             gain = self.leading_gain if leg_key == self.leading_leg else 1.0
             self._connect("BS_in_e", f"rg_e_{leg_key}", weight=18.0 * gain, p=0.45)
             self._connect("BS_in_f", f"rg_f_{leg_key}", weight=18.0 * gain, p=0.45)
+
+    def _build_base_connections(self):
+        """
+        Tonic base drive (`cpg_2legs_fast` `BASE_DRIVE_*`): the shared base_in
+        population projects bilaterally onto RGE and RGF with weight 1.0 and
+        p 0.10, delay 1.0 ms.
+        """
+        if self.base is None:
+            return
+        for leg_key in self.legs:
+            self._connect("BASE_in", f"rg_e_{leg_key}", weight=1.0, p=0.10, delay=1.0)
+            self._connect("BASE_in", f"rg_f_{leg_key}", weight=1.0, p=0.10, delay=1.0)
 
     def _build_commissural_connections(self, p_comm: float = 0.40):
         """

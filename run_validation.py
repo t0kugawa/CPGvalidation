@@ -32,6 +32,7 @@ from personalize import build_personalizer, DEFAULT_REFERENCE, DT_MS
 from persona.validation import ValidationReport
 from persona.h5io import save_run
 from model.render import LegRenderer, hud_lines
+from t2xcpg.cfg import POPULATIONS_FINAL
 
 
 def run(duration_s, view, width, height, fps, out_dir,
@@ -142,6 +143,8 @@ if __name__ == "__main__":
     ap.add_argument("--n-aff", type=int, default=6)
     ap.add_argument("--n-bs", type=int, default=8)
     ap.add_argument("--no-render", action="store_true")
+    ap.add_argument("--final", action="store_true",
+                    help="full cpg_2legs_fast population sizes")
     ap.add_argument("--fast", action="store_true",
                     help="quick low-res short run for iteration")
     args = ap.parse_args()
@@ -149,6 +152,12 @@ if __name__ == "__main__":
         args.duration_s = min(args.duration_s, 4.0)
         args.width, args.height, args.fps = 480, 270, 20
         args.n_rg, args.n_mn, args.n_int, args.n_aff, args.n_bs = 6, 5, 5, 3, 5
+    elif args.final:
+        args.n_rg = POPULATIONS_FINAL["n_rg"]
+        args.n_mn = POPULATIONS_FINAL["n_mn"]
+        args.n_int = POPULATIONS_FINAL["n_int"]
+        args.n_aff = POPULATIONS_FINAL["n_aff"]
+        args.n_bs = POPULATIONS_FINAL["n_bs"]
     run(args.duration_s, args.view, args.width, args.height, args.fps, args.out,
         args.w_scale, args.ref_hz, args.belt_mps, args.belt_start_s, args.belt_ramp_s,
         args.n_rg, args.n_mn, args.n_int, args.n_aff, args.n_bs, render=not args.no_render)
