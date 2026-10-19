@@ -63,7 +63,8 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
                        w_scale: float = 1.0,
                        ref_hz: float = 100.0,
                        belt_mode: str = "dataset",
-                       loop: bool = True) -> tuple[Personalizer, MocapLoader]:
+                       loop: bool = True,
+                       tau_mem_s: float = 2.0) -> tuple[Personalizer, MocapLoader]:
     """
     Builds the full closed loop: bilateral CPG (via the PERSONA registry),
     bilateral MuJoCo rig, PERSONA agent, and the mocap-driven target limb.
@@ -155,7 +156,8 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
         loop=loop,
     )
 
-    agent = Agent(registry=reg, lr_mu=0.03, lr_sigma=0.005, dt_ms=DT_MS)
+    agent = Agent(registry=reg, lr_mu=0.03, lr_sigma=0.005,
+                  tau_mem_s=tau_mem_s, dt_ms=DT_MS)
 
     personalizer = Personalizer(
         registry=reg, cpg=cpg, rig=rig, agent=agent, target_driver=driver,
@@ -176,7 +178,9 @@ def run_personalization(reference_path: str = DEFAULT_REFERENCE,
                         loss_window: int = 30,
                         verbose: bool = True,
                         log_every: int = 20,
-                        belt_mode: str = "dataset") -> dict:
+                        belt_mode: str = "dataset",
+                        tau_mem_s: float = 2.0,
+                        realize_every_k: int = 1) -> dict:
     """
     Full experiment: build the loop, run the two-stage PERSONA optimization,
     write the validation figure, the CSV/npz logs, and return the acceptance dict.
@@ -192,11 +196,12 @@ def run_personalization(reference_path: str = DEFAULT_REFERENCE,
     personalizer, loader = build_personalizer(
         reference_path=reference_path, max_steps=n_steps,
         eps_pose=eps_pose, pose_hold_steps=pose_hold_steps,
-        loss_stop=loss_stop, loss_window=loss_window, belt_mode=belt_mode, **sizes)
+        loss_stop=loss_stop, loss_window=loss_window, belt_mode=belt_mode,
+        tau_mem_s=tau_mem_s, **sizes)
     personalizer.verbose = verbose
     personalizer.log_every = log_every
 
-    log = personalizer.run()
+    log = personalizer.run(realize_every_k=realize_every_k)
     log.to_csv(os.path.join(output_dir, "run_log.csv"))
     n_pose = sum(1 for s in log.stage if s == "pose")
     n_track = sum(1 for s in log.stage if s == "track")
@@ -269,9 +274,11 @@ def _save_combined_figure(log, output_dir: str):
 
 
 def main(n_steps: int = 200, small: bool = False, output_dir: str | None = None,
-         verbose: bool = True, log_every: int = 20) -> dict:
+         verbose: bool = True, log_every: int = 20,
+         tau_mem_s: float = 2.0, realize_every_k: int = 1) -> dict:
     res = run_personalization(n_steps=n_steps, small=small, output_dir=output_dir,
-                              verbose=verbose, log_every=log_every)
+                              verbose=verbose, log_every=log_every,
+                              tau_mem_s=tau_mem_s, realize_every_k=realize_every_k)
     print(f"Steps: {res['n_steps_done']} (pose {res['n_pose']}, track {res['n_track']})")
     print(f"Final loss (last-20 mean): {res['final_loss']:.4f}")
     print(f"Acceptable: {res['acceptable']} | angle coverage: {res['angle_coverage']:.2f}")
@@ -280,4 +287,14 @@ def main(n_steps: int = 200, small: bool = False, output_dir: str | None = None,
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    ap = argparse.ArgumentParser(description="Run the PERSONA personalization experiment.")
+    ap.add_argument("--tau-mem-s", type=float, default=2.0,
+                    help="trace/credit memory time constant in seconds "
+                         "(beta = 1 - dt/tau_mem)")
+    ap.add_argument("--realize-every-k", type=int, default=1,
+                    help="sample + realize + record the network every k steps "
+                         "(strategy still updates every dt)")
+    args = ap.parse_args()
+    main(tau_mem_s=args.tau_mem_s, realize_every_k=args.realize_every_k)

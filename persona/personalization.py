@@ -238,6 +238,15 @@ class Personalizer:
         self.belt_mps = float(belt_mps)
         self.belt_start_step = int(belt_start_step)
         self.belt_ramp_steps = max(1, int(belt_ramp_steps))
+        self._seen_apply_errors: set[tuple[str, str]] = set()
+
+    def _log_new_apply_errors(self):
+        """Prints every newly surfaced realization failure exactly once."""
+        for key, msg in self.registry.last_apply_errors:
+            entry = (str(key), str(msg))
+            if entry not in self._seen_apply_errors:
+                self._seen_apply_errors.add(entry)
+                print(f"[apply-error] {entry[0]}: {entry[1]}", flush=True)
 
     def _log_progress(self, log: RunLog, stage: str):
         if not self.verbose:
@@ -275,7 +284,7 @@ class Personalizer:
                 st["weight_max"].setdefault(key, []).append(s["max"])
 
     def run(self, step_hook=None, wall_clock_s: float | None = None,
-            pose_max_steps: int = 0) -> RunLog:
+            pose_max_steps: int = 0, realize_every_k: int = 1) -> RunLog:
         """
         Runs the two-stage loop. `step_hook(step, log, cpg_in, cpg_out, stage)`
         is invoked after every step (e.g. to render a frame). When
@@ -284,14 +293,22 @@ class Personalizer:
         `pose_max_steps` caps the settling ("pose") stage so the loop always
         proceeds to tracking even when contact-driven CPG activity keeps the
         ankle error above `eps_pose`.
+
+        `realize_every_k` (spec §5.2): sample + realize + record the network
+        every k-th step only; the strategy still updates every dt from the
+        held (recorded) sample, so `k > 1` trades learning noise for wall-clock
+        without changing the update rule.
         """
         import time
         t_start = time.monotonic()
+        k_realize = max(1, int(realize_every_k))
         log = RunLog()
         cpg_in = CPGInput()
         stage = "pose"
         pose_ok = 0
         pose_steps = 0
+        # construction-time failures surface before the first apply clears them
+        self._log_new_apply_errors()
 
         for step in range(self.max_steps):
             if step >= self.belt_start_step and hasattr(self.rig, "set_treadmill_surfacevel"):
@@ -305,8 +322,10 @@ class Personalizer:
             tgt_L = rig_kwargs["target_ankle_L"]
             tgt_R = rig_kwargs["target_ankle_R"]
 
-            actions = self.agent.sample_actions()
-            self.registry.apply_explored_parameters(actions)
+            if step % k_realize == 0:
+                actions = self.agent.sample_actions(t_ms=self.cpg.current_time_ms)
+                self.registry.apply_explored_parameters(actions)
+                self._log_new_apply_errors()
 
             self.cpg.update(cpg_in)
             cpg_out = self.cpg.step()
@@ -316,6 +335,7 @@ class Personalizer:
                 output=np.array([cpg_in.ankle_angle_m_L, cpg_in.ankle_angle_m_R]),
                 target=np.array([tgt_L, tgt_R]),
                 phase=[cpg_in.phase_L, cpg_in.phase_R],
+                t_ms=self.cpg.current_time_ms,
             )
 
             log.time_ms.append(self.cpg.current_time_ms)

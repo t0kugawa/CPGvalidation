@@ -514,7 +514,7 @@ is a draw around the action (not the mean of draws); (c) a monkeypatched failing
 
 - [x] **Step 4: Run to verify pass** + `tests/test_cpg_build.py tests/test_cpg_topology.py tests/test_stdp.py`.
 
-- [ ] **Step 5: Commit** — `git commit -m "feat(persona): registry single NEST route, per-instance realization, apply errors surfaced"`
+- [x] **Step 5: Commit** — `git commit -m "feat(persona): registry single NEST route, per-instance realization, apply errors surfaced"`
 
 ---
 
@@ -531,13 +531,13 @@ is a draw around the action (not the mean of draws); (c) a monkeypatched failing
 - `personalize.py`: `Agent(..., lr_mu=0.03, lr_sigma=0.005, tau_mem_s=args.tau_mem_s, dt_ms=DT_MS)`.
 - CLI: `--tau-mem-s` (default 2.0), `--realize-every-k` (default 1) on `personalize.py`/`run_validation.py`.
 
-- [ ] **Step 1: Write failing tests** — `tests/test_personalization.py`: `realize_every_k=2` keeps the
+- [x] **Step 1: Write failing tests** — `tests/test_personalization.py`: `realize_every_k=2` keeps the
   site recorder's sample stable across the odd step and the strategy step still runs (loss log length equals
   total steps); `t_ms` reaches the recorders.
-- [ ] **Step 2: Run to verify failure.**
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run to verify pass.**
-- [ ] **Step 5: Commit** — `git commit -m "feat(persona): realize-every-k loop gating, tau-mem CLI, apply-error logging"`
+- [x] **Step 2: Run to verify failure.**
+- [x] **Step 3: Implement.**
+- [x] **Step 4: Run to verify pass.**
+- [x] **Step 5: Commit** — `git commit -m "feat(persona): realize-every-k loop gating, tau-mem CLI, apply-error logging"`
 
 ---
 

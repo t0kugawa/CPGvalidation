@@ -67,3 +67,50 @@ def test_driver_loops_trajectory():
     clamped = MocapTargetDriver(ankle_L=[0.1, 0.2, 0.3], ankle_R=[0.1, 0.2, 0.3],
                                 dt_ms=10.0, loop=False)
     assert np.isclose(clamped.target(100.0)["target_ankle_L"], 0.3)
+
+
+def test_realize_every_k_holds_the_sample(nest_kernel):
+    pers = build_small_personalizer(nest_kernel, max_steps=12, loss_stop=-1e9)
+    key = "pop_rg_e_L_a"
+    seen = []
+
+    def hook(step, log, cpg_in, cpg_out, stage):
+        rec = pers.registry.site_recorder(key)
+        seen.append((step, rec.latest_sample(), rec.stats()["t"]))
+
+    log = pers.run(realize_every_k=2, step_hook=hook)
+    # strategy steps still run every dt (downstream predicates use the loss)
+    assert len(log.loss) == len(log.time_ms)
+    assert len(seen) >= 6
+    by_step = {step: (sample_sigma, t) for step, sample_sigma, t in seen}
+    for step, sample_sigma, t in seen:
+        if step % 2 == 0:
+            # fresh realization + record at this step's t_ms (kernel clock)
+            assert t == step * 10.0
+        else:
+            # the odd step holds the even step's recorded (x, sigma, t) exactly;
+            # even when a fresh draw is clipped to the same bound, no write happens
+            assert (sample_sigma, t) == by_step[step - 1]
+
+
+def test_t_ms_reaches_the_recorders(nest_kernel):
+    pers = build_small_personalizer(nest_kernel, max_steps=6, loss_stop=-1e9)
+    log = pers.run()
+    n = len(log.time_ms)
+    assert n >= 4
+    rec = pers.registry.site_recorder("pop_rg_e_L_a")
+    # the last apply landed at the loop's t_ms, i.e. (n-1)*dt on the CPG clock
+    assert rec.stats()["t"] == (n - 1) * 10.0
+
+
+def test_apply_errors_logged_once(nest_kernel, capsys):
+    pers = build_small_personalizer(nest_kernel, max_steps=5, loss_stop=-1e9)
+
+    class _Boom:
+        def set(self, *args, **kwargs):
+            raise RuntimeError("boom")
+
+    pers.registry.population_cfgs["rg_e_L"].node_collection = _Boom()
+    pers.run()
+    out = capsys.readouterr().out
+    assert out.count("[apply-error] pop_rg_e_L") == 1
