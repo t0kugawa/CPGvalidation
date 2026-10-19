@@ -51,6 +51,15 @@ class Leg:
         self._build_connections()
 
         # 3. Readout Recorders
+        # Muscle drives are read from the MOTOR pool: the muscle parrots are a
+        # convergent relay (each motor spike lands on ~n_mn*P_M2MUS of them), and
+        # NEST collapses coincident relay input into one spike per neuron per ms,
+        # so the relay count saturates at n_mn as soon as the pool fires - a
+        # fan-in correction cannot recover a rate from it. Driving the plants from
+        # that count produced a bang-bang command (measured: drive in {0.8, 1.0}
+        # at n_mn=100) instead of the motor rate.
+        self.rec_mne = self.registry.create_spike_recorder(self.m_e)
+        self.rec_mnf = self.registry.create_spike_recorder(self.m_f)
         self.rec_muse = self.registry.create_spike_recorder(self.mus_e)
         self.rec_musf = self.registry.create_spike_recorder(self.mus_f)
         self.rec_rge = self.registry.create_spike_recorder(self.rg_e)
@@ -329,17 +338,15 @@ class Leg:
 
     def get_muscle_drives(self, dt_ms: float, current_time_ms: float = 0.0) -> Tuple[float, float]:
         """
-        Normalized muscle activation in [0, 1] from spikes during the step.
-        A pool at `ref_hz` per neuron (default 100 Hz) maps to full drive, so
-        the drive tracks population rate rather than saturating the instant the
-        pool fires. Muscle drives are readouts/logs, not noise channels.
+        Normalized muscle activation in [0, 1] from the motor pool's spikes this
+        step. A pool at `ref_hz` per neuron (default 100 Hz) maps to full drive, so
+        the drive tracks population rate and stays graded over its whole range.
+        Muscle drives are readouts/logs, not noise channels.
         """
-        ev_e = self.rec_muse.get("events")["times"]
-        ev_f = self.rec_musf.get("events")["times"]
-        n_e = len(ev_e)
-        n_f = len(ev_f)
-        self.rec_muse.set({"n_events": 0})
-        self.rec_musf.set({"n_events": 0})
+        n_e = len(self.rec_mne.get("events")["times"])
+        n_f = len(self.rec_mnf.get("events")["times"])
+        self.rec_mne.set({"n_events": 0})
+        self.rec_mnf.set({"n_events": 0})
 
         drive_e = self._drive(n_e, dt_ms)
         drive_f = self._drive(n_f, dt_ms)

@@ -279,18 +279,24 @@ class Leg:
     def _level_treadmill(self):
         """
         Places the treadmill plane so the limbs' feet rest on the belt: at the
-        lowest surface point of the TARGET limbs' feet plus a small penetration
-        (`TREADMILL_PENETRATION_M`), so a resting contact (and thus a stance
-        phase) is actually generated. A positive gap would suppress contact
-        entirely. Returns the plane height used. If an explicit belt height was
-        set with `set_treadmill_height`, that value is used instead.
+        lowest surface point of the CONTROLLED limbs' feet plus a small
+        penetration (`TREADMILL_PENETRATION_M`), so a resting contact (and thus a
+        stance phase) is actually generated. A positive gap would suppress contact
+        entirely. Returns the plane height used. If an explicit belt height was set
+        with `set_treadmill_height`, that value is used instead.
+
+        The controlled foot is the one that must touch: it is the only limb with
+        collision geoms (the target limb is a non-colliding kinematic mirror) and
+        the only one whose CUT contact feeds the CPG. The controlled foot's lowest
+        surface also sits slightly above the target foot's over the cycle, so
+        levelling on the target foot leaves the controlled foot in permanent air.
         """
         if self._belt_override is not None:
             self._apply_belt(self._belt_override)
             return self.belt_z
         lo = np.inf
         for s in SIDES:
-            lo = min(lo, self._foot_lowest_z(self.ref_foot_geoms[s]))
+            lo = min(lo, self._foot_lowest_z(self.model_foot_geoms[s]))
         if not np.isfinite(lo):
             return float(self.model.geom_pos[self.treadmill_gid, 2])
         self._apply_belt(lo + TREADMILL_PENETRATION_M)
