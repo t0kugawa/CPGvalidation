@@ -48,8 +48,10 @@ Four coupled defects in the current PERSONA module:
 - **G3 late credit.** `X̄_t = βX̄_{t−1} + (1−β)a_t` (PERSONA actions),
   `G_t = βG_{t−1} + (1−β)X̄_tA_tᵀ`, `Δμ = η_μ(F_t+λI)⁻¹(G_t·1₂)` — every dt.
 - **G4 noise accounting.** STDP projections and sensory Poisson generators get
-  producer recorders; their deltas enter `F` with their own recorded scale τ;
-  they never enter the trace/credit; they change step length through `F`.
+  producer recorders; their deltas enter `F` with a declared fixed reference
+  scale `R` (`s = δ/R²`; STDP: initial `Wmax`, Poisson: nominal rate, CUT:
+  10 Hz); they never enter the trace/credit; they change step length through
+  `F`.
 - **G5 NEST integration audit.** All `nest.Create`/`nest.Connect` go through
   `Registry` helpers; site recorder keys are unique by construction; apply
   failures are recorded and logged, never swallowed.
@@ -81,8 +83,9 @@ Four coupled defects in the current PERSONA module:
 - Advantage `A(t) ∈ R²` (one per leg), `A_i = b_i(phase_i) − E_i`, `b` the
   per-component, per-phase moving-average baselines (unchanged, α = 0.90).
 - Noise producer `p`: each STDP projection and each sensory Poisson group;
-  per-step delta `δ_p(t)`; recorder tracks β-EWMA mean/variance; scale
-  `τ_p(t) = sqrt(max(var_p, τ_floor²))`, `τ_floor = 1e-6`.
+  per-step delta `δ_p(t)`; declared fixed reference scale `R_p` (STDP: initial
+  `Wmax`; Poisson: nominal group rate; CUT: 10 Hz), set at registration. No
+  estimation and no warm-up.
 - Forgetting factor `β = 1 − dt/τ_mem`; `τ_mem` default 2.0 s (≈ a few
   locomotion cycles) → `β = 0.995` at `dt = 10 ms`.
 
@@ -101,7 +104,7 @@ producers. For each site `s` (sampling-time values):
 
 For each producer `p`:
 
-    s^N_p = δ_p / τ_p²             # δ never enters the trace
+    s^N_p = δ_p / R_p²             # declared scale; δ never enters the trace
     a row = 0 (excluded from X̄ and G)
 
 Every step `t` (after the first `warmup = 3` steps, updates are applied; the
@@ -222,16 +225,23 @@ API (replaces `observe`/`observe_weight`/`record_direct`/`flush_distribution`/
 
 ```python
 class NoiseRecorder:
-    def __init__(self, name, beta=0.995): ...
+    def __init__(self, name, beta=0.995, scale=None): ...
     def record_sample(self, t, sample, sigma):      # site recorders
     def record_delta(self, t, delta):               # producer recorders
     def latest_sample(self) -> tuple[float, float] | None   # (x̂, σ), never cleared
     def take_delta(self) -> float | None            # fresh since last take; read-and-clear
-    def stats(self) -> dict                         # β-EWMA mean/var/std/latest/t/n
+    def stats(self) -> dict                         # diagnostics only
 ```
 
-- β-EWMA statistics update on every record:
-  `m ← βm + (1−β)v`, `q ← βq + (1−β)v²`, `var = max(q − m², 0)`.
+- **Declared producer scale.** Every producer recorder carries a fixed
+  reference scale `R` supplied at registration (never estimated, never
+  updated): STDP → the projection's initial `Wmax`; Poisson → the nominal
+  group rate. CUT rests at 0 Hz, so it declares `R = 10 Hz` explicitly. The
+  strategy scores a producer as `s = δ/R²`; `R = 0`/absent means no influence,
+  and a step with no fresh delta uses `δ = 0` (score 0). There is no warm-up
+  and no "n ≥ 2" gate: the first declared delta counts at full weight.
+- β-EWMA statistics (`m`, `q`, `std`, `t`, `n`) remain available for
+  diagnostics with constant memory, but are **not** used for scoring.
 - **Freshness**: `take_delta` clears; a step with no new record yields `None`
   (treated as `δ = 0.0`); a stale value can never be re-read. (Fixes the
   `_step_deltas`-never-cleared bug.)
@@ -256,13 +266,13 @@ FisherMatrix(param_names, noise_names=None, lr_mu=0.02, lr_sigma=0.005,
     .ensure_names(param_names, noise_names)   # zero-pad F/X̄/G when sites appear
     .compute_advantage(loss_vector, phase)    # PhaseBaselines, unchanged
     .step(sites, noise, advantage) -> dict    # sites: key -> (Δθ, σ, Δlogσ)
-                                              # noise: name -> (δ, τ); returns Δμ per site
+                                              # noise: name -> (δ, R); returns Δμ per site
     .influence()                              # normalised |G| row norms
-    .F, .Xbar, .G                             # exposed for logging/tests
+    .F, .Xbar, .G, .noise_scales              # exposed for logging/tests
 ```
 
-- F = β-EWMA of `s sᵀ` over `[μ-scores; σ-scores; noise-scores]`; ridge
-  `+λI` only inside the solve (keep the raw F).
+- F = β-EWMA of `s sᵀ` over `[μ-scores; σ-scores; noise-scores]` with
+  `s_noise = δ/R²`; ridge `+λI` only inside the solve (keep the raw F).
 - Solve with `np.linalg.solve`, fallback `pinv`. `g` has zero rows for noise;
   the σ rows of `F⁻¹g` are **not** applied (σ has its own rule) but σ and
   noise still shape the μ step through the covariance (they are columns of F).
@@ -395,7 +405,8 @@ h5/figures).
   optimized set.)*
 - **V23** Per-site and per-producer noise recorders with unique keys
   (`site:*`, `producer:stdp:*`, `producer:poisson:*`), read-and-clear
-  freshness, β-EWMA mean/var; τ = sqrt(var) of producer deltas. *(Fixes tag
+  freshness, declared fixed producer scale `R` for scoring (`δ/R²`; no
+  estimation/gate); β-EWMA stats kept for diagnostics only. *(Fixes tag
   collisions and stale deltas.)*
 - **V24** Persisted two-type strategy, updated every dt, never pruned:
   `F = βF + (1−β)s sᵀ` over `[μ-score; σ-score; noise-score]` channels;

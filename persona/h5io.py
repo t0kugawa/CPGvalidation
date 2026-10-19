@@ -64,6 +64,10 @@ def save_run(path, log, agent, meta=None):
         strategy = getattr(agent, "strategy", None)
         if strategy is not None:
             ag.attrs["param_names"] = list(getattr(strategy, "param_names", []))
+            ag.attrs["noise_names"] = list(getattr(strategy, "noise_names", []))
+            ag.attrs["noise_scales"] = [
+                float(getattr(strategy, "noise_scales", {}).get(n, 0.0))
+                for n in getattr(strategy, "noise_names", [])]
             ag.attrs["all_names"] = list(getattr(strategy, "all_names", []))
             try:
                 ag.create_dataset("fisher",
@@ -106,5 +110,7 @@ def load_run(path):
                 if grp in f["agent"]:
                     out["agent"][grp] = f["agent"][grp][()]
             out["agent"]["param_names"] = list(f["agent"].attrs.get("param_names", []))
+            out["agent"]["noise_names"] = list(f["agent"].attrs.get("noise_names", []))
+            out["agent"]["noise_scales"] = list(f["agent"].attrs.get("noise_scales", []))
             out["agent"]["all_names"] = list(f["agent"].attrs.get("all_names", []))
     return out, meta

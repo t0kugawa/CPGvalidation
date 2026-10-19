@@ -34,9 +34,9 @@ def test_loss_decreases_and_sigma_recorded(nest_kernel):
     assert len(agent.history["sigmas"][key]) == 300
 
 
-def test_agent_passes_fresh_producer_deltas(nest_kernel):
+def test_agent_passes_fresh_producer_deltas_and_declared_scale(nest_kernel):
     agent, reg = _agent()
-    rec = reg.producer_recorder("stdp:x")
+    rec = reg.producer_recorder("stdp:x", scale=2.0)
     captured = {}
     orig = agent.strategy.step
 
@@ -50,10 +50,32 @@ def test_agent_passes_fresh_producer_deltas(nest_kernel):
     agent.sample_actions(t_ms=0.0)
     agent.step(np.zeros(2), np.zeros(2), phase="stance", t_ms=10.0)
     assert captured["producer:stdp:x"][0] == 5.0     # fresh value read
-    assert captured["producer:stdp:x"][1] > 0.0      # tau from recorder stats
+    assert captured["producer:stdp:x"][1] == 2.0     # declared scale, no warm-up
+    rec.record_delta(10.0, 3.0)
     agent.sample_actions(t_ms=10.0)
     agent.step(np.zeros(2), np.zeros(2), phase="stance", t_ms=20.0)
-    assert captured["producer:stdp:x"][0] == 0.0     # never the stale 5.0
+    assert captured["producer:stdp:x"][0] == 3.0     # fresh value read
+    assert captured["producer:stdp:x"][1] == 2.0     # scale is fixed, not estimated
+    agent.sample_actions(t_ms=20.0)
+    agent.step(np.zeros(2), np.zeros(2), phase="stance", t_ms=30.0)
+    assert captured["producer:stdp:x"][0] == 0.0     # never the stale 3.0
+
+
+def test_unscaled_producer_has_zero_declared_scale(nest_kernel):
+    agent, reg = _agent()
+    rec = reg.producer_recorder("stdp:no_scale")     # declaration omitted
+    captured = {}
+    orig = agent.strategy.step
+
+    def spy(sites, noise, advantage):
+        captured.update(noise)
+        return orig(sites, noise, advantage)
+
+    agent.strategy.step = spy
+    rec.record_delta(0.0, 5.0)
+    agent.sample_actions(t_ms=0.0)
+    agent.step(np.zeros(2), np.zeros(2), phase="stance", t_ms=10.0)
+    assert captured["producer:stdp:no_scale"] == (5.0, 0.0)
 
 
 def test_sigma_frozen_during_warmup_then_updates(nest_kernel):
@@ -98,3 +120,11 @@ def test_influence_logged(nest_kernel):
     agent.step(np.zeros(2), np.ones(2), phase=["stance", "swing"], t_ms=10.0)
     assert "influence" in agent.history and len(agent.history["influence"]) == 1
     assert agent.history["influence"][-1].shape == (2 * agent.strategy.n_sites,)
+
+
+def test_recorders_created_later_get_the_agent_beta(nest_kernel):
+    agent, reg = _agent(tau_mem_s=0.2)           # beta = 1 − 0.01/0.2 = 0.95
+    rec = reg.producer_recorder("stdp:late")
+    assert rec.beta == 0.995                     # NoiseRecorder default until seen
+    agent.sample_actions(t_ms=0.0)
+    assert rec.beta == agent.beta

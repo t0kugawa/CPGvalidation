@@ -179,9 +179,12 @@ class Leg:
         # Sensory Feedback Generators (Poisson -> Parrot) as registered relays;
         # each group's per-step rate delta goes to its producer recorder.
         # 1. CUT (cutaneous)
+        # Rest rate is 0, so the declared noise scale must be given explicitly:
+        # 10 Hz is the same full-scale rate used for the Ia groups, i.e. one
+        # nominal afferent firing rate (spec §5.3).
         self.cut_pg, self.cut_in = self.registry.create_relay(
             f"cut_pg_{self.leg}", f"cut_in_{self.leg}", self.n_aff,
-            rate=0.0, noise_name=f"cut_{self.leg}")
+            rate=0.0, noise_name=f"cut_{self.leg}", noise_scale=10.0)
 
         # 2. Ia Afferents (stretch length & velocity)
         self.ia_e_pg, self.ia_e_in = self.registry.create_relay(

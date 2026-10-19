@@ -232,17 +232,20 @@ class ValidationReport:
 
     @staticmethod
     def _channel_labels(strategy):
-        """Row labels of F/Xbar/G: sites [μ; σ] in param_names order, then noise."""
-        labels = []
-        for g in list(getattr(strategy, "param_names", [])):
-            labels += [f"{g} μ", f"{g} σ"]
-        labels += [f"noise {k}" for k in list(getattr(strategy, "noise_names", []))]
-        return labels
+        """Row labels of F/Xbar/G in the blocked layout [μ; σ; noise]."""
+        names = list(getattr(strategy, "all_names", []) or [])
+        if names:
+            return names
+        params = list(getattr(strategy, "param_names", []) or [])
+        return ([f"{k} μ" for k in params] + [f"{k} σ" for k in params]
+                + [f"noise {k}" for k in getattr(strategy, "noise_names", [])])
 
     def plot_fisher(self, agent):
         """Heat-map of F = β-EWMA score covariance (diagonal = channel activity)."""
         F = np.asarray(agent.strategy.F, dtype=float)
         names = self._channel_labels(agent.strategy)
+        if len(names) < F.shape[0]:      # labels saved by an older artifact
+            names = names + [f"ch{i}" for i in range(len(names), F.shape[0])]
         show = min(len(names), 60)  # keep the heat-map legible
         # pick the most active channels (largest diagonal of F)
         d = np.diag(F)
@@ -269,6 +272,8 @@ class ValidationReport:
         """Bar chart of the per-channel impact |G| row norms (normalised)."""
         infl = np.asarray(agent.strategy.influence(), dtype=float)
         names = self._channel_labels(agent.strategy)
+        if len(names) < len(infl):       # labels saved by an older artifact
+            names = names + [f"ch{i}" for i in range(len(names), len(infl))]
         order = np.argsort(-infl)[:min(len(infl), 25)]
         fig, ax = plt.subplots(figsize=(12, 4))
         ax.bar(range(len(order)), infl[order], color="tab:purple")
@@ -291,6 +296,8 @@ class ValidationReport:
         """
         F = np.asarray(agent.strategy.F, dtype=float)
         names = self._channel_labels(agent.strategy)
+        if len(names) < F.shape[0]:      # labels saved by an older artifact
+            names = names + [f"ch{i}" for i in range(len(names), F.shape[0])]
         show = min(len(names), 60)
         Fsub = F[:show, :show]
         labels = [names[i].replace("conn_", "").replace("_weight", "")[:14]

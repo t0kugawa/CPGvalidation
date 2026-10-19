@@ -86,3 +86,25 @@ def test_create_population_set_failure_is_surfaced(nest_kernel):
     reg.create_population(Population("izhikevich", 3, {"rate": bad}, "bad_pop"))
     assert [k for k, _ in reg.last_apply_errors] == ["pop_bad_pop"]
     assert reg.last_apply_errors[0][1]
+
+
+def test_relay_seed_dispersion_is_realized(nest_kernel):
+    reg = Registry()
+    p = PersonaParam(mean=100.0, sigma=20.0, min=0.0, max=1000.0)
+    reg.create_relay("seed_pg", "seed_in", 6, rate=100.0, rate_param=p,
+                     pop_name="seed", noise_name="seed")
+    rates = _values(reg.get("seed_pg"), "rate")
+    assert rates.size == 6
+    assert np.unique(rates).size == 6            # seed dispersion, not one scalar
+    assert abs(rates.mean() - 100.0) < 30.0
+    assert reg.site_recorder("pop_seed_rate").latest_sample() == (100.0, 20.0)
+
+
+def test_zero_synapse_projection_is_surfaced(nest_kernel):
+    reg = _tiny(nest_kernel)
+    reg._syn_counts["src_tgt"] = 0               # empty projection (cached count)
+    reg.apply_explored_parameters({"conn_src_tgt_weight": 5.0})
+    assert [k for k, _ in reg.last_apply_errors] == ["conn_src_tgt"]
+    assert "zero-synapse" in reg.last_apply_errors[0][1]
+    # the sample is still recorded: applied to an empty projection
+    assert reg.site_recorder("conn_src_tgt_weight").latest_sample()[0] == 5.0

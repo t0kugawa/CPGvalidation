@@ -12,12 +12,18 @@ class NoiseRecorder:
       source (STDP weight increments, sensory Poisson rate changes) and is
       read-and-clear, so a stale delta can never leak into a later step.
 
-    Statistics are constant-cost β-decayed EWMA estimates (`m`, `q`): a long run
-    neither stores samples nor scans a window.
+    A producer also carries a **declared reference scale** `R` (STDP: Wmax,
+    Poisson: nominal rate), fixed at registration. The strategy scores the
+    delta as `δ/R²`; there is no estimation, no warm-up and no per-step gate.
+    Missing/zero scale means the producer has no influence. Statistics remain
+    available for diagnostics only and are never used for scoring.
     """
-    def __init__(self, name: str, beta: float = 0.995):
+    def __init__(self, name: str, beta: float = 0.995,
+                 scale: float | None = None):
         self.name = name
         self.beta = float(beta)
+        self.scale = (float(scale) if scale is not None and float(scale) > 0.0
+                      else None)
         self.n = 0
         self.t = 0.0
         self._m: float | None = None

@@ -67,14 +67,22 @@ class Registry:
             self.register_noise_recorder(rec)
         return rec
 
-    def producer_recorder(self, name: str) -> NoiseRecorder:
+    def producer_recorder(self, name: str,
+                          scale: float | None = None) -> NoiseRecorder:
         """Get-or-create the recorder of one noise producer (e.g. 'stdp:cut_rge_L',
-        'poisson:cut_L'); the registered name is prefixed with 'producer:'."""
+        'poisson:cut_L'); the registered name is prefixed with 'producer:'.
+
+        `scale` is the declared reference `R` used to score the producer's
+        delta (`δ/R²`). It is fixed by the caller at registration time; a later
+        call without `scale` leaves the existing value untouched.
+        """
         full = name if name.startswith("producer:") else f"producer:{name}"
         rec = self.noise_recorders.get(full)
         if rec is None:
-            rec = NoiseRecorder(full)
+            rec = NoiseRecorder(full, scale=scale)
             self.register_noise_recorder(rec)
+        elif scale is not None:
+            rec.scale = float(scale) if float(scale) > 0.0 else None
         return rec
 
     def producer_recorders(self) -> Dict[str, NoiseRecorder]:
@@ -185,14 +193,20 @@ class Registry:
             self.site_recorder(f"conn_{conn_key}_{p_name}").record_sample(
                 self._now_ms(), param_obj.mean, param_obj.sigma)
         if cfg.weight_recorder is not None:
-            self.producer_recorder(f"stdp:{conn_key}")
+            # Declared noise scale: the projection's initial weight ceiling.
+            # Fixed here (not the live Wmax site, which PERSONA may move).
+            wmax = cfg.parameters.get("Wmax")
+            self.producer_recorder(
+                f"stdp:{conn_key}",
+                scale=float(wmax.mean) if wmax is not None else None)
         return conn_key
 
     def create_relay(self, pg_key: str, in_key: str, n: int, *,
                      rate: float = 0.0,
                      rate_param: "PersonaParam | None" = None,
                      pop_name: str | None = None,
-                     noise_name: str | None = None) -> tuple[Any, Any]:
+                     noise_name: str | None = None,
+                     noise_scale: float | None = None) -> tuple[Any, Any]:
         """
         Poisson generator -> parrot relay, registered so no module creates or
         connects these nodes directly:
@@ -202,7 +216,10 @@ class Registry:
         - `rate_param` makes the generator an optimizable `Population` under
           `pop_name` (defaults to `pg_key`);
         - `noise_name` attaches a producer recorder that `set_relay_rate` feeds
-          with the per-step rate delta.
+          with the per-step rate delta;
+        - `noise_scale` is the declared reference rate `R` for scoring that
+          delta (`δ/R²`); it defaults to the nominal `rate`. A zero rest rate
+          (CUT) must pass an explicit scale or the producer has no influence.
         """
         pg = nest.Create("poisson_generator", n, params={"rate": float(max(0.0, rate))})
         parrot = nest.Create("parrot_neuron", n)
@@ -218,10 +235,21 @@ class Registry:
             self.population_cfgs[name] = pop
             self.site_recorder(f"pop_{name}_rate").record_sample(
                 self._now_ms(), rate_param.mean, rate_param.sigma)
+            # realize the seed dispersion per device, exactly like
+            # create_population does for its neurons (spec §5.2):
+            # recorded = applied from the first step
+            try:
+                self._set_nodes(
+                    pg, {"rate": rate_param.sample_population(
+                        n, center=rate_param.mean)})
+            except Exception as exc:
+                self.last_apply_errors.append((f"pop_{name}", str(exc)))
 
         if noise_name is not None:
             rec_name = f"producer:poisson:{noise_name}"
-            self.producer_recorder(f"poisson:{noise_name}")
+            declared = (float(noise_scale) if noise_scale is not None
+                        else float(max(0.0, rate)))
+            self.producer_recorder(f"poisson:{noise_name}", scale=declared)
             self._relay_noise[pg_key] = rec_name
             self._relay_last[pg_key] = float(max(0.0, rate))
 
@@ -479,6 +507,7 @@ class Registry:
         # Apply to connections (synapses)
         for conn_key, conn in self.connection_cfgs.items():
             updates: Dict[str, Any] = {}
+            zero_syn: list[str] = []
             for p_name, param_obj in conn.parameters.items():
                 full_key = f"conn_{conn_key}_{p_name}"
                 if full_key not in sampled_values:
@@ -491,18 +520,26 @@ class Registry:
                     # static synapses: one array realization for the projection
                     n_syn = self.synapse_count(conn_key)
                     if n_syn <= 0:
+                        # surfaced, never swallowed (spec §5.5): the sample is
+                        # still recorded (applied to an empty projection), and
+                        # the emptiness is reported
+                        zero_syn.append(p_name)
                         continue
                     updates[p_name] = param_obj.sample_population(
                         n_syn, center=val).tolist()
-            if not updates:
-                continue
-            try:
-                self.synapses(conn_key).set(updates)
-            except Exception as exc:
-                self.last_apply_errors.append((f"conn_{conn_key}", str(exc)))
-                continue
+            if updates:
+                try:
+                    self.synapses(conn_key).set(updates)
+                except Exception as exc:
+                    self.last_apply_errors.append((f"conn_{conn_key}", str(exc)))
+                    continue
             for p_name, param_obj in conn.parameters.items():
                 full_key = f"conn_{conn_key}_{p_name}"
-                if full_key in sampled_values:
-                    self.site_recorder(full_key).record_sample(
-                        t_now, float(sampled_values[full_key]), param_obj.sigma)
+                if full_key not in sampled_values:
+                    continue
+                if p_name in zero_syn:
+                    self.last_apply_errors.append(
+                        (f"conn_{conn_key}",
+                         f"{p_name}: zero-synapse projection, nothing realized"))
+                self.site_recorder(full_key).record_sample(
+                    t_now, float(sampled_values[full_key]), param_obj.sigma)

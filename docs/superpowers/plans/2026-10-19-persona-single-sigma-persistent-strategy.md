@@ -576,6 +576,44 @@ is a draw around the action (not the mean of draws); (c) a monkeypatched failing
   (`(1−β) = 0.005`), or raise the effective-rate question with the user
   (do not silently rescale `g`).
 
+### Task 7 follow-up: declared noise scales (B)
+
+Agreed in chat (2026-10-20): keep the natural-noise block in `F`, but stop
+estimating its scale. A noise producer is scored with a **declared fixed
+reference scale** `R`, fixed at registration:
+
+- `s_noise = δ/R²`; no EWMA τ, no warm-up, no `n > 2` gate;
+- no fresh delta (`δ = 0`) → score 0; `R = 0`/absent → no influence;
+- STDP: `R` = the projection's initial `Wmax`;
+- Poisson: `R` = nominal group rate (Ia 10 Hz, Ib 5 Hz);
+- CUT: rest rate is 0, so it declares `R = 10 Hz` explicitly.
+
+- [x] `NoiseRecorder(scale=...)`, `producer_recorder(scale=...)`,
+  `create_relay(noise_scale=...)`.
+- [x] Agent passes `(δ, R)`; strategy scores `δ/R²`; `noise_scales` persisted in h5.
+- [x] Tests: declared scale from the first sample, zero scale → no influence,
+  registry scale table (Wmax / nominal / CUT), freshness unchanged.
+- [ ] Fast e2e: record `diag(F)` site vs noise, `max|Δμ|`, loss; compare with the
+  gated run. A zero-noise control must be identical to the gated run apart from
+  the noise rows (the gate only changed the noise rows).
+
+## Deferred: noise-module characterization matrix
+
+Not part of this bug fix. PERSONA is modular, so the recorder/strategy can be
+exercised with the CPG in isolation. Full matrix to measure **convergence speed
+and accuracy**:
+
+- **Noise sources:** all off; natural STDP + Poisson on but unscored; STDP only;
+  Poisson only; one sensory group at a time; synthetic producers with known δ.
+- **Scale choice:** declared natural (`Wmax`, nominal rate); 0.1× / 1× / 10×;
+  estimated τ (previous design); no noise block (A).
+- **Algorithms:** current single-σ/declared-R; alternative noise scorings.
+- **Metrics:** steps to loss threshold and final loss; parameter error at
+  steady state; `max|Δμ|`, `cond(F)`, `min eig(F)`, bound hits; per-producer
+  influence (norm of its F column / its contribution to `g`).
+- **Design:** ≥10 seeds per cell, report median/IQR; the fast e2e is only a
+  smoke test, not a statistical result.
+
 ## Self-Review
 
 - Spec coverage: §5.1→T1; §5.2→T4; §5.3→T2; §5.4→T3; §5.5→T2+T4; §5.6→T3+T5; §8→spread; V22→T1;

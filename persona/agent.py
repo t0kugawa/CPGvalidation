@@ -64,10 +64,6 @@ class Agent:
                 warmup=self.warmup,
             )
 
-        # Noise statistics share the strategy's forgetting factor.
-        for rec in self.registry.noise_recorders.values():
-            rec.beta = self.beta
-
     # --- host state ---------------------------------------------------------
 
     def refresh_params(self) -> Dict[str, PersonaParam]:
@@ -85,6 +81,11 @@ class Agent:
         for name in params:
             self.history["means"].setdefault(name, [])
             self.history["sigmas"].setdefault(name, [])
+        # Noise statistics share the strategy's forgetting factor — also for
+        # recorders created after this agent was constructed (spec §5.3).
+        for rec in self.registry.noise_recorders.values():
+            if rec.beta != self.beta:
+                rec.beta = self.beta
         self.params = params
         return params
 
@@ -92,12 +93,12 @@ class Agent:
 
     def sample_actions(self, t_ms: float | None = None) -> Dict[str, float]:
         """
-        Samples each site's exploratory value. The sample is written into the
-        site recorder together with its sampling-time sigma (recorded = applied
-        by construction), and the (μ, σ, x̂) snapshot is kept for the step.
+        Samples each site's exploratory value and keeps the (μ, σ, x̂) snapshot
+        for the step. The site recorder is written by the registry's realize
+        step, so recorded = applied with one record per realized step
+        (the realize step's own clock supplies the recording timestamp).
         """
         self.refresh_params()
-        t = 0.0 if t_ms is None else float(t_ms)
         self.current_actions = {}
         self._snap = {}
         for name, param in self.params.items():
@@ -106,7 +107,6 @@ class Agent:
             xhat = param.sample_exploration()
             self.current_actions[name] = xhat
             self._snap[name] = (mu, sig, xhat)
-            self.registry.site_recorder(name).record_sample(t, xhat, sig)
         return dict(self.current_actions)
 
     def _smooth(self, signal: np.ndarray, buffer: List[np.ndarray]) -> np.ndarray:
@@ -195,12 +195,14 @@ class Agent:
             sites[name] = (float(xhat) - float(mu_at), float(sig_at), float(d_log_sigma))
 
         # Producer deltas: fresh since the previous step; a step without new
-        # records contributes 0.0, never a stale value.
+        # records contributes 0.0, never a stale value. The second element is
+        # the producer's declared reference scale R (0.0 = no influence); no
+        # estimation and no warm-up gate.
         noise: Dict[str, tuple] = {}
         for rec_name, rec in self.registry.producer_recorders().items():
             delta = rec.take_delta()
-            tau = max(float(rec.stats()["std"]), 1e-6)
-            noise[rec_name] = (0.0 if delta is None else float(delta), tau)
+            noise[rec_name] = (0.0 if delta is None else float(delta),
+                               0.0 if rec.scale is None else float(rec.scale))
 
         delta_means = self.strategy.step(sites, noise, advantage_vec)
 

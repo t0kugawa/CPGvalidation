@@ -39,7 +39,8 @@ class FisherMatrix:
 
     Channel layout (``n = 2·|S| + |P|``): site μ rows, site σ rows, then noise
     producer rows. Noise producers get Fisher rows (they shape the step length
-    through F) but **no trace rows** — ``a`` is zero for them.
+    through F) but **no trace rows** — ``a`` is zero for them. Their score is
+    ``s^noise = δ/R²`` with the declared reference scale ``R`` (no estimation).
 
     For each site ``s`` (sampling-time snapshot):
 
@@ -73,6 +74,7 @@ class FisherMatrix:
                  baseline_alpha: float = 0.90):
         self.param_names = list(param_names)
         self.noise_names = list(noise_names or [])
+        self.noise_scales: Dict[str, float] = {}
         self.lr_mu = float(lr_mu)
         self.lr_sigma = float(lr_sigma)
         self.lambda_reg = float(lambda_reg)
@@ -103,7 +105,10 @@ class FisherMatrix:
 
     @property
     def all_names(self) -> List[str]:
-        return list(self.param_names) + list(self.noise_names)
+        """Blocked channel labels of the F/X̄/G rows: [μ; σ; noise]."""
+        return ([f"{k} μ" for k in self.param_names]
+                + [f"{k} σ" for k in self.param_names]
+                + [f"noise {k}" for k in self.noise_names])
 
     def ensure_names(self, param_names, noise_names=None) -> None:
         """
@@ -167,9 +172,10 @@ class FisherMatrix:
         One strategy step.
 
         ``sites[key] = (Δθ, σ_sampled, Δlogσ)`` for every site (sampling-time
-        values); ``noise[name] = (δ, τ)`` for every producer this step (missing
-        producers contribute δ=0); ``advantage`` is the per-component advantage
-        vector A(t) (length 2, one per limb).
+        values); ``noise[name] = (δ, R)`` for every producer this step, where
+        `R` is the declared reference scale (missing producers contribute
+        δ=0); ``advantage`` is the per-component advantage vector A(t) (length
+        2, one per limb).
 
         Updates F/Xbar/G, counts the step, and returns the per-site Δμ (all
         zero during warm-up).
@@ -189,9 +195,13 @@ class FisherMatrix:
             a[i] = float(dth) / sig ** 2
             a[m + i] = float(dlog)
         for j, name in enumerate(self.noise_names):
-            delta, tau = noise.get(name, (0.0, 1e-6))
-            tau = max(float(tau), 1e-6)
-            s[2 * m + j] = float(delta) / tau ** 2
+            delta, scale = noise.get(name, (0.0, 0.0))
+            # Declared reference scale: s = δ/R², with no estimation, no
+            # warm-up and no per-step gate. R ≤ 0 (or absent) = no influence.
+            r = float(scale)
+            if r > 0.0:
+                s[2 * m + j] = float(delta) / (r * r)
+                self.noise_scales[name] = r
 
         A = np.asarray(advantage, dtype=np.float64).ravel()
         if A.size < 2:

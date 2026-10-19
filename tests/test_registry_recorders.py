@@ -40,6 +40,27 @@ def test_stdp_producer_recorders_are_per_projection(nest_kernel):
     assert "producer:poisson:cut_L" in prods and "producer:poisson:cut_R" in prods
 
 
+def test_producer_declared_scales(nest_kernel):
+    reg = Registry()
+    leg = Leg("L", reg, n_rg=6, n_mn=6, n_int=5, n_aff=5)
+    # STDP: the initial weight ceiling of the projection (fixed at creation)
+    for key in leg.plastic_projections:
+        wmax = reg.connection_cfgs[key].parameters["Wmax"].mean
+        assert np.isclose(reg.producer_recorder(f"stdp:{key}").scale, wmax)
+    # Poisson: the nominal rate; CUT rests at 0 Hz and declares 10 Hz explicitly
+    assert reg.producer_recorder("poisson:ia_e_L").scale == 10.0
+    assert reg.producer_recorder("poisson:ia_f_L").scale == 10.0
+    assert reg.producer_recorder("poisson:ib_e_L").scale == 5.0
+    assert reg.producer_recorder("poisson:ib_f_L").scale == 5.0
+    assert reg.producer_recorder("poisson:cut_L").scale == 10.0
+
+
+def test_zero_rate_relay_without_declared_scale_has_no_influence(nest_kernel):
+    reg = Registry()
+    reg.create_relay("pg", "in", 4, rate=0.0, noise_name="cut_L")
+    assert reg.producer_recorder("poisson:cut_L").scale is None
+
+
 def test_relay_applies_rate_and_records_delta(nest_kernel):
     reg = Registry()
     reg.create_relay("pg", "in", 4, rate=0.0, noise_name="cut_L")

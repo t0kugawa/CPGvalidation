@@ -23,6 +23,15 @@ def synthetic_runlog(n=100):
     return log
 
 
+def test_channel_labels_follow_the_blocked_row_order():
+    from persona.strategy import FisherMatrix
+
+    fm = FisherMatrix(param_names=["a", "b"], noise_names=["n"], warmup=0)
+    labels = ValidationReport._channel_labels(fm)
+    assert labels == fm.all_names
+    assert labels[:2] == ["a μ", "b μ"] and labels[2:4] == ["a σ", "b σ"]
+
+
 def test_figures_written(tmp_path):
     log = synthetic_runlog(n=100)
     rep = ValidationReport()

@@ -103,6 +103,20 @@ def test_warmup_and_noise_not_in_trace():
     assert set(out) == {"p"}                      # noise never gets a step
 
 
+def test_noise_score_uses_declared_scale_from_the_first_sample():
+    beta = 0.5
+    fm = FisherMatrix(param_names=[], noise_names=["n"], beta=beta)
+    fm.step({}, {"n": (0.5, 2.0)}, np.array([1.0, 1.0]))
+    # s = δ/R²; no estimation, no "n > 2" gate: the first sample already counts
+    assert np.isclose(fm.F[0, 0], (1.0 - beta) * (0.5 / 2.0 ** 2) ** 2)
+    assert fm.noise_scales == {"n": 2.0}
+
+    fm0 = FisherMatrix(param_names=[], noise_names=["n"], beta=beta)
+    fm0.step({}, {"n": (0.5, 0.0)}, np.array([1.0, 1.0]))
+    assert fm0.F[0, 0] == 0.0                      # no declared scale = no influence
+    assert fm0.noise_scales == {}
+
+
 def test_few_steps_singular_no_crash():
     fm = FisherMatrix(param_names=[f"p{i}" for i in range(40)], warmup=0, lr_mu=0.1)
     rng = np.random.default_rng(3)
@@ -124,9 +138,20 @@ def test_influence_ranks_high_impact_first():
         fm.step({"coupled": (d[0], 0.3, 0.0), "inert": (d[1], 0.3, 0.0)}, {},
                 np.array([d[0] / 0.3, d[0] / 0.3]))   # A tracks `coupled` only
     infl = fm.influence()
-    assert infl.shape == (fm.n_total,)
+    assert infl.shape == (2 * fm.n_sites,)
     assert max(infl[0], infl[1]) > 5 * max(infl[2], infl[3])
     assert np.all(np.isfinite(infl)) and np.all(infl >= 0.0)
+
+
+def test_all_names_is_blocked_and_matches_row_count():
+    fm = FisherMatrix(param_names=["s1", "s2"], noise_names=["n1"], warmup=0)
+    assert fm.all_names == ["s1 μ", "s2 μ", "s1 σ", "s2 σ", "noise n1"]
+    assert len(fm.all_names) == fm.n_total == 2 * 2 + 1
+    fm.ensure_names(["s3"], ["n2"])
+    assert len(fm.all_names) == fm.n_total
+    assert fm.all_names[:3] == ["s1 μ", "s2 μ", "s3 μ"]
+    assert fm.all_names[3:6] == ["s1 σ", "s2 σ", "s3 σ"]
+    assert fm.all_names[6:] == ["noise n1", "noise n2"]
 
 
 def test_inert_low_sigma_parameter_does_not_drift():
