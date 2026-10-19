@@ -109,11 +109,19 @@ class Leg:
         }
 
         self.cut_afferent = {s: CUTAfferent(dt_ms=dt_ms, r_peak_hz=120.0) for s in SIDES}
-        self.ia_sol = {s: IaAfferent(l_0=0.040, k_l=600.0, k_v=120.0, r_base_hz=10.0, r_max_hz=250.0) for s in SIDES}
-        self.ia_ta = {s: IaAfferent(l_0=0.028, k_l=600.0, k_v=120.0, r_base_hz=10.0, r_max_hz=250.0) for s in SIDES}
+        # Reference lengths are placeholders: `calibrate_spindles` overwrites
+        # them with the tendon length at a zero ankle angle, so the stretch term
+        # stays alive whatever scale the limb bones are built at.
+        self.ia_sol = {s: IaAfferent(l_0=0.0142, k_l=2000.0, k_v=120.0,
+                                     k_force=6.0, r_base_hz=10.0, r_max_hz=250.0)
+                       for s in SIDES}
+        self.ia_ta = {s: IaAfferent(l_0=0.0072, k_l=2000.0, k_v=120.0,
+                                    k_force=6.0, r_base_hz=10.0, r_max_hz=250.0)
+                      for s in SIDES}
         self.ib_sol = {s: IbAfferent(k_force=15.0, k_act=40.0, r_base_hz=2.0, r_max_hz=200.0) for s in SIDES}
         self.ib_ta = {s: IbAfferent(k_force=15.0, k_act=40.0, r_base_hz=2.0, r_max_hz=200.0) for s in SIDES}
 
+        self.calibrate_spindles()
         self.reset()
 
     def _jid(self, name: str) -> int:
@@ -343,6 +351,26 @@ class Leg:
                 if int(self.model.site_bodyid[sid]) == bid:
                     self.model.site_pos[sid] *= ratio
         mujoco.mj_setConst(self.model, self.data)
+        self.calibrate_spindles()
+
+    def calibrate_spindles(self):
+        """
+        Sets each spindle's reference length to its tendon length at a zero ankle
+        angle. The tendon sites move with the bones, so this must run whenever
+        `set_limb_lengths` rescales a limb; otherwise the stretch term is
+        measured against a length the tendon can never reach (and reads zero).
+        """
+        for s in SIDES:
+            adr = int(self.model.jnt_qposadr[self.j_ankle_m[s]])
+            keep = float(self.data.qpos[adr])
+            self.data.qpos[adr] = 0.0
+            mujoco.mj_forward(self.model, self.data)
+            self.ia_sol[s].set_reference_length(
+                float(self.data.ten_length[self.ten_sol[s]]))
+            self.ia_ta[s].set_reference_length(
+                float(self.data.ten_length[self.ten_ta[s]]))
+            self.data.qpos[adr] = keep
+        mujoco.mj_forward(self.model, self.data)
 
     def _bodyid(self, name: str) -> int:
         i = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, name)
@@ -442,13 +470,14 @@ class Leg:
             sol_vel = float(self.data.ten_velocity[self.ten_sol[s]])
             ta_len = float(self.data.ten_length[self.ten_ta[s]])
             ta_vel = float(self.data.ten_velocity[self.ten_ta[s]])
-            ia_rate_e = self.ia_sol[s].get_ia_hz(sol_len, sol_vel)
-            ia_rate_f = self.ia_ta[s].get_ia_hz(ta_len, ta_vel)
 
             sol_force = float(abs(self.data.actuator_force[self.act_sol_m[s]]))
             ta_force = float(abs(self.data.actuator_force[self.act_ta_m[s]]))
             sol_act = self._activation(self.act_sol_m[s])
             ta_act = self._activation(self.act_ta_m[s])
+
+            ia_rate_e = self.ia_sol[s].get_ia_hz(sol_len, sol_vel, sol_force)
+            ia_rate_f = self.ia_ta[s].get_ia_hz(ta_len, ta_vel, ta_force)
             ib_rate_e = self.ib_sol[s].get_ib_hz(sol_force, sol_act)
             ib_rate_f = self.ib_ta[s].get_ib_hz(ta_force, ta_act)
 

@@ -60,28 +60,42 @@ class CUTAfferent:
 class IaAfferent:
     """
     Primary muscle spindle afferent model (group Ia).
-    Sensitive to muscle length stretch (l - l_0) and positive lengthening velocity (v = dl/dt).
+    Sensitive to muscle length stretch (l - l_0), positive lengthening velocity
+    (v = dl/dt) and tendon load (force), matching the reference spindle model
+    (`ia = IA_BASE_HZ + IA_K_FORCE * force + IA_K_STRETCH * stretch`).
+    The load term is what lets the spindle report weight-bearing during stance;
+    the velocity term alone saturates between steps and reports swing only.
     Prevents excessive muscle stretching by exciting homonymous motor pool and reciprocal interneurons.
     """
     def __init__(self,
-                 l_0: float = 0.035,
-                 k_l: float = 800.0,
+                 l_0: float = 0.014,
+                 k_l: float = 2000.0,
                  k_v: float = 150.0,
-                 r_base_hz: float = 5.0,
+                 k_force: float = 6.0,
+                 r_base_hz: float = 10.0,
                  r_max_hz: float = 250.0):
-        self.l_0 = l_0
+        self.l_0 = float(l_0)
         self.k_l = k_l
         self.k_v = k_v
+        self.k_force = k_force
         self.r_base_hz = r_base_hz
         self.r_max_hz = r_max_hz
 
-    def get_ia_hz(self, length: float, velocity: float) -> float:
-        # Stretch beyond resting length
+    def set_reference_length(self, l_0: float):
+        """Reference (resting) tendon length; set from the rig geometry."""
+        self.l_0 = float(l_0)
+
+    def get_ia_hz(self, length: float, velocity: float,
+                  force: float = 0.0) -> float:
+        # Stretch beyond the reference (resting) tendon length
         stretch = max(0.0, length - self.l_0)
         # Lengthening velocity
         pos_vel = max(0.0, velocity)
+        # Tendon load
+        load = max(0.0, force)
 
-        rate = self.r_base_hz + self.k_l * stretch + self.k_v * (pos_vel ** 0.6 if pos_vel > 0 else 0.0)
+        rate = (self.r_base_hz + self.k_force * load + self.k_l * stretch
+                + self.k_v * (pos_vel ** 0.6 if pos_vel > 0 else 0.0))
         return clamp(rate, 0.0, self.r_max_hz)
 
 
