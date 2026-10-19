@@ -93,5 +93,19 @@ class PersonaParam:
         self.sigma = new
         return new
 
+    def sigma_step_applied(self, sample: float, mu_at_sample: float, sigma_at_sample: float,
+                           advantage: float, lr_sigma: float = 0.005) -> float:
+        """
+        The Δlogσ that `update_sigma` will actually apply: the clipped log-step
+        pushed through the σ bounds. The trace's σ row records this value, so
+        "traced = applied" holds exactly (spec §4, b_s) even at the bounds.
+        """
+        new = float(np.clip(
+            float(sigma_at_sample) * np.exp(
+                self.sigma_step(sample, mu_at_sample, sigma_at_sample, advantage, lr_sigma)),
+            self.sigma_min, self.sigma_max))
+        sig = max(float(sigma_at_sample), 1e-300)
+        return float(np.log(new / sig))
+
     def update_mean(self, delta: float):
         self.mean = float(np.clip(self.mean + delta, self.min, self.max))

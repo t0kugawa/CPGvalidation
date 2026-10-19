@@ -17,7 +17,7 @@ def build_small_personalizer(nest_kernel, max_steps=40, loss_stop=0.05,
     leg_r = CPG_Leg("R", reg, n_rg=8, n_mn=8, n_int=6, n_aff=6)
     cpg = L2CPG(registry=reg, bs=bs, legs={"L": leg_l, "R": leg_r}, dt_ms=10.0)
     rig = Rig(mujoco_cfg="dual_rat_hindlimb.xml", dt_ms=10.0)
-    agent = Agent(registry=reg, window_size=30)
+    agent = Agent(registry=reg)
     n = 400
     t = np.arange(n) * 10.0
     driver = MocapTargetDriver(

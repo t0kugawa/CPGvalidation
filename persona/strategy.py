@@ -28,55 +28,114 @@ class PhaseBaselines:
 
 class FisherMatrix:
     """
-    Fisher / Natural Gradient Strategy module.
-    Maintains empirical covariance/correlation matrix of all parameters plus noise producer deltas.
-    Calculates component-wise advantage separated for stance and swing phases,
-    and derives natural gradient update steps Delta mu = eta_mu * F^{-1} * grad_log_pi.
+    Persisted per-step strategy (spec §4): one forgetting factor
+    β = 1 − dt/τ_mem over the whole run, no windows. State:
+
+    - ``F    = βF    + (1−β) s sᵀ`` — expected Fisher of the policy scores;
+    - ``Xbar = βXbar + (1−β) a``    — EWMA trace (what actually moved, per channel);
+    - ``G    = βG    + (1−β) Xbar Aᵀ`` — delayed credit: the current trace paired
+      with the advantage A(t), so a site whose *trace* (its recent applied moves)
+      predicts the advantage is credited even when the coupling lags.
+
+    Channel layout (``n = 2·|S| + |P|``): site μ rows, site σ rows, then noise
+    producer rows. Noise producers get Fisher rows (they shape the step length
+    through F) but **no trace rows** — ``a`` is zero for them.
+
+    For each site ``s`` (sampling-time snapshot):
+
+        s^μ_s = Δθ_s / σ_s²            score of the μ coordinate
+        s^σ_s = z_s² − 1, z = Δθ_s/σ_s       log-σ score
+        a^μ_s = Δθ_s / σ_s²            trace row, μ part — score units, so the
+                                       natural-gradient direction is unit
+                                       invariant (a raw-Δθ trace would give
+                                       every site a spurious σ_s² gain)
+        a^σ_s = Δlogσ_s(t)             σ change actually applied this step
+
+    Update step: ``g = G·1₂`` (noise rows excluded), ``Δμ = lr_mu · (F + λI)⁻¹ g``
+    (pinv fallback). The σ coordinates are updated by the Agent's log-σ rule;
+    ``lr_sigma`` is kept here only for interface compatibility.
+
+    Warm-up: F/Xbar/G accumulate from step 1, Δμ is applied from step
+    ``warmup``+1. Advantage baselines are per-component, per-phase
+    (α = 0.90, unchanged).
+
+    TODO(perf): the (F + λI) solve is O(n³) per step; n ≈ 300–400 now, prefer
+    a low-rank/rank-1 update (Sherman–Morrison) so the cost is O(n²).
     """
     def __init__(self,
                  param_names: List[str],
                  noise_names: List[str] | None = None,
                  lr_mu: float = 0.02,
                  lr_sigma: float = 0.005,
-                 window_size: int = 50,
                  lambda_reg: float = 1e-3,
+                 beta: float = 0.995,
+                 warmup: int = 3,
                  baseline_alpha: float = 0.90):
         self.param_names = list(param_names)
         self.noise_names = list(noise_names or [])
-        self.all_names = self.param_names + self.noise_names
-        self.n_params = len(self.param_names)
-        self.n_total = len(self.all_names)
-
-        self.lr_mu = lr_mu
-        self.lr_sigma = lr_sigma
-        self.window_size = window_size
-        self.lambda_reg = lambda_reg
+        self.lr_mu = float(lr_mu)
+        self.lr_sigma = float(lr_sigma)
+        self.lambda_reg = float(lambda_reg)
+        self.beta = float(beta)
+        self.warmup = int(warmup)
+        self.steps = 0
 
         self.baselines = PhaseBaselines(alpha=baseline_alpha)
 
-        # Rolling histories
-        self.perturbation_history: List[np.ndarray] = []
-        self.loss_history: List[np.ndarray] = []
-        self.phase_history: List[str] = []
+        n = self.n_total
+        self.F = np.zeros((n, n), dtype=np.float64)
+        self.Xbar = np.zeros(n, dtype=np.float64)
+        self.G = np.zeros((n, 2), dtype=np.float64)
 
-        # Perturbation–advantage samples (natural gradient): (delta_theta, A)
-        self.response_dtheta: List[np.ndarray] = []
-        self.response_da: List[np.ndarray] = []
-        self.lambda_F: float = float(lambda_reg)
-        self.ridge_J: float = 1e-3  # kept for backwards-compatible imports
+    # --- layout helpers ------------------------------------------------------
 
-        self._scales: np.ndarray | None = None
-        self._G: np.ndarray | None = None
+    @property
+    def n_sites(self) -> int:
+        return len(self.param_names)
 
-    def update_feature_names(self, noise_names: List[str]):
+    @property
+    def n_noise(self) -> int:
+        return len(self.noise_names)
+
+    @property
+    def n_total(self) -> int:
+        return 2 * self.n_sites + self.n_noise
+
+    @property
+    def all_names(self) -> List[str]:
+        return list(self.param_names) + list(self.noise_names)
+
+    def ensure_names(self, param_names, noise_names=None) -> None:
         """
-        Dynamically updates noise producer tags if new ones are observed.
+        Grows the state to cover new sites/producers, zero-padding F/Xbar/G and
+        preserving the order (and history) of the existing channels. New sites
+        append to the μ block; their σ rows append to the σ block; new noise
+        producers append to the noise block.
         """
-        for n in noise_names:
-            if n not in self.noise_names:
-                self.noise_names.append(n)
-        self.all_names = self.param_names + self.noise_names
-        self.n_total = len(self.all_names)
+        new_params = [k for k in (param_names or []) if k not in self.param_names]
+        new_noise = [k for k in (noise_names or []) if k not in self.noise_names]
+        if not new_params and not new_noise:
+            return
+        m_old, k_old = self.n_sites, self.n_noise
+        self.param_names += new_params
+        self.noise_names += new_noise
+        m_new, k_new = self.n_sites, self.n_noise
+
+        F = np.zeros((2 * m_new + k_new, 2 * m_new + k_new), dtype=np.float64)
+        X = np.zeros(2 * m_new + k_new, dtype=np.float64)
+        G = np.zeros((2 * m_new + k_new, 2), dtype=np.float64)
+        old_idx = ([i for i in range(m_old)]
+                   + [m_old + i for i in range(m_old)]
+                   + [2 * m_old + j for j in range(k_old)])
+        new_idx = ([i for i in range(m_old)]                  # μ rows keep indices
+                   + [m_new + i for i in range(m_old)]        # σ block shifts
+                   + [2 * m_new + j for j in range(k_old)])   # noise block shifts
+        F[np.ix_(new_idx, new_idx)] = self.F[np.ix_(old_idx, old_idx)]
+        X[new_idx] = self.Xbar[old_idx]
+        G[new_idx, :] = self.G[old_idx, :]
+        self.F, self.Xbar, self.G = F, X, G
+
+    # --- advantage / updates -------------------------------------------------
 
     @staticmethod
     def _per_component_phases(phase: object, n: int) -> list:
@@ -100,156 +159,74 @@ class FisherMatrix:
             self.baselines.update(i, phases[i], loss[i])
         return advantage
 
-    def record_step(self,
-                    perturbation_dict: Dict[str, float],
-                    loss_vector: np.ndarray,
-                    phase: object):
-        # Ensure all features exist in feature list
-        noise_keys = [k for k in perturbation_dict.keys() if k.startswith("noise_")]
-        self.update_feature_names(noise_keys)
-
-        vec = np.zeros(self.n_total, dtype=np.float64)
-        for i, name in enumerate(self.all_names):
-            vec[i] = perturbation_dict.get(name, 0.0)
-
-        self.perturbation_history.append(vec)
-        self.loss_history.append(np.asarray(loss_vector, dtype=np.float64))
-        self.phase_history.append(phase)
-
-        if len(self.perturbation_history) > self.window_size:
-            self.perturbation_history = self.perturbation_history[-self.window_size:]
-            self.loss_history = self.loss_history[-self.window_size:]
-            self.phase_history = self.phase_history[-self.window_size:]
-
-    def compute_fisher_matrix(self) -> np.ndarray:
+    def step(self,
+             sites: Dict[str, tuple],
+             noise: Dict[str, tuple],
+             advantage: np.ndarray) -> Dict[str, float]:
         """
-        Backwards-compatible accessor: returns the metric matrix.
+        One strategy step.
+
+        ``sites[key] = (Δθ, σ_sampled, Δlogσ)`` for every site (sampling-time
+        values); ``noise[name] = (δ, τ)`` for every producer this step (missing
+        producers contribute δ=0); ``advantage`` is the per-component advantage
+        vector A(t) (length 2, one per limb).
+
+        Updates F/Xbar/G, counts the step, and returns the per-site Δμ (all
+        zero during warm-up).
         """
-        return self.compute_metric()[0]
+        self.ensure_names(list(sites.keys()), list(noise.keys()))
+        m, k = self.n_sites, self.n_noise
+        n = self.n_total
+
+        s = np.zeros(n, dtype=np.float64)
+        a = np.zeros(n, dtype=np.float64)
+        for i, name in enumerate(self.param_names):
+            dth, sigma, dlog = sites[name]
+            sig = max(float(sigma), 1e-12)
+            z2 = (float(dth) / sig) ** 2
+            s[i] = float(dth) / sig ** 2
+            s[m + i] = z2 - 1.0
+            a[i] = float(dth) / sig ** 2
+            a[m + i] = float(dlog)
+        for j, name in enumerate(self.noise_names):
+            delta, tau = noise.get(name, (0.0, 1e-6))
+            tau = max(float(tau), 1e-6)
+            s[2 * m + j] = float(delta) / tau ** 2
+
+        A = np.asarray(advantage, dtype=np.float64).ravel()
+        if A.size < 2:
+            A = np.pad(A, (0, 2 - A.size))
+        A = A[:2]
+
+        b = self.beta
+        self.F = b * self.F + (1.0 - b) * np.outer(s, s)
+        self.Xbar = b * self.Xbar + (1.0 - b) * a
+        self.G = b * self.G + (1.0 - b) * np.outer(self.Xbar, A)
+        self.steps += 1
+
+        deltas = {name: 0.0 for name in self.param_names}
+        if self.steps <= self.warmup:
+            return deltas
+
+        g = self.G.sum(axis=1)
+        g[2 * m:] = 0.0                      # noise rows never receive credit
+        M = self.F + self.lambda_reg * np.eye(n)
+        try:
+            nat = np.linalg.solve(M, g)
+        except np.linalg.LinAlgError:
+            nat = np.linalg.pinv(M) @ g
+        for i, name in enumerate(self.param_names):
+            deltas[name] = float(self.lr_mu * nat[i])
+        return deltas
+
+    # --- introspection -------------------------------------------------------
 
     def feature_scales(self) -> np.ndarray:
-        if self._scales is None:
-            self.compute_metric()
-        return np.asarray(self._scales, dtype=np.float64)
-
-    # --- Perturbation–advantage covariance (natural gradient) ---------------
-
-    def record_response(self, delta_theta: np.ndarray, advantage: np.ndarray):
-        """
-        Appends one exploration sample: delta_theta = action - mean (n_total,)
-        paired with the reward advantage A (n_y,).
-        """
-        dth = np.asarray(delta_theta, dtype=np.float64).ravel()
-        if dth.size < self.n_total:
-            dth = np.concatenate([dth, np.zeros(self.n_total - dth.size)])
-        elif dth.size > self.n_total:
-            dth = dth[:self.n_total]
-        self.response_dtheta.append(dth.copy())
-        self.response_da.append(np.asarray(advantage, dtype=np.float64).ravel().copy())
-        if len(self.response_dtheta) > self.window_size:
-            self.response_dtheta = self.response_dtheta[-self.window_size:]
-            self.response_da = self.response_da[-self.window_size:]
-
-    def _stack(self) -> tuple[np.ndarray, np.ndarray]:
-        W = len(self.response_dtheta)
-        n_y = max((a.size for a in self.response_da), default=2)
-        X = np.zeros((W, self.n_total), dtype=np.float64)
-        Y = np.zeros((W, n_y), dtype=np.float64)
-        for i in range(W):
-            d = self.response_dtheta[i]
-            X[i, :min(d.size, self.n_total)] = d[:self.n_total]
-            a = self.response_da[i]
-            Y[i, :min(a.size, n_y)] = a[:n_y]
-        return X, Y
-
-    def _covariances(self) -> tuple[np.ndarray, np.ndarray]:
-        """
-        F = Cov(Δθ) + λ_F I          (n_total x n_total)  — metric / preconditioner
-        G = Cov(Δθ, A)               (n_total x n_y)      — per-parameter impact
-        Column means removed over the rolling window.
-        """
-        W = len(self.response_dtheta)
-        if W < 3:
-            n_y = max((a.size for a in self.response_da), default=2)
-            return np.eye(self.n_total, dtype=np.float64), np.zeros((self.n_total, n_y))
-        X, Y = self._stack()
-        Xc = X - X.mean(axis=0, keepdims=True)
-        Yc = Y - Y.mean(axis=0, keepdims=True)
-        F = (Xc.T @ Xc) / W + self.lambda_F * np.eye(self.n_total)
-        G = (Xc.T @ Yc) / W
-        self._G = G
-        return F, G
-
-    def _score_fisher(self, sigma_ctrl_dict: Dict[str, float] | None):
-        """
-        Policy (score) Fisher and gradient for the Gaussian exploration:
-        score_i = Δθ_i / σ_ctrl,i²,  F = E[score scoreᵀ] + λI,  g = E[score·ΣA].
-        Δμ = F⁻¹ g reduces (for the diagonal case) to Δμ_i = Cov(Δθ_i, ΣA) —
-        the correct natural gradient, which does NOT blow up the noise of an
-        inert low-σ parameter the way dividing by Cov(Δθ_i) does.
-        Features without a σ_ctrl (noise/exogenous) use their empirical
-        perturbation std as the scale, so they collapse to the same form.
-        """
-        W = len(self.response_dtheta)
-        if W < 3:
-            return np.eye(self.n_total, dtype=np.float64), np.zeros(self.n_total)
-        X, Y = self._stack()
-        Xc = X - X.mean(axis=0, keepdims=True)
-        Yc = Y - Y.mean(axis=0, keepdims=True)
-        s2 = np.empty(self.n_total, dtype=np.float64)
-        for i, name in enumerate(self.all_names):
-            sc = sigma_ctrl_dict.get(name) if sigma_ctrl_dict else None
-            s2[i] = (sc ** 2) if (sc and sc > 0.0) else max(float(Xc[:, i].var()), 1e-12)
-        S = Xc / s2[None, :]
-        F = (S.T @ S) / W + self.lambda_F * np.eye(self.n_total)
-        g = ((S.T @ Yc) / W).sum(axis=1)
-        return F, g
-
-    def compute_metric(self) -> tuple[np.ndarray, np.ndarray]:
-        """Returns (F, scales); F = Cov(Δθ) + λ_F I, scales = sqrt(diag(F))."""
-        F, _ = self._covariances()
-        self._scales = np.sqrt(np.maximum(np.diag(F), 1e-12))
-        return F, self._scales
-
-    def compute_gradient(self) -> np.ndarray:
-        """g = Cov(Δθ, ΣA) — the natural-gradient direction (n_total,)."""
-        _, G = self._covariances()
-        return G.sum(axis=1)
+        """sqrt(diag(F)) — per-channel activity scale (kept for h5/figures)."""
+        return np.sqrt(np.maximum(np.diag(self.F), 0.0))
 
     def influence(self) -> np.ndarray:
-        """Per-parameter impact |Cov(Δθ_i, A)|, normalised to [0, 1]."""
-        _, G = self._covariances()
-        row = np.linalg.norm(G, axis=1)
+        """Normalised |G| row norms over the 2·|S| site rows (μ and σ of each
+        site), the per-channel impact on the tracked advantage."""
+        row = np.linalg.norm(self.G[:2 * self.n_sites, :], axis=1)
         return row / (row.max() + 1e-12)
-
-    def compute_correlation_matrix(self) -> np.ndarray:
-        """Deprecated alias for the metric matrix (kept for importers)."""
-        return self.compute_metric()[0]
-
-    def compute_natural_gradient_step(self,
-                                      action_dict: Dict[str, float],
-                                      mean_dict: Dict[str, float],
-                                      sigma_ctrl_dict: Dict[str, float],
-                                      advantage_vector: np.ndarray) -> Dict[str, float]:
-        """
-        Natural-gradient ascent on the reward advantage:
-            Delta mu = eta_mu * F^-1 * g,  F = E[score score^T] + lambda I,
-            g = E[score * ΣA],  score_i = Δθ_i / sigma_ctrl_i^2.
-        For the diagonal case this is Delta mu_i = Cov(Δθ_i, ΣA) — the impact of
-        each parameter on the tracked error. E[Delta mu_i] = -eta * d E[ΣE]/dtheta_i
-        (ascent on reward = descent on error).
-        TODO(advantage): the baselined advantage is the reward signal; unify the
-        per-leg loss/advantage weighting with the score term.
-        """
-        F, g = self._score_fisher(sigma_ctrl_dict)
-        try:
-            nat_grad = np.linalg.solve(F, g)
-        except np.linalg.LinAlgError:
-            nat_grad = np.linalg.pinv(F) @ g
-
-        delta_vec = self.lr_mu * nat_grad
-
-        deltas = {}
-        for i, name in enumerate(self.param_names):
-            deltas[name] = float(delta_vec[i])
-        return deltas

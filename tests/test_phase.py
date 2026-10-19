@@ -22,7 +22,7 @@ def make_agent(nest_kernel):
 
 
 def test_per_component_phase_independent():
-    fm = FisherMatrix(param_names=["p"], window_size=10)
+    fm = FisherMatrix(param_names=["p"])
     fm.baselines = PhaseBaselines(alpha=0.0)
     fm.compute_advantage(np.array([2.0, 2.0]), ("stance", "swing"))
     a = fm.compute_advantage(np.array([1.0, 2.0]), ("stance", "swing"))
@@ -30,7 +30,7 @@ def test_per_component_phase_independent():
 
 
 def test_baselines_are_per_component():
-    fm = FisherMatrix(param_names=["p"], window_size=10)
+    fm = FisherMatrix(param_names=["p"])
     fm.baselines = PhaseBaselines(alpha=0.0)
     # L stance (loss 2), R swing (loss 5)
     fm.compute_advantage(np.array([2.0, 5.0]), ("stance", "swing"))

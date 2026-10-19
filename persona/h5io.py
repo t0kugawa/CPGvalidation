@@ -67,10 +67,13 @@ def save_run(path, log, agent, meta=None):
             ag.attrs["all_names"] = list(getattr(strategy, "all_names", []))
             try:
                 ag.create_dataset("fisher",
-                                  data=np.asarray(strategy.compute_correlation_matrix(),
-                                                  dtype=float))
+                                  data=np.asarray(strategy.F, dtype=float))
                 ag.create_dataset("feature_scales",
                                   data=np.asarray(strategy.feature_scales(), dtype=float))
+                ag.create_dataset("trace_final",
+                                  data=np.asarray(strategy.Xbar, dtype=float))
+                ag.create_dataset("credit_final",
+                                  data=np.asarray(strategy.G, dtype=float))
             except Exception:
                 pass
 
@@ -99,7 +102,7 @@ def load_run(path):
                     for k, v in f["agent"][grp].items():
                         out["agent"][grp][k] = v[()]
             for grp in ("influence", "loss", "advantage_vector", "error_vector",
-                        "fisher", "feature_scales"):
+                        "fisher", "feature_scales", "trace_final", "credit_final"):
                 if grp in f["agent"]:
                     out["agent"][grp] = f["agent"][grp][()]
             out["agent"]["param_names"] = list(f["agent"].attrs.get("param_names", []))

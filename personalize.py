@@ -155,8 +155,7 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
         loop=loop,
     )
 
-    agent = Agent(registry=reg, lr_mu=0.03, lr_sigma_ctrl=0.005,
-                  window_size=max(30, loss_window))
+    agent = Agent(registry=reg, lr_mu=0.03, lr_sigma=0.005, dt_ms=DT_MS)
 
     personalizer = Personalizer(
         registry=reg, cpg=cpg, rig=rig, agent=agent, target_driver=driver,

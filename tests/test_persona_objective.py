@@ -23,7 +23,7 @@ def make_agent(nest_kernel):
 
 def test_advantage_is_baseline_minus_loss():
     ph = PhaseBaselines(alpha=0.0)
-    fm = FisherMatrix(param_names=["p"], window_size=10)
+    fm = FisherMatrix(param_names=["p"])
     fm.baselines = ph
     a1 = fm.compute_advantage(np.array([1.0]), "stance")
     a2 = fm.compute_advantage(np.array([0.4]), "stance")

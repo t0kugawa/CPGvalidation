@@ -230,15 +230,24 @@ class ValidationReport:
         self.figures["param_shift"] = fig
         return fig
 
+    @staticmethod
+    def _channel_labels(strategy):
+        """Row labels of F/Xbar/G: sites [μ; σ] in param_names order, then noise."""
+        labels = []
+        for g in list(getattr(strategy, "param_names", [])):
+            labels += [f"{g} μ", f"{g} σ"]
+        labels += [f"noise {k}" for k in list(getattr(strategy, "noise_names", []))]
+        return labels
+
     def plot_fisher(self, agent):
-        """Heat-map of the metric F = Cov(Δθ) + λ_F I (diagonal = perturbation variance)."""
-        F = agent.strategy.compute_correlation_matrix()
-        names = agent.strategy.all_names
+        """Heat-map of F = β-EWMA score covariance (diagonal = channel activity)."""
+        F = np.asarray(agent.strategy.F, dtype=float)
+        names = self._channel_labels(agent.strategy)
         show = min(len(names), 60)  # keep the heat-map legible
-        # pick the highest-variance (most active) features
-        X = np.asarray(agent.strategy.perturbation_history, dtype=float)
-        if X.size:
-            idx = np.argsort(-X.std(axis=0))[:show]
+        # pick the most active channels (largest diagonal of F)
+        d = np.diag(F)
+        if d.size:
+            idx = np.argsort(-d)[:show]
         else:
             idx = np.arange(show)
         Fsub = F[np.ix_(idx, idx)]
@@ -250,16 +259,16 @@ class ValidationReport:
         ax.set_yticks(range(len(idx)))
         ax.set_xticklabels(labels, rotation=90, fontsize=6)
         ax.set_yticklabels(labels, fontsize=6)
-        ax.set_title(f"Metric F = Cov(Δθ) + λF I, final — {len(idx)} most active features")
-        fig.colorbar(im, ax=ax, label="Cov(Δθ)")
+        ax.set_title(f"Fisher F = score covariance, final — {len(idx)} most active channels")
+        fig.colorbar(im, ax=ax, label="F")
         fig.tight_layout()
         self.figures["fisher"] = fig
         return fig
 
     def plot_influence(self, agent):
-        """Bar chart of the per-parameter impact |Cov(Δθ, A)| on the tracked error."""
+        """Bar chart of the per-channel impact |G| row norms (normalised)."""
         infl = np.asarray(agent.strategy.influence(), dtype=float)
-        names = list(agent.strategy.all_names)
+        names = self._channel_labels(agent.strategy)
         order = np.argsort(-infl)[:min(len(infl), 25)]
         fig, ax = plt.subplots(figsize=(12, 4))
         ax.bar(range(len(order)), infl[order], color="tab:purple")
@@ -267,8 +276,8 @@ class ValidationReport:
         ax.set_xticklabels(
             [names[i].replace("conn_", "").replace("_weight", "")[:22] for i in order],
             rotation=90, fontsize=7)
-        ax.set_ylabel("influence  |Cov(Δθ, A)|  (norm.)")
-        ax.set_title("Per-parameter impact on the tracked error (top 25)")
+        ax.set_ylabel("influence  |G| (norm.)")
+        ax.set_title("Per-channel impact on the tracked error (top 25)")
         ax.grid(alpha=0.3, axis="y")
         fig.tight_layout()
         self.figures["influence"] = fig
@@ -276,12 +285,12 @@ class ValidationReport:
 
     def plot_metric(self, agent):
         """
-        Heat-map of the metric F = Cov(Δθ) + λ_F I. The diagonal is the
-        perturbation variance (the natural-gradient preconditioner); the
-        per-parameter impact on the error is |Cov(Δθ, A)| — see `influence()`.
+        Heat-map of the Fisher F = β-EWMA score covariance; the diagonal is the
+        per-channel activity (the natural-gradient preconditioner). The
+        per-channel impact on the error is |G| — see `influence()`.
         """
-        F = np.asarray(agent.strategy.compute_metric()[0], dtype=float)
-        names = agent.strategy.all_names
+        F = np.asarray(agent.strategy.F, dtype=float)
+        names = self._channel_labels(agent.strategy)
         show = min(len(names), 60)
         Fsub = F[:show, :show]
         labels = [names[i].replace("conn_", "").replace("_weight", "")[:14]
@@ -293,9 +302,9 @@ class ValidationReport:
         ax.set_yticks(range(show))
         ax.set_xticklabels(labels, rotation=90, fontsize=6)
         ax.set_yticklabels(labels, fontsize=6)
-        ax.set_title("Metric F = Cov(Δθ) + λ_F I — diagonal = perturbation variance;"
-                     " impact = |Cov(Δθ, A)|")
-        fig.colorbar(im, ax=ax, label="Cov(Δθ)")
+        ax.set_title("Fisher F = score covariance — diagonal = channel activity;"
+                     " impact = |G|")
+        fig.colorbar(im, ax=ax, label="F")
         fig.tight_layout()
         self.figures["metric"] = fig
         return fig

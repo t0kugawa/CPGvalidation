@@ -37,11 +37,12 @@ def test_influence_and_metric_figures(tmp_path):
     from types import SimpleNamespace
     from persona.strategy import FisherMatrix
     fm = FisherMatrix(param_names=[f"p{i}" for i in range(6)],
-                      window_size=300, lambda_reg=1e-9)
+                      beta=0.9, warmup=0, lambda_reg=1e-9)
     rng = np.random.default_rng(0)
     for _ in range(300):
-        dth = rng.standard_normal(6) * 0.1
-        fm.record_response(dth, np.array([dth[0] * 10.0, dth[1] * 5.0]))
+        d = rng.standard_normal(6) * 0.3
+        fm.step({f"p{i}": (float(d[i]), 0.3, 0.0) for i in range(6)}, {},
+                np.array([d[0] * 10.0, d[1] * 5.0]))
     agent = SimpleNamespace(strategy=fm)
     rep = ValidationReport()
     rep.plot_influence(agent)
