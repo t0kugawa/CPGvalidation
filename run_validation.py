@@ -17,6 +17,7 @@ Quick iteration:
 import argparse
 import os
 import sys
+import time
 
 os.environ.setdefault("MUJOCO_GL", "osmesa")
 # OpenBLAS spawns many threads that thrash on WSL (a 322x322 solve goes from
@@ -40,10 +41,55 @@ from model.render import LegRenderer, hud_lines
 from t2xcpg.cfg import POPULATIONS_FINAL
 
 
+def _atomic_write(path, write_fn):
+    """Writes via `<path>.tmp` then renames, so a crash cannot truncate `path`."""
+    tmp = path + ".tmp"
+    write_fn(tmp)
+    os.replace(tmp, path)
+
+
+class _Snapshotter:
+    """
+    Periodically writes `run.h5` and `run_log.csv` atomically, so a long run
+    that dies part-way still leaves a complete snapshot of everything up to the
+    last checkpoint. The final save overwrites both with the full run.
+    """
+    def __init__(self, out_dir, every_s, meta_fn):
+        self.out_dir = out_dir
+        self.every_s = float(every_s or 0.0)
+        self.meta_fn = meta_fn
+        self.t_last = time.monotonic()
+        self.count = 0
+
+    def maybe(self, step, log, agent):
+        if self.every_s <= 0.0:
+            return
+        now = time.monotonic()
+        if now - self.t_last < self.every_s:
+            return
+        self.t_last = now
+        self.write(step, log, agent)
+
+    def write(self, step, log, agent):
+        t0 = time.monotonic()
+        try:
+            _atomic_write(os.path.join(self.out_dir, "run.h5"),
+                          lambda p: save_run(p, log, agent,
+                                             meta=self.meta_fn(step, log)))
+            _atomic_write(os.path.join(self.out_dir, "run_log.csv"), log.to_csv)
+            self.count += 1
+            print(f"[snapshot {self.count}] step {step} "
+                  f"t={log.time_ms[-1] / 1000.0:.1f}s "
+                  f"samples={len(log.time_ms)} "
+                  f"({time.monotonic() - t0:.1f}s)", flush=True)
+        except Exception as e:
+            print(f"[snapshot] failed at step {step}: {e}", flush=True)
+
+
 def run(duration_s, view, width, height, fps, out_dir,
         w_scale, ref_hz, belt_mps, belt_start_s, belt_ramp_s,
         n_rg, n_mn, n_int, n_aff, n_bs, render=True, budget_s=None,
-        pose_max_s=1.0, belt_mode="dataset"):
+        pose_max_s=1.0, belt_mode="dataset", snapshot_s=900.0):
     os.makedirs(out_dir, exist_ok=True)
     steps = int(round(duration_s / (DT_MS / 1000.0)))
     n_frames = int(round(duration_s * fps))
@@ -62,6 +108,15 @@ def run(duration_s, view, width, height, fps, out_dir,
     pers.stdp_every = 20
     agent = pers.agent
     rig = pers.rig
+
+    def _meta(step, log):
+        return {"duration_s": float(duration_s), "dt_ms": float(DT_MS),
+                "belt_mode": str(belt_mode), "belt_z": float(rig.belt_z),
+                "n_steps": int(len(log.time_ms)), "snapshot_step": int(step)}
+
+    snap = _Snapshotter(out_dir, snapshot_s, _meta)
+    if snapshot_s:
+        print(f"[snapshot] every {snapshot_s:.0f} s of wall time", flush=True)
     renderer = LegRenderer(rig.model, rig.data, width=width, height=height) if render else None
     writer = None
     if render:
@@ -73,6 +128,7 @@ def run(duration_s, view, width, height, fps, out_dir,
         if render and step in frame_steps:
             lines = hud_lines(cpg_in, cpg_out, log.time_ms[-1], stage)
             writer.append_data(renderer.frame(view, lines))
+        snap.maybe(step, log, agent)
 
     status = {}
     try:
@@ -165,6 +221,9 @@ if __name__ == "__main__":
                     help="full cpg_2legs_fast population sizes")
     ap.add_argument("--belt", type=str, default="dataset", choices=("dataset", "model"),
                     help="belt placement: dataset ground vs model-derived target-foot lowest surface")
+    ap.add_argument("--snapshot-s", type=float, default=900.0,
+                    help="wall-clock interval between atomic run.h5/run_log.csv "
+                         "checkpoints (0 disables)")
     ap.add_argument("--fast", action="store_true",
                     help="quick low-res short run for iteration")
     args = ap.parse_args()
@@ -181,4 +240,5 @@ if __name__ == "__main__":
     run(args.duration_s, args.view, args.width, args.height, args.fps, args.out,
         args.w_scale, args.ref_hz, args.belt_mps, args.belt_start_s, args.belt_ramp_s,
         args.n_rg, args.n_mn, args.n_int, args.n_aff, args.n_bs, render=not args.no_render,
-        budget_s=args.budget_s, pose_max_s=args.pose_max_s, belt_mode=args.belt)
+        budget_s=args.budget_s, pose_max_s=args.pose_max_s, belt_mode=args.belt,
+        snapshot_s=args.snapshot_s)
