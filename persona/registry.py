@@ -8,6 +8,26 @@ from persona.connection import Connection
 from persona.noise_recorder import NoiseRecorder
 
 
+def plastic_delta_from_events(events: dict, last_w: dict, seed_weight: float,
+                              n_syn: int) -> tuple[float, dict]:
+    """
+    Per-synapse mean weight increment of one drained weight-recorder batch:
+        Δw = w_event − last_w[(sender, target)]     (first sighting → seed weight)
+        δ  = Σ Δw / N_syn
+    Mutates and returns `last_w` (per projection, per synapse).
+    """
+    weights = np.asarray(events.get("weights", []), dtype=np.float64)
+    senders = np.asarray(events.get("senders", []), dtype=np.int64)
+    targets = np.asarray(events.get("targets", []), dtype=np.int64)
+    delta_sum = 0.0
+    for s, tgt, w in zip(senders, targets, weights):
+        key = (int(s), int(tgt))
+        prev = float(last_w.get(key, seed_weight))
+        delta_sum += float(w) - prev
+        last_w[key] = float(w)
+    return delta_sum / max(1, int(n_syn)), last_w
+
+
 class Registry:
     """
     Central repository for populations, connections, parameters, and noise recorders.
@@ -20,16 +40,55 @@ class Registry:
         self.population_nodes: Dict[str, nest.NodeCollection] = {}
         self.noise_recorders: Dict[str, NoiseRecorder] = {}
         self._synapses: Dict[str, Any] = {}
-        self._plastic_prev_mean: Dict[str, float] = {}
         self._plastic_counts: Dict[str, int] = {}
         self._plastic_cache_key: float | None = None
         self._plastic_cache: Dict[str, float] = {}
+        self._plastic_last_w: Dict[str, Dict[tuple, float]] = {}
+        self._plastic_n_syn: Dict[str, int] = {}
+        self._relay_noise: Dict[str, str] = {}
+        self._relay_last: Dict[str, float] = {}
 
     def register_noise_recorder(self, recorder: NoiseRecorder):
         self.noise_recorders[recorder.name] = recorder
 
     def get_noise_recorder(self, name: str) -> NoiseRecorder | None:
         return self.noise_recorders.get(name)
+
+    def site_recorder(self, full_key: str) -> NoiseRecorder:
+        """Get-or-create the recorder of one personalizable parameter site."""
+        name = f"site:{full_key}"
+        rec = self.noise_recorders.get(name)
+        if rec is None:
+            rec = NoiseRecorder(name)
+            self.register_noise_recorder(rec)
+        return rec
+
+    def producer_recorder(self, name: str) -> NoiseRecorder:
+        """Get-or-create the recorder of one noise producer (e.g. 'stdp:cut_rge_L',
+        'poisson:cut_L'); the registered name is prefixed with 'producer:'."""
+        full = name if name.startswith("producer:") else f"producer:{name}"
+        rec = self.noise_recorders.get(full)
+        if rec is None:
+            rec = NoiseRecorder(full)
+            self.register_noise_recorder(rec)
+        return rec
+
+    def producer_recorders(self) -> Dict[str, NoiseRecorder]:
+        """All producer recorders (STDP projections and sensory Poisson groups)."""
+        return {n: r for n, r in self.noise_recorders.items()
+                if n.startswith("producer:")}
+
+    @staticmethod
+    def _now_ms() -> float:
+        try:
+            return float(nest.GetKernelStatus("biological_time"))
+        except Exception:
+            return 0.0
+
+    def register_nodes(self, name: str, nodes: Any) -> Any:
+        """Registers raw NEST nodes (readout parrots, relay parrots) by name."""
+        self.population_nodes[name] = nodes
+        return nodes
 
     def create_population(self, cfg: Population, explored_means: Dict[str, float] | None = None) -> nest.NodeCollection:
         """
@@ -39,6 +98,12 @@ class Registry:
         cfg.node_collection = nodes
         self.population_cfgs[cfg.name] = cfg
         self.population_nodes[cfg.name] = nodes
+
+        # One site recorder per optimizable parameter; the seed value it is
+        # about to realize is the first recorded (sample, sigma).
+        for p_name, param_obj in cfg.params.items():
+            self.site_recorder(f"pop_{cfg.name}_{p_name}").record_sample(
+                self._now_ms(), param_obj.mean, param_obj.sigma)
 
         sampled = cfg.sample_matrix(explored_means=explored_means)
         for key, values in sampled.items():
@@ -76,7 +141,62 @@ class Registry:
 
         conn_key = cfg.key if cfg.key is not None else f"{cfg.source}_{cfg.target}"
         self.connection_cfgs[conn_key] = cfg
+        for p_name, param_obj in cfg.parameters.items():
+            self.site_recorder(f"conn_{conn_key}_{p_name}").record_sample(
+                self._now_ms(), param_obj.mean, param_obj.sigma)
+        if cfg.weight_recorder is not None:
+            self.producer_recorder(f"stdp:{conn_key}")
         return conn_key
+
+    def create_relay(self, pg_key: str, in_key: str, n: int, *,
+                     rate: float = 0.0,
+                     rate_param: "PersonaParam | None" = None,
+                     pop_name: str | None = None,
+                     noise_name: str | None = None) -> tuple[Any, Any]:
+        """
+        Poisson generator -> parrot relay, registered so no module creates or
+        connects these nodes directly:
+
+        - `pg_key`/`in_key` register the generator and the parrot in
+          `population_nodes`;
+        - `rate_param` makes the generator an optimizable `Population` under
+          `pop_name` (defaults to `pg_key`);
+        - `noise_name` attaches a producer recorder that `set_relay_rate` feeds
+          with the per-step rate delta.
+        """
+        pg = nest.Create("poisson_generator", n, params={"rate": float(max(0.0, rate))})
+        parrot = nest.Create("parrot_neuron", n)
+        nest.Connect(pg, parrot, conn_spec={"rule": "one_to_one"})
+        self.register_nodes(pg_key, pg)
+        self.register_nodes(in_key, parrot)
+
+        if rate_param is not None:
+            name = pop_name or pg_key
+            pop = Population(model="poisson_generator", n=n,
+                             params={"rate": rate_param}, name=name)
+            pop.node_collection = pg
+            self.population_cfgs[name] = pop
+            self.site_recorder(f"pop_{name}_rate").record_sample(
+                self._now_ms(), rate_param.mean, rate_param.sigma)
+
+        if noise_name is not None:
+            rec_name = f"producer:poisson:{noise_name}"
+            self.producer_recorder(f"poisson:{noise_name}")
+            self._relay_noise[pg_key] = rec_name
+            self._relay_last[pg_key] = float(max(0.0, rate))
+
+        return pg, parrot
+
+    def set_relay_rate(self, pg_key: str, rate: float):
+        """Sets a relay generator's rate; a wired producer recorder receives the
+        per-step delta (read-and-clear upstream)."""
+        r = float(max(0.0, rate))
+        self.get(pg_key).set({"rate": r})
+        rec_name = self._relay_noise.get(pg_key)
+        if rec_name is not None:
+            prev = self._relay_last.get(pg_key, r)
+            self._relay_last[pg_key] = r
+            self.noise_recorders[rec_name].record_delta(self._now_ms(), r - prev)
 
     def synapses(self, conn_key: str) -> Any:
         """
@@ -98,7 +218,8 @@ class Registry:
     def finalize_connections(self):
         """
         Captures one SynapseCollection per projection; call once the network is
-        fully built (after the last nest.Connect).
+        fully built (after the last nest.Connect). Also caches each plastic
+        projection's synapse count, the N_syn of the STDP delta normalization.
         """
         self._synapses = {
             key: nest.GetConnections(source=self.get(cfg.source),
@@ -106,11 +227,20 @@ class Registry:
                                      synapse_model=cfg.model)
             for key, cfg in self.connection_cfgs.items()
         }
+        self._plastic_n_syn = {}
+        for key, cfg in self.connection_cfgs.items():
+            if cfg.weight_recorder is None:
+                continue
+            try:
+                self._plastic_n_syn[key] = int(len(self._synapses[key]))
+            except Exception:
+                self._plastic_n_syn[key] = 0
 
     def read_plastic_events(self, clear: bool = True) -> Dict[str, Dict[str, np.ndarray]]:
         """
         Drains each plastic projection's NEST weight_recorder and returns the
-        events accumulated since the previous call ({key: {"times", "weights"}}).
+        events accumulated since the previous call
+        ({key: {"times", "weights", "senders", "targets"}}).
         With `clear` the recorder is emptied afterwards so a long run neither
         grows memory without bound nor re-scans the whole history every step.
         """
@@ -123,24 +253,31 @@ class Registry:
                 ev = wr.get("events")
                 weights = np.asarray(ev.get("weights", []), dtype=np.float64)
                 times = np.asarray(ev.get("times", []), dtype=np.float64)
+                senders = np.asarray(ev.get("senders", []), dtype=np.int64)
+                targets = np.asarray(ev.get("targets", []), dtype=np.int64)
             except Exception:
                 weights = np.empty(0, dtype=np.float64)
                 times = np.empty(0, dtype=np.float64)
+                senders = np.empty(0, dtype=np.int64)
+                targets = np.empty(0, dtype=np.int64)
             if clear:
                 try:
                     wr.set({"n_events": 0})
                 except Exception:
                     pass
-            out[key] = {"times": times, "weights": weights}
+            out[key] = {"times": times, "weights": weights,
+                        "senders": senders, "targets": targets}
         return out
 
     def sample_plastic_weight_deltas(self, t_before: float, t_now: float) -> Dict[str, float]:
         """
-        Mean per-synapse weight change each plastic projection's weight_recorder
-        observed within the last step, keyed by projection key. The recorder is
-        drained (and cleared) so the cost per step is proportional to the new
-        events only; repeated calls within one step (one per limb) reuse the
-        drained result instead of finding the recorders empty.
+        Per-step STDP signal of each plastic projection: the per-synapse mean
+        weight increment Σ(w − last_w)/N_syn over the events its weight recorder
+        accumulated since the previous step. The recorder is drained, so the
+        cost per step is proportional to the new events only; repeated calls
+        within one step (one per limb) reuse the drained batch, and each
+        projection's δ is recorded exactly once into its `stdp:<key>` producer
+        recorder (read-and-clear upstream).
         """
         key_now = float(t_now)
         if self._plastic_cache_key == key_now:
@@ -151,16 +288,17 @@ class Registry:
         for key, ev in events.items():
             weights = ev["weights"]
             counts[key] = int(weights.size)
-            if weights.size == 0:
-                out[key] = 0.0
-                continue
-            current = float(np.mean(weights))
-            previous = self._plastic_prev_mean.get(key)
-            out[key] = 0.0 if previous is None else current - previous
-            self._plastic_prev_mean[key] = current
+            cfg = self.connection_cfgs[key]
+            seed = float(cfg.extra_syn_spec.get("weight", 0.0))
+            n_syn = int(self._plastic_n_syn.get(key) or 0) or max(1, int(weights.size))
+            last_w = self._plastic_last_w.setdefault(key, {})
+            delta, _ = plastic_delta_from_events(ev, last_w, seed, n_syn)
+            out[key] = delta
         self._plastic_counts = counts
         self._plastic_cache_key = key_now
         self._plastic_cache = out
+        for key, delta in out.items():
+            self.producer_recorder(f"stdp:{key}").record_delta(key_now, delta)
         return dict(out)
 
     def last_plastic_counts(self) -> Dict[str, int]:
@@ -246,6 +384,7 @@ class Registry:
         the exploration is required for personalization, so it is left in place.
         """
         # Apply to populations
+        t_now = self._now_ms()
         for pop_name, pop in self.population_cfgs.items():
             if pop.node_collection is None:
                 continue
@@ -260,7 +399,14 @@ class Registry:
                 try:
                     pop.node_collection.set(update_dict)
                 except Exception:
-                    pass
+                    continue
+                for p_name, param_obj in pop.params.items():
+                    full_key = f"pop_{pop_name}_{p_name}"
+                    if full_key in sampled_values:
+                        # recorded = applied: the site recorder holds exactly
+                        # the sample the network just realized
+                        self.site_recorder(full_key).record_sample(
+                            t_now, float(sampled_values[full_key]), param_obj.sigma)
 
         # Apply to connections (synapses)
         for conn_key, conn in self.connection_cfgs.items():
@@ -274,4 +420,7 @@ class Registry:
             try:
                 self.synapses(conn_key).set(updates)
             except Exception:
-                pass
+                continue
+            for p_name, val in updates.items():
+                self.site_recorder(f"conn_{conn_key}_{p_name}").record_sample(
+                    t_now, val, conn.parameters[p_name].sigma)

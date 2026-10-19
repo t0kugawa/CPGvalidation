@@ -5,7 +5,6 @@ import numpy as np
 from persona.parameter import PersonaParam
 from persona.population import Population
 from persona.connection import Connection
-from persona.noise_recorder import NoiseRecorder
 from persona.registry import Registry
 from t2xcpg.utils import (
     get_jitter_delay, create_spike_recorder, create_stdp_synapse, STDP_POSTFIX,
@@ -46,10 +45,6 @@ class Leg:
         self.ref_hz = float(ref_hz)
         self.plastic_projections: list[str] = []
         self.plastic_counts: dict[str, int] = {}
-
-        # Create Noise Recorder for this leg
-        self.noise_recorder = NoiseRecorder(f"noise_{leg_name}")
-        self.registry.register_noise_recorder(self.noise_recorder)
 
         # 1. Build Neuronal Populations
         self._build_populations()
@@ -171,39 +166,33 @@ class Leg:
         )
 
         # Muscles (Parrot readout)
-        self.mus_e = nest.Create("parrot_neuron", self.n_mn)
-        self.mus_f = nest.Create("parrot_neuron", self.n_mn)
-        self.registry.population_nodes[f"mus_e_{self.leg}"] = self.mus_e
-        self.registry.population_nodes[f"mus_f_{self.leg}"] = self.mus_f
+        self.mus_e = self.registry.register_nodes(
+            f"mus_e_{self.leg}", nest.Create("parrot_neuron", self.n_mn))
+        self.mus_f = self.registry.register_nodes(
+            f"mus_f_{self.leg}", nest.Create("parrot_neuron", self.n_mn))
 
-        # Sensory Feedback Generators (Poisson -> Parrot)
+        # Sensory Feedback Generators (Poisson -> Parrot) as registered relays;
+        # each group's per-step rate delta goes to its producer recorder.
         # 1. CUT (cutaneous)
-        self.cut_pg = nest.Create("poisson_generator", self.n_aff, params={"rate": 0.0})
-        self.cut_in = nest.Create("parrot_neuron", self.n_aff)
-        nest.Connect(self.cut_pg, self.cut_in, conn_spec={"rule": "one_to_one"})
-        self.registry.population_nodes[f"cut_in_{self.leg}"] = self.cut_in
+        self.cut_pg, self.cut_in = self.registry.create_relay(
+            f"cut_pg_{self.leg}", f"cut_in_{self.leg}", self.n_aff,
+            rate=0.0, noise_name=f"cut_{self.leg}")
 
         # 2. Ia Afferents (stretch length & velocity)
-        self.ia_e_pg = nest.Create("poisson_generator", self.n_aff, params={"rate": 10.0})
-        self.ia_e_in = nest.Create("parrot_neuron", self.n_aff)
-        nest.Connect(self.ia_e_pg, self.ia_e_in, conn_spec={"rule": "one_to_one"})
-        self.registry.population_nodes[f"ia_e_in_{self.leg}"] = self.ia_e_in
-
-        self.ia_f_pg = nest.Create("poisson_generator", self.n_aff, params={"rate": 10.0})
-        self.ia_f_in = nest.Create("parrot_neuron", self.n_aff)
-        nest.Connect(self.ia_f_pg, self.ia_f_in, conn_spec={"rule": "one_to_one"})
-        self.registry.population_nodes[f"ia_f_in_{self.leg}"] = self.ia_f_in
+        self.ia_e_pg, self.ia_e_in = self.registry.create_relay(
+            f"ia_e_pg_{self.leg}", f"ia_e_in_{self.leg}", self.n_aff,
+            rate=10.0, noise_name=f"ia_e_{self.leg}")
+        self.ia_f_pg, self.ia_f_in = self.registry.create_relay(
+            f"ia_f_pg_{self.leg}", f"ia_f_in_{self.leg}", self.n_aff,
+            rate=10.0, noise_name=f"ia_f_{self.leg}")
 
         # 3. Ib Afferents (strain force & activation)
-        self.ib_e_pg = nest.Create("poisson_generator", self.n_aff, params={"rate": 5.0})
-        self.ib_e_in = nest.Create("parrot_neuron", self.n_aff)
-        nest.Connect(self.ib_e_pg, self.ib_e_in, conn_spec={"rule": "one_to_one"})
-        self.registry.population_nodes[f"ib_e_in_{self.leg}"] = self.ib_e_in
-
-        self.ib_f_pg = nest.Create("poisson_generator", self.n_aff, params={"rate": 5.0})
-        self.ib_f_in = nest.Create("parrot_neuron", self.n_aff)
-        nest.Connect(self.ib_f_pg, self.ib_f_in, conn_spec={"rule": "one_to_one"})
-        self.registry.population_nodes[f"ib_f_in_{self.leg}"] = self.ib_f_in
+        self.ib_e_pg, self.ib_e_in = self.registry.create_relay(
+            f"ib_e_pg_{self.leg}", f"ib_e_in_{self.leg}", self.n_aff,
+            rate=5.0, noise_name=f"ib_e_{self.leg}")
+        self.ib_f_pg, self.ib_f_in = self.registry.create_relay(
+            f"ib_f_pg_{self.leg}", f"ib_f_in_{self.leg}", self.n_aff,
+            rate=5.0, noise_name=f"ib_f_{self.leg}")
 
     def _connect(self, src: str, tgt: str, weight: float, p: float = 0.5,
                  is_stdp: bool = False, delay: float | None = None,
@@ -237,7 +226,6 @@ class Leg:
             parameters=parameters,
             rule="pairwise_bernoulli",
             p=float(p),
-            noise_recorder_id=self.noise_recorder.name,
             extra_syn_spec=extra,
             key=key,
             weight_recorder=wr
@@ -248,16 +236,15 @@ class Leg:
 
     def update_plastic_weights(self, t_before: float, t_now: float):
         """
-        Samples STDP weight changes from the weight recorders and records them
-        as ordinary noise features in this leg's NoiseRecorder. Returns the
-        per-projection mean deltas (the STDP learning signal) and stores the
-        per-projection update counts for logging.
+        Samples STDP weight changes from the weight recorders (the registry
+        computes each projection's per-synapse mean increment and records it in
+        the matching producer recorder). Returns the per-projection deltas and
+        stores the per-projection update counts for logging.
         """
         deltas = self.registry.sample_plastic_weight_deltas(t_before, t_now)
         counts = self.registry.last_plastic_counts()
         self.plastic_counts = {}
         for key in self.plastic_projections:
-            self.noise_recorder.record_direct(key, t_now, "weight", deltas.get(key, 0.0))
             self.plastic_counts[key] = int(counts.get(key, 0))
         return deltas
 
@@ -334,27 +321,22 @@ class Leg:
                                 current_time_ms: float = 0.0):
         """
         Updates Poisson generator rates based on live MuJoCo sensory inputs.
-        Records noise fluctuations in the NoiseRecorder.
+        Goes through the registry, which records each group's per-step rate
+        delta into its producer recorder (read-and-clear upstream).
         """
-        self.cut_pg.set({"rate": float(max(0.0, cut_hz))})
-        self.ia_e_pg.set({"rate": float(max(0.0, ia_e_hz))})
-        self.ia_f_pg.set({"rate": float(max(0.0, ia_f_hz))})
-        self.ib_e_pg.set({"rate": float(max(0.0, ib_e_hz))})
-        self.ib_f_pg.set({"rate": float(max(0.0, ib_f_hz))})
-
-        self.noise_recorder.observe("cut", current_time_ms, "rate", float(cut_hz))
-        self.noise_recorder.observe("ia_e", current_time_ms, "rate", float(ia_e_hz))
-        self.noise_recorder.observe("ia_f", current_time_ms, "rate", float(ia_f_hz))
-        self.noise_recorder.observe("ib_e", current_time_ms, "rate", float(ib_e_hz))
-        self.noise_recorder.observe("ib_f", current_time_ms, "rate", float(ib_f_hz))
+        side = self.leg
+        self.registry.set_relay_rate(f"cut_pg_{side}", cut_hz)
+        self.registry.set_relay_rate(f"ia_e_pg_{side}", ia_e_hz)
+        self.registry.set_relay_rate(f"ia_f_pg_{side}", ia_f_hz)
+        self.registry.set_relay_rate(f"ib_e_pg_{side}", ib_e_hz)
+        self.registry.set_relay_rate(f"ib_f_pg_{side}", ib_f_hz)
 
     def get_muscle_drives(self, dt_ms: float, current_time_ms: float = 0.0) -> Tuple[float, float]:
         """
         Normalized muscle activation in [0, 1] from spikes during the step.
         A pool at `ref_hz` per neuron (default 100 Hz) maps to full drive, so
         the drive tracks population rate rather than saturating the instant the
-        pool fires. The per-step activation change is recorded as a noise
-        feature (inner muscle dynamics) for PERSONA.
+        pool fires. Muscle drives are readouts/logs, not noise channels.
         """
         ev_e = self.rec_muse.get("events")["times"]
         ev_f = self.rec_musf.get("events")["times"]
@@ -365,8 +347,6 @@ class Leg:
 
         drive_e = self._drive(n_e, dt_ms)
         drive_f = self._drive(n_f, dt_ms)
-        self.noise_recorder.observe("mus_e", current_time_ms, "act", drive_e)
-        self.noise_recorder.observe("mus_f", current_time_ms, "act", drive_f)
         return drive_e, drive_f
 
     def _drive(self, spikes: int, dt_ms: float, n: int | None = None) -> float:

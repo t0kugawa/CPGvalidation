@@ -142,11 +142,12 @@ class Agent:
             a = self.current_actions.get(name, param.mean)
             perturbations[name] = a - param.mean
 
-        # Collect noise producer fluctuations
-        for nr_name, nr in self.registry.noise_recorders.items():
-            noise_deltas = nr.get_latest_step_deltas()
-            for tag, d_val in noise_deltas.items():
-                perturbations[tag] = d_val
+        # Producer deltas (STDP projections, sensory Poisson groups): fresh
+        # since the previous step, read-and-clear, so a stale value can never
+        # repeat; a step without new records contributes 0.0.
+        for nr_name, nr in self.registry.producer_recorders().items():
+            d_val = nr.take_delta()
+            perturbations[f"noise_{nr_name}"] = 0.0 if d_val is None else float(d_val)
 
         # Record step in Fisher Matrix strategy (legacy perturbation history, kept
         # for the Fisher heat-map figure)

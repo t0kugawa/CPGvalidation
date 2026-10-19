@@ -1,87 +1,74 @@
-from dataclasses import dataclass
-from typing import Deque, Dict, List
-from collections import deque
 import numpy as np
-
-
-@dataclass
-class NoiseSample:
-    producer_id: str          # noise producer name (synapse / population / generator)
-    t: float
-    value: float              # delta or instantaneous observed fluctuation
-    param: str                # "weight", "rate", "jitter", etc.
 
 
 class NoiseRecorder:
     """
-    Monitors and records noise producer fluctuations (e.g. STDP weight changes,
-    Poisson rate fluctuations, input jitter). Exposes current step changes and
-    historical statistics so Strategy / FisherMatrix can treat noise as an
-    ordinary parameter affecting reward. `samples` is a bounded rolling window
-    (`MAX_SAMPLES`) so a long run does not accumulate it without bound.
+    Records one signal stream for PERSONA:
+
+    - a **site** recorder holds the last explored sample `(x̂, σ)` applied at a
+      personalizable parameter; it is never cleared, because the applied value
+      stays in force until the next refresh step;
+    - a **producer** recorder holds the per-step delta of an external noise
+      source (STDP weight increments, sensory Poisson rate changes) and is
+      read-and-clear, so a stale delta can never leak into a later step.
+
+    Statistics are constant-cost β-decayed EWMA estimates (`m`, `q`): a long run
+    neither stores samples nor scans a window.
     """
-    def __init__(self, name: str):
+    def __init__(self, name: str, beta: float = 0.995):
         self.name = name
-        self.MAX_SAMPLES = 50000
-        self.samples: Deque[NoiseSample] = deque(maxlen=self.MAX_SAMPLES)
-        self._last_values: Dict[tuple, float] = {}
-        self._step_deltas: Dict[str, float] = {}
+        self.beta = float(beta)
+        self.n = 0
+        self.t = 0.0
+        self._m: float | None = None
+        self._q: float | None = None
+        self._latest: float = 0.0
+        self._latest_sample: tuple[float, float] | None = None
+        self._pending: float | None = None
 
-    def observe(self, producer_id: str, t: float,
-                param: str, current_value: float) -> NoiseSample | None:
-        key = (producer_id, param)
-        prev = self._last_values.get(key)
-        self._last_values[key] = current_value
-        if prev is None:
-            delta = 0.0
+    def _observe(self, t: float, value: float) -> None:
+        v = float(value)
+        b = self.beta
+        if self._m is None:
+            self._m = v
+            self._q = v * v
         else:
-            delta = float(current_value - prev)
+            self._m = b * self._m + (1.0 - b) * v
+            self._q = b * self._q + (1.0 - b) * v * v
+        self.n += 1
+        self.t = float(t)
+        self._latest = v
 
-        s = NoiseSample(producer_id=producer_id, t=t,
-                        value=delta, param=param)
-        self.samples.append(s)
+    def record_sample(self, t: float, sample: float, sigma: float) -> None:
+        """Site recorder: the sample that was just applied, with its sigma."""
+        self._latest_sample = (float(sample), float(sigma))
+        self._observe(t, sample)
 
-        tag = f"noise_{producer_id}_{param}"
-        self._step_deltas[tag] = delta
-        return s
+    def record_delta(self, t: float, delta: float) -> None:
+        """Producer recorder: this step's delta (read once with `take_delta`)."""
+        self._pending = float(delta)
+        self._observe(t, delta)
 
-    def observe_weight(self, producer_id: str, t: float,
-                       current_weight: float) -> NoiseSample:
-        return self.observe(producer_id, t, "weight", float(current_weight))
+    def latest_sample(self) -> tuple[float, float] | None:
+        """Last applied `(sample, sigma)`; never cleared."""
+        return self._latest_sample
 
-    def record_direct(self, producer_id: str, t: float, param: str, delta: float) -> NoiseSample:
-        s = NoiseSample(producer_id=producer_id, t=t, value=float(delta), param=param)
-        self.samples.append(s)
-        tag = f"noise_{producer_id}_{param}"
-        self._step_deltas[tag] = float(delta)
-        return s
+    def take_delta(self) -> float | None:
+        """Delta recorded since the previous take, or None; read-and-clear."""
+        d = self._pending
+        self._pending = None
+        return d
 
-    def get_latest_step_deltas(self) -> Dict[str, float]:
-        """
-        Returns recent noise producer deltas for the current step.
-        """
-        return dict(self._step_deltas)
-    def flush_distribution(self, window: float, now: float) -> Dict[str, dict]:
-        """
-        Computes mean and stddev of fluctuations within the given time window.
-        """
-        cutoff = now - window
-        out: Dict[str, List[float]] = {}
-        for s in self.samples:
-            if s.t >= cutoff:
-                key = f"noise_{s.producer_id}_{s.param}"
-                out.setdefault(key, []).append(s.value)
-
-        stats = {}
-        for tag, vals in out.items():
-            arr = np.asarray(vals, dtype=np.float64)
-            if len(arr) > 0:
-                stats[tag] = {
-                    "mean": float(arr.mean()),
-                    "sigma": float(arr.std() + 1e-8),
-                    "n": len(arr),
-                    "latest": float(arr[-1])
-                }
-            else:
-                stats[tag] = {"mean": 0.0, "sigma": 1e-4, "n": 0, "latest": 0.0}
-        return stats
+    def stats(self) -> dict:
+        """β-EWMA mean/variance of the recorded stream (constant cost)."""
+        m = 0.0 if self._m is None else float(self._m)
+        q = 0.0 if self._q is None else float(self._q)
+        var = max(q - m * m, 0.0)
+        return {
+            "mean": m,
+            "var": var,
+            "std": float(np.sqrt(var)),
+            "latest": float(self._latest),
+            "t": float(self.t),
+            "n": int(self.n),
+        }

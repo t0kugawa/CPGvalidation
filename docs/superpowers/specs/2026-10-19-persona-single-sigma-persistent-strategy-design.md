@@ -239,10 +239,11 @@ class NoiseRecorder:
   `create_population`/`create_connection` time and exposes
   `site_recorder(full_key)` / `producer_recorder(name)`. Producer recorders:
   one per STDP projection (`create_connection` with a `weight_recorder`) and
-  one per sensory Poisson group (`create_relay(noise=True)`).
-- Producer set for the MVP: 4 STDP projections (`cut_rge_L/R`, `ia_rge_L/R`)
-  + 10 sensory groups (CUT, Ia-E, Ia-F, Ib-E, Ib-F × L/R). Muscle drives and
-  RG rates are readouts/logs, not noise channels.
+  one per sensory Poisson group (`create_relay(noise_name=...)`).
+- Producer set for the MVP: one recorder per plastic projection — 6 in the
+  current network (`cut_rge_L/R`, `ia_rge_L/R`, `ia_rgf_L/R`) — plus 10 sensory
+  groups (CUT, Ia-E, Ia-F, Ib-E, Ib-F × L/R). Muscle drives and RG rates are
+  readouts/logs, not noise channels.
 
 ### 5.4 Strategy — `persona/strategy.py`
 

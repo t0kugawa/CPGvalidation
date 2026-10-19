@@ -79,8 +79,11 @@ def test_stdp_weight_deltas_recorded_in_step(nest_kernel):
     lr = CPG_Leg("R", reg, n_rg=6, n_mn=6, n_int=5, n_aff=5)
     cpg = L2CPG(registry=reg, bs=bs, legs={"L": ll, "R": lr}, dt_ms=10.0)
     cpg.step()
-    deltas = ll.noise_recorder.get_latest_step_deltas()
-    assert any(k.endswith("_weight") for k in deltas)
+    stdp_recs = [n for n in reg.producer_recorders() if n.startswith("producer:stdp:")]
+    assert stdp_recs, "every STDP projection must have a producer recorder"
+    for name in stdp_recs:
+        d = reg.noise_recorders[name].take_delta()
+        assert d is not None and np.isfinite(d)     # fresh each step (0.0 if no updates)
 
 
 # --- Important: plastic (STDP) seed weights must lie within their bounds ---
@@ -209,14 +212,15 @@ def test_joint_ranges_cover_loader_clamp():
             assert hi >= JOINT_RANGES[j][1] - 1e-9, (s, j, hi)
 
 
-def test_noise_recorder_samples_are_bounded():
+def test_noise_recorder_memory_is_constant_size():
     from persona.noise_recorder import NoiseRecorder
 
-    nr = NoiseRecorder("x")
-    for i in range(nr.MAX_SAMPLES + 100):
-        nr.record_direct("p", float(i), "weight", 1.0)
-    assert len(nr.samples) == nr.MAX_SAMPLES
-    assert np.isclose(nr.get_latest_step_deltas()["noise_p_weight"], 1.0)
+    nr = NoiseRecorder("producer:x")
+    for i in range(10_000):
+        nr.record_delta(float(i), 1.0)
+    s = nr.stats()
+    assert s["n"] == 10_000                      # statistics, not a growing sample list
+    assert np.isclose(s["std"], 0.0) and np.isclose(s["latest"], 1.0)
 
 
 def test_rg_recorders_are_read_and_cleared(nest_kernel):
