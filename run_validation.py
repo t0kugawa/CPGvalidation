@@ -89,7 +89,8 @@ class _Snapshotter:
 def run(duration_s, view, width, height, fps, out_dir,
         w_scale, ref_hz, belt_mps, belt_start_s, belt_ramp_s,
         n_rg, n_mn, n_int, n_aff, n_bs, render=True, budget_s=None,
-        pose_max_s=1.0, belt_mode="dataset", snapshot_s=900.0):
+        pose_max_s=1.0, belt_mode="dataset", snapshot_s=900.0,
+        tau_mem_s=2.0, realize_every_k=1):
     os.makedirs(out_dir, exist_ok=True)
     steps = int(round(duration_s / (DT_MS / 1000.0)))
     n_frames = int(round(duration_s * fps))
@@ -100,7 +101,7 @@ def run(duration_s, view, width, height, fps, out_dir,
         n_rg=n_rg, n_mn=n_mn, n_int=n_int, n_aff=n_aff, n_bs=n_bs,
         max_steps=steps, eps_pose=0.10, pose_hold_steps=3,
         loss_stop=1e-4, loss_window=20, w_scale=w_scale, ref_hz=ref_hz,
-        belt_mode=belt_mode, loop=True)
+        belt_mode=belt_mode, loop=True, tau_mem_s=tau_mem_s)
     pers.belt_mps = float(belt_mps)
     pers.belt_start_step = int(round(belt_start_s / (DT_MS / 1000.0)))
     pers.belt_ramp_steps = max(1, int(round(belt_ramp_s / (DT_MS / 1000.0))))
@@ -133,7 +134,8 @@ def run(duration_s, view, width, height, fps, out_dir,
     status = {}
     try:
         log = pers.run(step_hook=_hook, wall_clock_s=budget_s,
-                       pose_max_steps=int(round(pose_max_s / (DT_MS / 1000.0))))
+                       pose_max_steps=int(round(pose_max_s / (DT_MS / 1000.0))),
+                       realize_every_k=realize_every_k)
     finally:
         if writer is not None:
             try:
@@ -224,6 +226,12 @@ if __name__ == "__main__":
     ap.add_argument("--snapshot-s", type=float, default=900.0,
                     help="wall-clock interval between atomic run.h5/run_log.csv "
                          "checkpoints (0 disables)")
+    ap.add_argument("--tau-mem-s", type=float, default=2.0,
+                    help="trace/credit memory time constant in seconds "
+                         "(beta = 1 - dt/tau_mem)")
+    ap.add_argument("--realize-every-k", type=int, default=1,
+                    help="sample + realize + record the network every k steps "
+                         "(strategy still updates every dt)")
     ap.add_argument("--fast", action="store_true",
                     help="quick low-res short run for iteration")
     args = ap.parse_args()
@@ -241,4 +249,5 @@ if __name__ == "__main__":
         args.w_scale, args.ref_hz, args.belt_mps, args.belt_start_s, args.belt_ramp_s,
         args.n_rg, args.n_mn, args.n_int, args.n_aff, args.n_bs, render=not args.no_render,
         budget_s=args.budget_s, pose_max_s=args.pose_max_s, belt_mode=args.belt,
-        snapshot_s=args.snapshot_s)
+        snapshot_s=args.snapshot_s, tau_mem_s=args.tau_mem_s,
+        realize_every_k=args.realize_every_k)
