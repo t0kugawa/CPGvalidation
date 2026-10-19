@@ -8,6 +8,13 @@ from model.adapter import CPGAdapter, CPGInput, CPGOutput
 from t2xcpg.bs import BrainStem, BaseDrive
 from t2xcpg.leg import Leg
 
+# Tonic brainstem -> rhythm generator weight. The reference (`cpg_2legs_fast`)
+# relies on this projection being weak enough that the cutaneous co-activation
+# gate decides when the RG fires. Measured: the previous value (18.0, x1.5 on the
+# leading leg) held an isolated RG pool at 243 Hz, i.e. the gate was always open.
+# 2.0 gives ~10 Hz on this pool and ~25 Hz when co-activated with CUT.
+W_BS2RG = 2.0
+
 
 class L2CPG(CPGAdapter):
     """
@@ -72,8 +79,8 @@ class L2CPG(CPGAdapter):
         """
         for leg_key, leg in self.legs.items():
             gain = self.leading_gain if leg_key == self.leading_leg else 1.0
-            self._connect("BS_in_e", f"rg_e_{leg_key}", weight=18.0 * gain, p=0.45)
-            self._connect("BS_in_f", f"rg_f_{leg_key}", weight=18.0 * gain, p=0.45)
+            self._connect("BS_in_e", f"rg_e_{leg_key}", weight=W_BS2RG * gain, p=0.45)
+            self._connect("BS_in_f", f"rg_f_{leg_key}", weight=W_BS2RG * gain, p=0.45)
 
     def _build_base_connections(self):
         """
