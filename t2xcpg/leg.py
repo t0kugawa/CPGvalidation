@@ -1,5 +1,4 @@
 from typing import Any, Tuple
-import nest
 import numpy as np
 
 from persona.parameter import PersonaParam
@@ -7,8 +6,7 @@ from persona.population import Population
 from persona.connection import Connection
 from persona.registry import Registry
 from t2xcpg.utils import (
-    get_jitter_delay, create_spike_recorder, create_stdp_synapse, STDP_POSTFIX,
-    stdp_param_spec,
+    get_jitter_delay, create_stdp_synapse, STDP_POSTFIX, stdp_param_spec,
 )
 
 
@@ -53,10 +51,10 @@ class Leg:
         self._build_connections()
 
         # 3. Readout Recorders
-        self.rec_muse = create_spike_recorder(self.mus_e)
-        self.rec_musf = create_spike_recorder(self.mus_f)
-        self.rec_rge = create_spike_recorder(self.rg_e)
-        self.rec_rgf = create_spike_recorder(self.rg_f)
+        self.rec_muse = self.registry.create_spike_recorder(self.mus_e)
+        self.rec_musf = self.registry.create_spike_recorder(self.mus_f)
+        self.rec_rge = self.registry.create_spike_recorder(self.rg_e)
+        self.rec_rgf = self.registry.create_spike_recorder(self.rg_f)
 
         self.registry.finalize_connections()
 
@@ -166,10 +164,8 @@ class Leg:
         )
 
         # Muscles (Parrot readout)
-        self.mus_e = self.registry.register_nodes(
-            f"mus_e_{self.leg}", nest.Create("parrot_neuron", self.n_mn))
-        self.mus_f = self.registry.register_nodes(
-            f"mus_f_{self.leg}", nest.Create("parrot_neuron", self.n_mn))
+        self.mus_e = self.registry.create_parrot_nodes(f"mus_e_{self.leg}", self.n_mn)
+        self.mus_f = self.registry.create_parrot_nodes(f"mus_f_{self.leg}", self.n_mn)
 
         # Sensory Feedback Generators (Poisson -> Parrot) as registered relays;
         # each group's per-step rate delta goes to its producer recorder.
@@ -206,7 +202,7 @@ class Leg:
         if is_stdp:
             syn_base = key.rsplit("_", 1)[0] if key else "default"
             syn_type = STDP_POSTFIX.get(syn_base, "default")
-            model, wr = create_stdp_synapse(syn_type, f"{src}_{tgt}")
+            model, wr = create_stdp_synapse(self.registry, syn_type, f"{src}_{tgt}")
             # STDP owns the synaptic weight; PERSONA optimizes only the STDP
             # hyper-parameters (tau_plus/lambda/alpha/mu/Wmax). The seed weight
             # is written once via the syn_spec and never overwritten afterwards.

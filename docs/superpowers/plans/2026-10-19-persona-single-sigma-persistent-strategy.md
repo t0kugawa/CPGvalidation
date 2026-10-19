@@ -52,7 +52,7 @@
   - `update_mean(delta)` unchanged.
 - Removed: `sigma_param`, `sigma_ctrl`, `sigma` property, `log_sigma_param`, `set_log_sigma_param`, `update_controlling_variance`, `update_parametric_variance`.
 
-- [ ] **Step 1: Write the failing tests — `tests/test_param_sigma.py`**
+- [x] **Step 1: Write the failing tests — `tests/test_param_sigma.py`**
 
 ```python
 import numpy as np
@@ -104,12 +104,12 @@ def test_bounds_still_clip():
     assert p.mean == 2.0
 ```
 
-- [ ] **Step 2: Run to verify failure**
+- [x] **Step 2: Run to verify failure**
 
 Run the Global-Constraints pytest command on `tests/test_param_sigma.py -v`.
 Expected: FAIL (`sigma_step` / `update_sigma` missing, `sigma_max` not accepted).
 
-- [ ] **Step 3: Implement `persona/parameter.py`**
+- [x] **Step 3: Implement `persona/parameter.py`**
 
 Dataclass fields per the Interfaces block. `sample_population` draws
 `rng.normal(center, max(1e-8, sigma), n)` and clips; `sample_exploration` draws
@@ -119,7 +119,7 @@ Dataclass fields per the Interfaces block. `sample_population` draws
 `TODO(sigma-ewma)` comment (variant B). `update_sigma`:
 `new = clip(sigma_at_sample·exp(self.sigma_step(...)), self.sigma_min, self.sigma_max); self.sigma = new; return new`.
 
-- [ ] **Step 4: Sweep call sites**
+- [x] **Step 4: Sweep call sites**
 
 - `persona/population.py`: `sigmas = np.array([self.params[k].sigma ...])`; docstring “the single σ governs dispersion”.
 - `persona/agent.py` (minimal port, keeps the windowed strategy working):
@@ -139,7 +139,7 @@ Dataclass fields per the Interfaces block. `sample_population` draws
   sigma_at_sample=p.sigma, advantage=0.5, lr_sigma=0.005)`; keep
   `assert 1e-4 <= p.sigma < 0.05` (no blow-up).
 
-- [ ] **Step 5: Run the suite**
+- [x] **Step 5: Run the suite**
 
 Run: Global-Constraints pytest command on
 `tests/test_param_sigma.py tests/test_persona_objective.py tests/test_phase.py tests/test_review_fixes.py -v`.
@@ -147,7 +147,7 @@ Expected: PASS. Then run the full suite; only failures that require later tasks
 (noise/strategy/agent rewrites) are acceptable if they are *import-time* free —
 prefer fixing ctor-level fallout now.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add persona/parameter.py persona/population.py persona/agent.py t2xcpg/leg.py t2xcpg/bs.py tests/test_param_sigma.py tests/test_persona_objective.py tests/test_phase.py tests/test_review_fixes.py
@@ -183,7 +183,7 @@ git commit -m "feat(persona): single sigma per site with sample-time snapshot up
     recorded into `stdp:{key}` producer recorders; keep the per-step cache and `last_plastic_counts()`.
   - module-level `plastic_delta_from_events(events, last_w, seed_weight, n_syn) -> (delta, updated_last_w)` (pure, testable).
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 `tests/test_noise_recorder.py`:
 ```python
@@ -244,9 +244,9 @@ def test_stdp_producer_delta_from_events():
 `tests/test_stdp.py` / `tests/test_noise.py`: replace `leg.noise_recorder` reads with
 `reg.producer_recorder(f"stdp:{key}").take_delta()` and drop the old tag-style asserts.
 
-- [ ] **Step 2: Run to verify failure** (all three files).
+- [x] **Step 2: Run to verify failure** (all three files).
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 - `persona/noise_recorder.py`: state `_m`, `_q`, `_n`, `_last`, `_latest_sample`, `_pending`;
   `record_*` update the β-EWMA (`m ← βm+(1−β)v; q ← βq+(1−β)v²`; first value seeds m=q=v) and set `_pending`
@@ -268,9 +268,9 @@ def test_stdp_producer_delta_from_events():
   production recorders: for each `name` in the strategy's noise names, `delta = rec.take_delta() or 0.0`
   (τ stays the old empirical path until Task 3), key them `f"noise_{name}"` for the old windowed strategy.
 
-- [ ] **Step 4: Run to verify pass** — the new tests + `tests/test_stdp.py tests/test_noise.py tests/test_cpg_build.py`.
+- [x] **Step 4: Run to verify pass** — the new tests + `tests/test_stdp.py tests/test_noise.py tests/test_cpg_build.py`.
 
-- [ ] **Step 5: Commit** — `git commit -m "feat(persona): per-site/per-producer noise recorders, STDP delta = sum(dw)/N, registry relays"`
+- [x] **Step 5: Commit** — `git commit -m "feat(persona): per-site/per-producer noise recorders, STDP delta = sum(dw)/N, registry relays"`
 
 ---
 
@@ -296,7 +296,7 @@ def test_stdp_producer_delta_from_events():
   `history` groups `means`, `sigmas`, `influence`; snapshot storage `self._snap[key] = (mu_at_sample, sigma_at_sample, xhat)`.
 - h5 `agent/` groups: `means`, `sigmas` (replaces `sigmas_ctrl`/`sigmas_param`); add final `trace_final`, `credit_final` in the same task.
 
-- [ ] **Step 1: Write failing tests — `tests/test_strategy.py`**
+- [x] **Step 1: Write failing tests — `tests/test_strategy.py`**
 
 ```python
 import numpy as np
@@ -424,9 +424,9 @@ def test_loss_decreases_and_sigma_recorded(nest_kernel):
     assert len(agent.history["sigmas"][key]) == 120
 ```
 
-- [ ] **Step 2: Run to verify failure.**
+- [x] **Step 2: Run to verify failure.**
 
-- [ ] **Step 3: Implement `persona/strategy.py`**
+- [x] **Step 3: Implement `persona/strategy.py`**
 
 State: `param_names`, `noise_names`, `n_sites`, `n_noise`, `F`, `Xbar`, `G`,
 `steps` counter, `warmup`, `beta`, `lambda_reg`, `lr_mu`, `lr_sigma`, baselines.
@@ -438,7 +438,7 @@ State: `param_names`, `noise_names`, `n_sites`, `n_noise`, `F`, `Xbar`, `G`,
 5. `g = G.sum(axis=1)`, zero the noise rows; `dmu = lr_mu·solve(F+λI, g)` (pinv fallback);
    return `{name: float(dmu[i])}` for sites.
 
-- [ ] **Step 4: Implement `persona/agent.py`**
+- [x] **Step 4: Implement `persona/agent.py`**
 
 `beta = 1 − (dt_ms/1000)/tau_mem_s`. `sample_actions(t_ms)`: refresh params; for each site
 `x̂ = p.sample_exploration()`; store `self._snap[key] = (p.mean, p.sigma, x̂)`;
@@ -451,15 +451,15 @@ noise dict from `registry.producer_recorder(name)`: `(take_delta() or 0.0, max(s
 history logs `means`, `sigmas`, `influence`; return `delta_means`, `dlog_sigma`.
 Remove all legacy paths (`record_step`, `record_response`, `sigma_ctrl_dict`, `lr_sigma_ctrl`/`lr_sigma_param`).
 
-- [ ] **Step 5: Update `persona/h5io.py` + `persona/validation.py`**
+- [x] **Step 5: Update `persona/h5io.py` + `persona/validation.py`**
 
 Replace the `sigmas_ctrl`/`sigmas_param` groups with `sigmas`; store `agent/trace_final`,
 `agent/credit_final` next to the final metric. `plot_param_shift` reads `sigmas`.
 
-- [ ] **Step 6: Run to verify pass**; update/delete the superseded test files listed above;
+- [x] **Step 6: Run to verify pass**; update/delete the superseded test files listed above;
   run the full suite and fix fallout that belongs to this task.
 
-- [ ] **Step 7: Commit** — `git commit -m "feat(persona): persisted F+trace+credit strategy; agent update-every-dt with recorded samples"`
+- [x] **Step 7: Commit** — `git commit -m "feat(persona): persisted F+trace+credit strategy; agent update-every-dt with recorded samples"`
 
 ---
 
@@ -479,7 +479,7 @@ Replace the `sigmas_ctrl`/`sigmas_param` groups with `sigmas`; store `agent/trac
 - `t2xcpg/utils.py` keeps only `nest.CopyModel`-based helpers (`copy_syn_model`, `create_stdp_synapse(registry, ...)`;
   `create_izhi_population`/`poisson_to_parrot`/`create_spike_recorder`/`create_weight_recorder` removed).
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 `tests/test_nest_route.py`:
 ```python
@@ -506,13 +506,13 @@ def test_no_raw_nest_calls_outside_registry():
 is a draw around the action (not the mean of draws); (c) a monkeypatched failing `set` lands in
 `registry.last_apply_errors` and the earlier entries stay.
 
-- [ ] **Step 2: Run to verify failure** (raw-call scan fails until utils/leg/bs are cleaned).
+- [x] **Step 2: Run to verify failure** (raw-call scan fails until utils/leg/bs are cleaned).
 
-- [ ] **Step 3: Implement** the registry/apply changes; rewrite `t2xcpg/leg.py` muscle/readout
+- [x] **Step 3: Implement** the registry/apply changes; rewrite `t2xcpg/leg.py` muscle/readout
   creation (`register_nodes` / `create_spike_recorder`), `t2xcpg/utils.py` cleanup,
   `t2xcpg/bs.py`/`t2xcpg/cpg.py` call sites.
 
-- [ ] **Step 4: Run to verify pass** + `tests/test_cpg_build.py tests/test_cpg_topology.py tests/test_stdp.py`.
+- [x] **Step 4: Run to verify pass** + `tests/test_cpg_build.py tests/test_cpg_topology.py tests/test_stdp.py`.
 
 - [ ] **Step 5: Commit** — `git commit -m "feat(persona): registry single NEST route, per-instance realization, apply errors surfaced"`
 
@@ -566,6 +566,15 @@ is a draw around the action (not the mean of draws); (c) a monkeypatched failing
   (`git diff f611e78..HEAD` + the spec).
 - [ ] **Step 2:** Apply fixes for every finding; re-run the full suite.
 - [ ] **Step 3:** Commit — `git commit -m "fix(persona): review findings"`.
+
+**Reviewer checklist (added during T3, from test calibration):**
+- **Credit gain.** `G = βG + (1−β)X̄Aᵀ` has stationary mean `(1−β)·E[trace·A]`
+  (pinned by `test_credit_gain_is_ewma_weighted`), while `F = E[s sᵀ]` is
+  full-scale. So the effective step is `η·(1−β)βᵏ·Cov` at lag `k` — the trace
+  weights a lag-`k` coupling by `(1−β)βᵏ`. Confirm on the T6 runs that the
+  production `lr_mu` (0.03) still learns acceptably with `τ_mem = 2 s`
+  (`(1−β) = 0.005`), or raise the effective-rate question with the user
+  (do not silently rescale `g`).
 
 ## Self-Review
 

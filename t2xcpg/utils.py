@@ -24,32 +24,6 @@ def clamp(x: float, lo: float, hi: float) -> float:
     return float(max(lo, min(hi, x)))
 
 
-def poisson_to_parrot(poisson_n: int, parrot_n: int, hz: float) -> Any:
-    assert poisson_n == parrot_n, f"one_to_one connection requires equal poisson_n ({poisson_n}) and parrot_n ({parrot_n})"
-    poisson = nest.Create("poisson_generator", poisson_n)
-    parrot = nest.Create("parrot_neuron", parrot_n)
-    nest.Connect(poisson, parrot, conn_spec={"rule": "one_to_one"})
-    poisson.set({"rate": float(max(0.0, hz))})
-    return poisson, parrot
-
-
-def create_izhi_population(size: int, params=None) -> Any:
-    p = dict(INIT_IZHI_PARAMS)
-    if params:
-        p.update(params)
-    return nest.Create("izhikevich", size, params=p)
-
-
-def create_spike_recorder(target):
-    rec = nest.Create("spike_recorder", params={"record_to": "memory"})
-    nest.Connect(target, rec)
-    return rec
-
-
-def create_weight_recorder():
-    return nest.Create("weight_recorder")
-
-
 def copy_syn_model(name: str, params: dict, wr=None):
     p = dict(params)
     if wr is not None:
@@ -99,9 +73,14 @@ def stdp_param_spec(syn_type: str) -> dict:
             return dict(STDP_DEFAULT)
 
 
-def create_stdp_synapse(syn_type: str, postfix: str):
+def create_stdp_synapse(registry, syn_type: str, postfix: str) -> tuple[str, Any]:
+    """
+    Defines one plastic projection's STDP synapse model. Creating the weight
+    recorder goes through the registry (single NEST route); this module keeps
+    only the `nest.CopyModel` call that must run before the registry connects.
+    """
     name = f"stdp_{syn_type}_{postfix}"
-    wr = create_weight_recorder()
+    wr = registry.create_weight_recorder()
     copy_syn_model(name, stdp_param_spec(syn_type), wr)
     return name, wr
 

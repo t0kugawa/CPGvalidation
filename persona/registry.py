@@ -1,5 +1,5 @@
 import nest
-from typing import Dict, Any
+from typing import Any, Dict, List
 import numpy as np
 
 from persona.parameter import PersonaParam
@@ -47,6 +47,10 @@ class Registry:
         self._plastic_n_syn: Dict[str, int] = {}
         self._relay_noise: Dict[str, str] = {}
         self._relay_last: Dict[str, float] = {}
+        self._syn_counts: Dict[str, int] = {}
+        # Failures of the realization path (create_population's set,
+        # apply_explored_parameters); cleared on every apply, never swallowed.
+        self.last_apply_errors: List[tuple[str, str]] = []
 
     def register_noise_recorder(self, recorder: NoiseRecorder):
         self.noise_recorders[recorder.name] = recorder
@@ -90,6 +94,45 @@ class Registry:
         self.population_nodes[name] = nodes
         return nodes
 
+    def create_parrot_nodes(self, name: str, n: int) -> Any:
+        """Creates and registers `n` parrot readout neurons (no intrinsic drive)."""
+        return self.register_nodes(name, nest.Create("parrot_neuron", n))
+
+    def create_spike_recorder(self, target: Any) -> Any:
+        """Creates a memory spike recorder wired to `target`."""
+        rec = nest.Create("spike_recorder", params={"record_to": "memory"})
+        nest.Connect(target, rec)
+        return rec
+
+    def create_weight_recorder(self) -> Any:
+        """Creates a weight recorder for one plastic projection's STDP model."""
+        return nest.Create("weight_recorder")
+
+    def _set_nodes(self, nodes: Any, update_dict: Dict[str, Any]) -> None:
+        """
+        Realizes per-subject values on a node collection: one vectorized `set`
+        first (neurons accept arrays), then a per-node loop — device-only
+        parameters such as a Poisson `rate` may reject arrays (spec §5.2).
+        Raises with both messages when neither path works, so the caller can
+        surface the failure instead of silently keeping the old value.
+        """
+        try:
+            nodes.set(update_dict)
+            return
+        except Exception as arr_exc:
+            arr_msg = str(arr_exc)
+        try:
+            for i, node in enumerate(nodes):
+                per = {}
+                for key, val in update_dict.items():
+                    arr = np.asarray(val, dtype=np.float64).ravel()
+                    per[key] = float(arr[0] if arr.size == 1 else arr[i])
+                node.set(per)
+        except Exception as loop_exc:
+            raise RuntimeError(
+                f"array set failed ({arr_msg}); "
+                f"per-node realization failed ({loop_exc})") from arr_exc
+
     def create_population(self, cfg: Population, explored_means: Dict[str, float] | None = None) -> nest.NodeCollection:
         """
         Instantiates a NEST neuron population according to the Population specification.
@@ -106,15 +149,12 @@ class Registry:
                 self._now_ms(), param_obj.mean, param_obj.sigma)
 
         sampled = cfg.sample_matrix(explored_means=explored_means)
-        for key, values in sampled.items():
+        if sampled:
             try:
-                nodes.set({key: values})
-            except Exception:
-                # Some properties in NEST are scalar or have specific setters
-                try:
-                    nodes.set({key: float(np.mean(values))})
-                except Exception:
-                    pass
+                self._set_nodes(nodes, sampled)
+            except Exception as exc:
+                # surfaced, never swallowed (spec §5.5: no silent failures)
+                self.last_apply_errors.append((f"pop_{cfg.name}", str(exc)))
 
         return nodes
 
@@ -215,11 +255,23 @@ class Registry:
             self._synapses[conn_key] = col
         return col
 
+    def synapse_count(self, conn_key: str) -> int:
+        """Number of synapses of one projection (cached by `finalize_connections`)."""
+        n = self._syn_counts.get(conn_key)
+        if n is None:
+            try:
+                n = int(len(self.synapses(conn_key)))
+            except Exception:
+                n = 0
+            self._syn_counts[conn_key] = n
+        return int(n)
+
     def finalize_connections(self):
         """
         Captures one SynapseCollection per projection; call once the network is
-        fully built (after the last nest.Connect). Also caches each plastic
-        projection's synapse count, the N_syn of the STDP delta normalization.
+        fully built (after the last nest.Connect). Also caches every projection's
+        synapse count — the realization length of static weight arrays and the
+        N_syn of the STDP delta normalization.
         """
         self._synapses = {
             key: nest.GetConnections(source=self.get(cfg.source),
@@ -227,14 +279,15 @@ class Registry:
                                      synapse_model=cfg.model)
             for key, cfg in self.connection_cfgs.items()
         }
+        self._syn_counts = {}
         self._plastic_n_syn = {}
         for key, cfg in self.connection_cfgs.items():
-            if cfg.weight_recorder is None:
-                continue
             try:
-                self._plastic_n_syn[key] = int(len(self._synapses[key]))
+                self._syn_counts[key] = int(len(self._synapses[key]))
             except Exception:
-                self._plastic_n_syn[key] = 0
+                self._syn_counts[key] = 0
+            if cfg.weight_recorder is not None:
+                self._plastic_n_syn[key] = self._syn_counts[key]
 
     def read_plastic_events(self, clear: bool = True) -> Dict[str, Dict[str, np.ndarray]]:
         """
@@ -378,13 +431,27 @@ class Registry:
 
     def apply_explored_parameters(self, sampled_values: Dict[str, float]):
         """
-        Applies exploratory values to active NEST populations and synapses where supported.
+        Realizes the sampled action on the live network:
+
+        - populations: one dispersion draw per subject (array `set`, per-node
+          loop fallback for device-only parameters);
+        - static synapses: one array realization per projection (`weight` of
+          every synapse draws around the action);
+        - STDP connections: scalar hyper-parameters (one synapse model per
+          projection).
+
+        `recorded = applied`: each site recorder stores exactly the (x̂, σ) the
+        network realized. Failures land in `last_apply_errors` (cleared per
+        call) — never swallowed.
+
         TODO(perf): this per-step re-sampling + `set()` of every neuron and every
         synapse dominates the step cost at full population sizes (~1.5 s/step);
         the exploration is required for personalization, so it is left in place.
         """
-        # Apply to populations
         t_now = self._now_ms()
+        self.last_apply_errors = []
+
+        # Apply to populations
         for pop_name, pop in self.population_cfgs.items():
             if pop.node_collection is None:
                 continue
@@ -393,34 +460,49 @@ class Registry:
                 full_key = f"pop_{pop_name}_{p_name}"
                 if full_key in sampled_values:
                     val = sampled_values[full_key]
-                    sampled_arr = param_obj.sample_population(pop.n, center=val)
-                    update_dict[p_name] = sampled_arr.tolist()
-            if update_dict:
-                try:
-                    pop.node_collection.set(update_dict)
-                except Exception:
-                    continue
-                for p_name, param_obj in pop.params.items():
-                    full_key = f"pop_{pop_name}_{p_name}"
-                    if full_key in sampled_values:
-                        # recorded = applied: the site recorder holds exactly
-                        # the sample the network just realized
-                        self.site_recorder(full_key).record_sample(
-                            t_now, float(sampled_values[full_key]), param_obj.sigma)
+                    update_dict[p_name] = param_obj.sample_population(pop.n, center=val)
+            if not update_dict:
+                continue
+            try:
+                self._set_nodes(pop.node_collection, update_dict)
+            except Exception as exc:
+                self.last_apply_errors.append((f"pop_{pop_name}", str(exc)))
+                continue
+            for p_name, param_obj in pop.params.items():
+                full_key = f"pop_{pop_name}_{p_name}"
+                if full_key in sampled_values:
+                    # recorded = applied: the site recorder holds exactly
+                    # the sample the network just realized
+                    self.site_recorder(full_key).record_sample(
+                        t_now, float(sampled_values[full_key]), param_obj.sigma)
 
         # Apply to connections (synapses)
         for conn_key, conn in self.connection_cfgs.items():
-            updates = {}
-            for p_name in conn.parameters.keys():
+            updates: Dict[str, Any] = {}
+            for p_name, param_obj in conn.parameters.items():
                 full_key = f"conn_{conn_key}_{p_name}"
-                if full_key in sampled_values:
-                    updates[p_name] = float(sampled_values[full_key])
+                if full_key not in sampled_values:
+                    continue
+                val = float(sampled_values[full_key])
+                if conn.weight_recorder is not None:
+                    # STDP projection: the sampled hyper-parameters are scalars
+                    updates[p_name] = val
+                else:
+                    # static synapses: one array realization for the projection
+                    n_syn = self.synapse_count(conn_key)
+                    if n_syn <= 0:
+                        continue
+                    updates[p_name] = param_obj.sample_population(
+                        n_syn, center=val).tolist()
             if not updates:
                 continue
             try:
                 self.synapses(conn_key).set(updates)
-            except Exception:
+            except Exception as exc:
+                self.last_apply_errors.append((f"conn_{conn_key}", str(exc)))
                 continue
-            for p_name, val in updates.items():
-                self.site_recorder(f"conn_{conn_key}_{p_name}").record_sample(
-                    t_now, val, conn.parameters[p_name].sigma)
+            for p_name, param_obj in conn.parameters.items():
+                full_key = f"conn_{conn_key}_{p_name}"
+                if full_key in sampled_values:
+                    self.site_recorder(full_key).record_sample(
+                        t_now, float(sampled_values[full_key]), param_obj.sigma)

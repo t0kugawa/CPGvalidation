@@ -33,8 +33,8 @@ def test_params_have_independent_rng():
 
 
 # --- Important: natural-gradient step maps back losslessly ---
-# (Superseded: unit-invariance of the perturbation-advantage natural gradient is
-#  covered by tests/test_variantb_metric.py::test_step_is_unit_invariant.)
+# (Superseded: unit-covariance of the persisted natural gradient is covered by
+#  tests/test_strategy.py::test_step_is_unit_covariant.)
 
 
 # --- Critical 2: STDP weight deltas reach the noise recorder during a step ---
@@ -50,12 +50,19 @@ def test_synaptic_parameters_reach_the_right_projection(nest_kernel):
     reg.apply_explored_parameters(explored)
     for key, cfg in reg.connection_cfgs.items():
         col = reg.synapses(key)
-        got = {round(float(w), 6) for w in col.get("weight")}
+        w = np.asarray(col.get("weight"), dtype=float)
         if cfg.model == "static_synapse":
-            want = round(float(explored[f"conn_{key}_weight"]), 6)
-            assert got == {want}, f"{key}: explored weight not applied"
+            want = float(explored[f"conn_{key}_weight"])
+            sigma = cfg.parameters["weight"].sigma
+            # per-synapse realization around the explored sample (spec §5.2)
+            assert abs(w.mean() - want) < 5.0 * sigma / np.sqrt(w.size) + 1e-9, \
+                f"{key}: explored weight not realized around the sample"
+            assert w.std() > 0.0, f"{key}: no per-synapse dispersion"
+            # recorded = applied: the recorder holds exactly the applied sample
+            assert reg.site_recorder(f"conn_{key}_weight").latest_sample()[0] == want
         else:
             seed = round(float(cfg.extra_syn_spec["weight"]), 6)
+            got = {round(float(x), 6) for x in w}
             assert got == {seed}, f"{key}: STDP weight must not be overwritten"
 
 
