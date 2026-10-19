@@ -547,16 +547,16 @@ is a draw around the action (not the mean of draws); (c) a monkeypatched failing
 - Create: `tests/test_persona_integration.py`
 - Modify: any test still red from the API change
 
-- [ ] **Step 1: Write the smoke test** — build the two-leg CPG tiny (n_rg=4, n_mn=4, n_int=4, n_aff=4) with
+- [x] **Step 1: Write the smoke test** — build the two-leg CPG tiny (n_rg=4, n_mn=4, n_int=4, n_aff=4) with
   `BrainStem` + `BaseDrive`; run 12 `agent.sample_actions/apply/step` iterations on synthetic outputs;
   assert: `strategy.F` finite and symmetric; `G` non-zero; every site/σ finite; σ within bounds;
   `registry.last_apply_errors == []`; every producer recorder's `stats()["n"] > 0`.
-- [ ] **Step 2: Run the full suite** with the Global-Constraints command; fix remaining fallout.
-- [ ] **Step 3: Run a fast end-to-end**:
+- [x] **Step 2: Run the full suite** with the Global-Constraints command; fix remaining fallout.
+- [x] **Step 3: Run a fast end-to-end**:
   `wsl -e bash -lc "cd /mnt/d/CPGvalidation && OPENBLAS_NUM_THREADS=1 MUJOCO_GL=osmesa /home/t0kgw/.virtualenvs/KinematicsCPG/bin/python run_validation.py --fast --out /mnt/d/CPGvalidation/validation_mvp"`;
   verify `run.h5` carries `agent/means`, `agent/sigmas`, `agent/trace_final`, `agent/credit_final`
   and the plots are produced.
-- [ ] **Step 4: Commit** — `git commit -m "test(persona): integration smoke; full-suite green after single-sigma rework"`
+- [x] **Step 4: Commit** — `git commit -m "test(persona): integration smoke; full-suite green after single-sigma rework"`
 
 ---
 
