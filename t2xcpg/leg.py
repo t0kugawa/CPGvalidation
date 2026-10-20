@@ -171,12 +171,14 @@ class Leg:
             Population(model="izhikevich", n=self.n_int, params=inh(), name=f"in_ib_f_{self.leg}")
         )
 
-        # Excitatory relay interneurons (InE, InF)
+        # Half-centre inhibitory interneurons (InE, InF): fast-spiking
+        # (izh_inh_params in cpg_2legs_fast). With exc() the two half-centres
+        # are co-active instead of alternating.
         self.in_e = self.registry.create_population(
-            Population(model="izhikevich", n=self.n_int, params=exc(), name=f"in_e_{self.leg}")
+            Population(model="izhikevich", n=self.n_int, params=inh(), name=f"in_e_{self.leg}")
         )
         self.in_f = self.registry.create_population(
-            Population(model="izhikevich", n=self.n_int, params=exc(), name=f"in_f_{self.leg}")
+            Population(model="izhikevich", n=self.n_int, params=inh(), name=f"in_f_{self.leg}")
         )
 
         # Muscles (Parrot readout)
@@ -268,7 +270,7 @@ class Leg:
         # --- Rhythm-generator half-centre THROUGH the InE/InF relays
         #     (cpg_2legs_fast): RGE->InE (exc), InE-|RGF, RGF->InF (exc), InF-|RGE.
         self._connect(f"rg_e_{leg}", f"in_e_{leg}", weight=12.0, p=0.15)   # W_RG2INE, P_RG_RECIP_E
-        self._connect(f"in_e_{leg}", f"rg_f_{leg}", weight=-8.0, p=0.30)   # W_INE2RGF
+        self._connect(f"in_e_{leg}", f"rg_f_{leg}", weight=-8.0, p=0.15)   # W_INE2RGF, P_RG_RECIP_E
         self._connect(f"rg_f_{leg}", f"in_f_{leg}", weight=18.0, p=0.30)   # W_RG2INF, P_RG_RECIP_F
         self._connect(f"in_f_{leg}", f"rg_e_{leg}", weight=-48.0, p=0.30)  # W_INF2RGE
 
@@ -299,12 +301,18 @@ class Leg:
         self._connect(f"ia_f_in_{leg}", f"in_f_{leg}", weight=6.0, p=0.25)
 
         # --- Recurrent (Renshaw) inhibition (project values) ---
-        self._connect(f"m_e_{leg}", f"r_e_{leg}", weight=15.0, p=0.50)     # M-E -> R-E
-        self._connect(f"r_e_{leg}", f"m_e_{leg}", weight=-20.0, p=0.50)    # R-E -| M-E
-        self._connect(f"r_e_{leg}", f"ia_e_{leg}", weight=-12.0, p=0.40)   # R-E -| Ia-E
-        self._connect(f"m_f_{leg}", f"r_f_{leg}", weight=15.0, p=0.50)     # M-F -> R-F
-        self._connect(f"r_f_{leg}", f"m_f_{leg}", weight=-20.0, p=0.50)    # R-F -| M-F
-        self._connect(f"r_f_{leg}", f"ia_f_{leg}", weight=-12.0, p=0.40)   # R-F -| Ia-F
+        # Renshaw recurrent inhibition, attenuated to 0.2x. This loop is net
+        # *positive* feedback here: M excites R, R inhibits the motor pool, but
+        # R also inhibits the Ia interneuron which inhibits the motor pool, so R
+        # disinhibits M. At full gain it held the motor pools at the 0.2 ms step
+        # cap (2418 Hz while RG-F ran at 79 Hz); at 0.2x the motor pools track RG
+        # (`test_results/renshaw_fix.py`).
+        self._connect(f"m_e_{leg}", f"r_e_{leg}", weight=3.0, p=0.50)      # M-E -> R-E
+        self._connect(f"r_e_{leg}", f"m_e_{leg}", weight=-4.0, p=0.50)     # R-E -| M-E
+        self._connect(f"r_e_{leg}", f"ia_e_{leg}", weight=-2.4, p=0.40)    # R-E -| Ia-E
+        self._connect(f"m_f_{leg}", f"r_f_{leg}", weight=3.0, p=0.50)      # M-F -> R-F
+        self._connect(f"r_f_{leg}", f"m_f_{leg}", weight=-4.0, p=0.50)     # R-F -| M-F
+        self._connect(f"r_f_{leg}", f"ia_f_{leg}", weight=-2.4, p=0.40)    # R-F -| Ia-F
 
         # --- Ib Golgi tendon organ, disynaptic via Ib interneurons (project values) ---
         # Extensor Ib: GTO -> InIb-E -> {M-E inh, M-F exc, RGF inh}

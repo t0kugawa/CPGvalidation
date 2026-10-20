@@ -69,11 +69,15 @@ class L2CPG(CPGAdapter):
         Connects Brainstem to Extensor (RGE) and Flexor (RGF) generators of all
         legs. The brainstem drive frequency is equal for both legs; the leading
         leg receives a larger synaptic weight so the first step emerges from it.
+
+        The reference's BS->RG is an STDP projection that adapts down. A static
+        18 pins RG at the 0.2 ms step cap; a seed of 4.0 puts it in the
+        reference's measured band (85-229 Hz). PERSONA refines from here.
         """
         for leg_key, leg in self.legs.items():
             gain = self.leading_gain if leg_key == self.leading_leg else 1.0
-            self._connect("BS_in_e", f"rg_e_{leg_key}", weight=18.0 * gain, p=0.45)
-            self._connect("BS_in_f", f"rg_f_{leg_key}", weight=18.0 * gain, p=0.45)
+            self._connect("BS_in_e", f"rg_e_{leg_key}", weight=4.0 * gain, p=0.45)
+            self._connect("BS_in_f", f"rg_f_{leg_key}", weight=4.0 * gain, p=0.45)
 
     def _build_base_connections(self):
         """
