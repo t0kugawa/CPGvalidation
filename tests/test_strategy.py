@@ -103,7 +103,7 @@ def test_warmup_and_noise_not_in_trace():
     assert set(out) == {"p"}                      # noise never gets a step
 
 
-def test_noise_score_uses_declared_scale_from_the_first_sample():
+def test_noise_score_uses_producer_current_value_from_the_first_sample():
     beta = 0.5
     fm = FisherMatrix(param_names=[], noise_names=["n"], beta=beta)
     fm.step({}, {"n": (0.5, 2.0)}, np.array([1.0, 1.0]))
@@ -113,7 +113,7 @@ def test_noise_score_uses_declared_scale_from_the_first_sample():
 
     fm0 = FisherMatrix(param_names=[], noise_names=["n"], beta=beta)
     fm0.step({}, {"n": (0.5, 0.0)}, np.array([1.0, 1.0]))
-    assert fm0.F[0, 0] == 0.0                      # no declared scale = no influence
+    assert fm0.F[0, 0] == 0.0                      # no current value = no influence
     assert fm0.noise_scales == {}
 
 

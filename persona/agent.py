@@ -196,8 +196,8 @@ class Agent:
 
         # Producer deltas: fresh since the previous step; a step without new
         # records contributes 0.0, never a stale value. The second element is
-        # the producer's declared reference scale R (0.0 = no influence); no
-        # estimation and no warm-up gate.
+        # the producer's current value at registration (0.0 = no influence);
+        # no estimation and no warm-up gate.
         noise: Dict[str, tuple] = {}
         for rec_name, rec in self.registry.producer_recorders().items():
             delta = rec.take_delta()

@@ -562,10 +562,11 @@ is a draw around the action (not the mean of draws); (c) a monkeypatched failing
 
 ### Task 7: Fresh-eyes review
 
-- [ ] **Step 1:** Dispatch `superpowers:requesting-code-review` on the branch diff
+- [x] **Step 1:** Dispatch `superpowers:requesting-code-review` on the branch diff
   (`git diff f611e78..HEAD` + the spec).
-- [ ] **Step 2:** Apply fixes for every finding; re-run the full suite.
-- [ ] **Step 3:** Commit — `git commit -m "fix(persona): review findings"`.
+- [x] **Step 2:** Apply fixes for every finding; re-run the full suite.
+- [x] **Step 3:** Commit — `fix(persona): review findings and declared-scale noise scoring`
+  (`1ba4ec4`; includes the B noise-scale follow-up).
 
 **Reviewer checklist (added during T3, from test calibration):**
 - **Credit gain.** `G = βG + (1−β)X̄Aᵀ` has stationary mean `(1−β)·E[trace·A]`
@@ -576,26 +577,29 @@ is a draw around the action (not the mean of draws); (c) a monkeypatched failing
   (`(1−β) = 0.005`), or raise the effective-rate question with the user
   (do not silently rescale `g`).
 
-### Task 7 follow-up: declared noise scales (B)
+### Task 7 follow-up: noise scale from the producer's current value (B)
 
 Agreed in chat (2026-10-20): keep the natural-noise block in `F`, but stop
-estimating its scale. A noise producer is scored with a **declared fixed
-reference scale** `R`, fixed at registration:
+estimating its scale. A noise producer is scored with its **current value at
+registration** `R`, held fixed for the run:
 
 - `s_noise = δ/R²`; no EWMA τ, no warm-up, no `n > 2` gate;
 - no fresh delta (`δ = 0`) → score 0; `R = 0`/absent → no influence;
-- STDP: `R` = the projection's initial `Wmax`;
-- Poisson: `R` = nominal group rate (Ia 10 Hz, Ib 5 Hz);
+- STDP: `R` = its current `Wmax`;
+- Poisson: `R` = its current rate (Ia 10 Hz, Ib 5 Hz);
 - CUT: rest rate is 0, so it declares `R = 10 Hz` explicitly.
+
+The scale is normalisation only; PERSONA's `F` decides the actual influence.
 
 - [x] `NoiseRecorder(scale=...)`, `producer_recorder(scale=...)`,
   `create_relay(noise_scale=...)`.
 - [x] Agent passes `(δ, R)`; strategy scores `δ/R²`; `noise_scales` persisted in h5.
-- [x] Tests: declared scale from the first sample, zero scale → no influence,
-  registry scale table (Wmax / nominal / CUT), freshness unchanged.
-- [ ] Fast e2e: record `diag(F)` site vs noise, `max|Δμ|`, loss; compare with the
-  gated run. A zero-noise control must be identical to the gated run apart from
-  the noise rows (the gate only changed the noise rows).
+- [x] Tests: current value from the first sample, zero value → no influence,
+  registry value table (Wmax / rate / CUT), freshness unchanged.
+- [x] Fast e2e (`validation_mvp_b`): noise `diag(F)` max 0.457 (gate 3.1e7,
+  pre-gate 6.8e22), median 2.3e-3; loss last-10 0.8725 (gate 0.8594);
+  `max|Δμ|` 0.438 (gate 0.491). With `R = Wmax`, STDP noise is ~5.5e-7
+  (normalised away); Poisson survives (Ib dominates at 0.46).
 
 ## Deferred: noise-module characterization matrix
 
@@ -605,9 +609,9 @@ and accuracy**:
 
 - **Noise sources:** all off; natural STDP + Poisson on but unscored; STDP only;
   Poisson only; one sensory group at a time; synthetic producers with known δ.
-- **Scale choice:** declared natural (`Wmax`, nominal rate); 0.1× / 1× / 10×;
+- **Scale choice:** producer's current value (`Wmax`, rate); 0.1× / 1× / 10×;
   estimated τ (previous design); no noise block (A).
-- **Algorithms:** current single-σ/declared-R; alternative noise scorings.
+- **Algorithms:** current single-σ/current-value R; alternative noise scorings.
 - **Metrics:** steps to loss threshold and final loss; parameter error at
   steady state; `max|Δμ|`, `cond(F)`, `min eig(F)`, bound hits; per-producer
   influence (norm of its F column / its contribution to `g`).
@@ -619,7 +623,7 @@ and accuracy**:
 - Spec coverage: §5.1→T1; §5.2→T4; §5.3→T2; §5.4→T3; §5.5→T2+T4; §5.6→T3+T5; §8→spread; V22→T1;
   V23→T2; V24→T3; V25→T1+T3; V26→T2; V27→T4; V28→T5; V29→T3; V30→T3+T5.
 - Type consistency: `site_recorder`/`producer_recorder` names, `(Δθ, σ, Δlogσ)` site tuples,
-  `(δ, τ)` noise tuples, `latest_sample`/`take_delta` used identically in T2–T4.
+  `(δ, R)` noise tuples, `latest_sample`/`take_delta` used identically in T2–T4.
 - Review Focus lines each get a test: RF1→T3 (`test_no_sigma_square_gain_and_unit_invariance`, `test_sigma_max_default…`),
   RF2→T3+T5 (recorder equality, `realize_every_k` test), RF3→T4 (device loop), RF4→T2 (`test_take_delta_is_fresh`),
   RF5→T2 (`test_site_recorder_per_site_unique_across_legs`).

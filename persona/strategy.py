@@ -40,7 +40,8 @@ class FisherMatrix:
     Channel layout (``n = 2·|S| + |P|``): site μ rows, site σ rows, then noise
     producer rows. Noise producers get Fisher rows (they shape the step length
     through F) but **no trace rows** — ``a`` is zero for them. Their score is
-    ``s^noise = δ/R²`` with the declared reference scale ``R`` (no estimation).
+    ``s^noise = δ/R²`` with the producer's current value ``R`` at registration
+    (no estimation).
 
     For each site ``s`` (sampling-time snapshot):
 
@@ -173,9 +174,9 @@ class FisherMatrix:
 
         ``sites[key] = (Δθ, σ_sampled, Δlogσ)`` for every site (sampling-time
         values); ``noise[name] = (δ, R)`` for every producer this step, where
-        `R` is the declared reference scale (missing producers contribute
-        δ=0); ``advantage`` is the per-component advantage vector A(t) (length
-        2, one per limb).
+        `R` is the producer's current value at registration (missing producers
+        contribute δ=0); ``advantage`` is the per-component advantage vector
+        A(t) (length 2, one per limb).
 
         Updates F/Xbar/G, counts the step, and returns the per-site Δμ (all
         zero during warm-up).
@@ -196,8 +197,9 @@ class FisherMatrix:
             a[m + i] = float(dlog)
         for j, name in enumerate(self.noise_names):
             delta, scale = noise.get(name, (0.0, 0.0))
-            # Declared reference scale: s = δ/R², with no estimation, no
-            # warm-up and no per-step gate. R ≤ 0 (or absent) = no influence.
+            # Producer's current value at registration: s = δ/R², with no
+            # estimation, no warm-up and no per-step gate. R ≤ 0 (or absent)
+            # means no influence.
             r = float(scale)
             if r > 0.0:
                 s[2 * m + j] = float(delta) / (r * r)

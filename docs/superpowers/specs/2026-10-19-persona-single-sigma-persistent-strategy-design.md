@@ -48,10 +48,10 @@ Four coupled defects in the current PERSONA module:
 - **G3 late credit.** `X̄_t = βX̄_{t−1} + (1−β)a_t` (PERSONA actions),
   `G_t = βG_{t−1} + (1−β)X̄_tA_tᵀ`, `Δμ = η_μ(F_t+λI)⁻¹(G_t·1₂)` — every dt.
 - **G4 noise accounting.** STDP projections and sensory Poisson generators get
-  producer recorders; their deltas enter `F` with a declared fixed reference
-  scale `R` (`s = δ/R²`; STDP: initial `Wmax`, Poisson: nominal rate, CUT:
-  10 Hz); they never enter the trace/credit; they change step length through
-  `F`.
+  producer recorders; their deltas enter `F` with the producer's current value
+  at registration as the scale (`s = δ/R²`; STDP: current `Wmax`, Poisson:
+  current rate, CUT: 10 Hz at rest); they never enter the trace/credit; they
+  change step length through `F`.
 - **G5 NEST integration audit.** All `nest.Create`/`nest.Connect` go through
   `Registry` helpers; site recorder keys are unique by construction; apply
   failures are recorded and logged, never swallowed.
@@ -83,9 +83,11 @@ Four coupled defects in the current PERSONA module:
 - Advantage `A(t) ∈ R²` (one per leg), `A_i = b_i(phase_i) − E_i`, `b` the
   per-component, per-phase moving-average baselines (unchanged, α = 0.90).
 - Noise producer `p`: each STDP projection and each sensory Poisson group;
-  per-step delta `δ_p(t)`; declared fixed reference scale `R_p` (STDP: initial
-  `Wmax`; Poisson: nominal group rate; CUT: 10 Hz), set at registration. No
-  estimation and no warm-up.
+  per-step delta `δ_p(t)`; initial scale `R_p(0)` = the producer's current
+  value at registration (STDP: current `Wmax`; Poisson: current nominal rate;
+  CUT: 10 Hz at rest), held fixed for the run. No estimation and no warm-up.
+  The scale is normalisation only; whether the producer matters is decided by
+  the strategy (`F`).
 - Forgetting factor `β = 1 − dt/τ_mem`; `τ_mem` default 2.0 s (≈ a few
   locomotion cycles) → `β = 0.995` at `dt = 10 ms`.
 
@@ -104,7 +106,7 @@ producers. For each site `s` (sampling-time values):
 
 For each producer `p`:
 
-    s^N_p = δ_p / R_p²             # declared scale; δ never enters the trace
+    s^N_p = δ_p / R_p²             # R_p = producer's current value at registration
     a row = 0 (excluded from X̄ and G)
 
 Every step `t` (after the first `warmup = 3` steps, updates are applied; the
@@ -233,13 +235,14 @@ class NoiseRecorder:
     def stats(self) -> dict                         # diagnostics only
 ```
 
-- **Declared producer scale.** Every producer recorder carries a fixed
-  reference scale `R` supplied at registration (never estimated, never
-  updated): STDP → the projection's initial `Wmax`; Poisson → the nominal
-  group rate. CUT rests at 0 Hz, so it declares `R = 10 Hz` explicitly. The
-  strategy scores a producer as `s = δ/R²`; `R = 0`/absent means no influence,
-  and a step with no fresh delta uses `δ = 0` (score 0). There is no warm-up
-  and no "n ≥ 2" gate: the first declared delta counts at full weight.
+- **Initial noise scale = the producer's current value.** Every producer
+  recorder carries a fixed reference scale `R` supplied at registration (never
+  estimated, never updated): STDP → its current `Wmax`; Poisson → its current
+  rate. CUT rests at 0 Hz, so it declares `R = 10 Hz` explicitly. The strategy
+  scores a producer as `s = δ/R²`; `R = 0`/absent means no influence, and a
+  step with no fresh delta uses `δ = 0` (score 0). There is no warm-up and no
+  "n ≥ 2" gate: the first recorded delta counts at full weight. The scale is
+  normalisation only — the strategy's `F` decides the actual influence.
 - β-EWMA statistics (`m`, `q`, `std`, `t`, `n`) remain available for
   diagnostics with constant memory, but are **not** used for scoring.
 - **Freshness**: `take_delta` clears; a step with no new record yields `None`
@@ -405,9 +408,9 @@ h5/figures).
   optimized set.)*
 - **V23** Per-site and per-producer noise recorders with unique keys
   (`site:*`, `producer:stdp:*`, `producer:poisson:*`), read-and-clear
-  freshness, declared fixed producer scale `R` for scoring (`δ/R²`; no
-  estimation/gate); β-EWMA stats kept for diagnostics only. *(Fixes tag
-  collisions and stale deltas.)*
+  freshness, producer's current value at registration as the scoring scale
+  (`δ/R²`; no estimation/gate); β-EWMA stats kept for diagnostics only.
+  *(Fixes tag collisions and stale deltas.)*
 - **V24** Persisted two-type strategy, updated every dt, never pruned:
   `F = βF + (1−β)s sᵀ` over `[μ-score; σ-score; noise-score]` channels;
   `X̄ = βX̄ + (1−β)a` over `[Δθ/σ²; Δlogσ]` (μ rows in score units, §4 Units);

@@ -222,7 +222,7 @@
       <div class="math">
         μ-channel: &nbsp; s<sub>i</sub> = Δθ<sub>i</sub>/σ<sub>i</sub>² &nbsp; (z<sub>i</sub> = Δθ<sub>i</sub>/σ<sub>i</sub>)<br>
         σ-channel: &nbsp; d<sub>i</sub> = z<sub>i</sub>² − 1<br>
-        noise k: &nbsp; s<sub>k</sub> = δ<sub>k</sub>/τ<sub>k</sub>² &nbsp; (τ<sub>k</sub> = recorded scale)
+        noise k: &nbsp; s<sub>k</sub> = δ<sub>k</sub>/R<sub>k</sub>² &nbsp; (R<sub>k</sub> = producer's current value at registration)
       </div>
       <div class="math">F<sub>t</sub> = β·F<sub>t−1</sub> + (1−β)·s<sub>t</sub>s<sub>t</sub><sup>T</sup> &nbsp;&nbsp;&nbsp; solve with (F<sub>t</sub> + λI)</div>
       <p>Persisted across the whole run — stance, swing, everything. Noise is captured here (read-only channels).</p>
@@ -292,7 +292,7 @@
     <tr><td>σ update: exact expression (β? Ā vs A? caps?)</td><td><span class="chip open">open</span></td><td>keep log-variance rule from the sketch</td></tr>
     <tr><td>σ-channels in the credit trace?</td><td><span class="chip open">open</span></td><td>σ changes are also “ours” — include as own rows, or exclude?</td></tr>
     <tr><td>Applied marginal variance 2σ²; realization cadence</td><td><span class="chip open">open</span></td><td>per-synapse redraws every dt = known perf hot spot</td></tr>
-    <tr><td>Noise scale τ<sub>k</sub>; does noise enter G at all?</td><td><span class="chip open">open</span></td><td>proposed: τ<sub>k</sub> = recorded EWMA std; noise only in F</td></tr>
+    <tr><td>Noise scale R<sub>k</sub>; does noise enter G at all?</td><td><span class="chip agreed">agreed</span></td><td>R<sub>k</sub> = producer's current value at registration; noise only in F; F decides influence</td></tr>
     <tr><td>Bug fixes</td><td><span class="chip agreed">agreed</span></td><td>σ-update order; stale recorder deltas; tag collisions; registry routing; silent apply failures</td></tr>
   </table>
 

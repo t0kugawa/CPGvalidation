@@ -12,11 +12,12 @@ class NoiseRecorder:
       source (STDP weight increments, sensory Poisson rate changes) and is
       read-and-clear, so a stale delta can never leak into a later step.
 
-    A producer also carries a **declared reference scale** `R` (STDP: Wmax,
-    Poisson: nominal rate), fixed at registration. The strategy scores the
-    delta as `δ/R²`; there is no estimation, no warm-up and no per-step gate.
-    Missing/zero scale means the producer has no influence. Statistics remain
-    available for diagnostics only and are never used for scoring.
+    A producer also carries the **current value of its signal at registration**
+    `R` (STDP: Wmax, Poisson: rate), held fixed for the run. The strategy
+    scores the delta as `δ/R²`; there is no estimation, no warm-up and no
+    per-step gate. Missing/zero value means the producer has no influence.
+    Statistics remain available for diagnostics only and are never used for
+    scoring.
     """
     def __init__(self, name: str, beta: float = 0.995,
                  scale: float | None = None):

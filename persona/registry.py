@@ -72,9 +72,9 @@ class Registry:
         """Get-or-create the recorder of one noise producer (e.g. 'stdp:cut_rge_L',
         'poisson:cut_L'); the registered name is prefixed with 'producer:'.
 
-        `scale` is the declared reference `R` used to score the producer's
-        delta (`δ/R²`). It is fixed by the caller at registration time; a later
-        call without `scale` leaves the existing value untouched.
+        `scale` is the producer's current value at registration, used to score
+        its delta (`δ/R²`). It is fixed by the caller at registration time; a
+        later call without `scale` leaves the existing value untouched.
         """
         full = name if name.startswith("producer:") else f"producer:{name}"
         rec = self.noise_recorders.get(full)
@@ -193,8 +193,8 @@ class Registry:
             self.site_recorder(f"conn_{conn_key}_{p_name}").record_sample(
                 self._now_ms(), param_obj.mean, param_obj.sigma)
         if cfg.weight_recorder is not None:
-            # Declared noise scale: the projection's initial weight ceiling.
-            # Fixed here (not the live Wmax site, which PERSONA may move).
+            # Noise scale: the projection's current weight ceiling at
+            # registration (not the live Wmax site, which PERSONA may move).
             wmax = cfg.parameters.get("Wmax")
             self.producer_recorder(
                 f"stdp:{conn_key}",
@@ -217,9 +217,10 @@ class Registry:
           `pop_name` (defaults to `pg_key`);
         - `noise_name` attaches a producer recorder that `set_relay_rate` feeds
           with the per-step rate delta;
-        - `noise_scale` is the declared reference rate `R` for scoring that
-          delta (`δ/R²`); it defaults to the nominal `rate`. A zero rest rate
-          (CUT) must pass an explicit scale or the producer has no influence.
+        - `noise_scale` is the producer's current value at registration (the
+          nominal `rate` by default), used to score that delta (`δ/R²`). A zero
+          rest rate (CUT) must pass an explicit value or the producer has no
+          influence.
         """
         pg = nest.Create("poisson_generator", n, params={"rate": float(max(0.0, rate))})
         parrot = nest.Create("parrot_neuron", n)
@@ -247,9 +248,9 @@ class Registry:
 
         if noise_name is not None:
             rec_name = f"producer:poisson:{noise_name}"
-            declared = (float(noise_scale) if noise_scale is not None
-                        else float(max(0.0, rate)))
-            self.producer_recorder(f"poisson:{noise_name}", scale=declared)
+            value = (float(noise_scale) if noise_scale is not None
+                     else float(max(0.0, rate)))
+            self.producer_recorder(f"poisson:{noise_name}", scale=value)
             self._relay_noise[pg_key] = rec_name
             self._relay_last[pg_key] = float(max(0.0, rate))
 
