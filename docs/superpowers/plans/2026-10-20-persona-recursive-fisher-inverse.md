@@ -508,16 +508,17 @@ git commit -m "docs(persona): record recursive-inverse acceptance and benchmark"
 - Produces:
   - `run_benchmark(out_dir, n_values=(64, 128, 256, 458, 512, 1024),
     seeds=(0, 1, 2), steps=30, refresh_every=10, repeats=3,
-    make_figures=True) -> dict`;
+    make_figures=True, accuracy_steps=None, accuracy_n_values=None) -> dict`;
   - `main(argv=None) -> int` with `--out`, `--quick`, `--no-figures`;
   - `performance.csv`: `n, mode, seed, repeat, step_ms`;
   - `accuracy.csv`: `n, seed, step, k, rel_error_decaying,
     rel_error_constant, cosine_constant, dmu_rel_error_constant`;
   - `summary.csv`: `table, group, metric, mean, std, median, q25, q75`;
   - `performance.png`, `accuracy.png`;
-  - `recursive_inverse_results.xlsx` when `openpyxl` is importable.
+  - `recursive_inverse_results.xlsx` when `openpyxl` or `xlsxwriter` is
+    importable.
 
-- [ ] **Step 1: Write the failing smoke test**
+- [x] **Step 1: Write the failing smoke test**
 
 Create `tests/test_bench_recursive_inverse.py`:
 
@@ -546,7 +547,7 @@ def test_benchmark_writes_tables_and_figures(tmp_path):
     assert (tmp_path / "accuracy.png").exists()
 ```
 
-- [ ] **Step 2: Run the test to verify failure**
+- [x] **Step 2: Run the test to verify failure**
 
 Run:
 `wsl -e bash -lc "cd /mnt/d/CPGvalidation && OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 /home/t0kgw/.virtualenvs/KinematicsCPG/bin/python -m pytest tests/test_bench_recursive_inverse.py -v"`
@@ -554,7 +555,7 @@ Run:
 Expected: FAIL with `ModuleNotFoundError: No module named
 'bench_recursive_inverse'`.
 
-- [ ] **Step 3: Implement `bench_recursive_inverse.py`**
+- [x] **Step 3: Implement `bench_recursive_inverse.py`**
 
 The script is pure numpy/pandas/matplotlib; it does not create a NEST
 network. Use `matplotlib.use("Agg")` before importing `pyplot`.
@@ -605,7 +606,7 @@ def _layout(n):
    panels: (a) mean `rel_error_decaying` vs `k` for `n=458` (log y, dashed
    1e-12 reference); (b) mean `rel_error_constant` vs `k` for each `n`
    (log y, shaded std).
-6. **XLSX:** if `import openpyxl` succeeds, write
+6. **XLSX:** if `openpyxl` or `xlsxwriter` is importable, write
    `recursive_inverse_results.xlsx` with sheets `performance`, `accuracy`,
    `summary`; otherwise skip silently (the CSVs are the fallback).
 7. Write `README.md` in `out_dir` with the run command, column meanings,
@@ -616,25 +617,26 @@ def _layout(n):
 `benchmarks/recursive_inverse`, `--quick` uses `n_values=(64,)`,
 `seeds=(0,)`, `steps=8`, `repeats=1`, and `--no-figures`.
 
-- [ ] **Step 4: Run the smoke test to verify pass**
+- [x] **Step 4: Run the smoke test to verify pass**
 
 Run:
 `wsl -e bash -lc "cd /mnt/d/CPGvalidation && OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 /home/t0kgw/.virtualenvs/KinematicsCPG/bin/python -m pytest tests/test_bench_recursive_inverse.py -v"`
 
 Expected: PASS.
 
-- [ ] **Step 5: Run the full harness and inspect the artifacts**
+- [x] **Step 5: Run the full harness and inspect the artifacts**
 
 Run:
 `wsl -e bash -lc "cd /mnt/d/CPGvalidation && OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 /home/t0kgw/.virtualenvs/KinematicsCPG/bin/python bench_recursive_inverse.py --out benchmarks/recursive_inverse"`
 
 Expected: `performance.csv`, `accuracy.csv`, `summary.csv`,
-`performance.png`, `accuracy.png`, and `README.md` exist. Check that
+`performance.png`, `accuracy.png`, `recursive_inverse_results.xlsx` (when an
+Excel writer is available), and `README.md` exist. Check that
 `accuracy.csv` has `rel_error_decaying < 1e-8`, `rel_error_constant` is
 ~0 at `k=0`, and grows with `k`; check that the performance plot shows the
 direct solve above the recursive modes at large `n`.
 
-- [ ] **Step 6: Update the design doc and commit**
+- [x] **Step 6: Update the design doc and commit**
 
 Add a "Results" subsection to the design doc with the full-harness
 timings and the worst `rel_error_constant` at `k = refresh_every - 1`. Tick

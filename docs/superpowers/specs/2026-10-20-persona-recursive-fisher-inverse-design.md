@@ -158,8 +158,8 @@ maintain per-phase metrics).
 - A9. Microbenchmark recorded at n = 458: old direct full step, recursive
   no-refresh, recursive `K_max=10`, and direct solve-only.
 - A10. The benchmark harness writes `performance.csv`, `accuracy.csv`,
-  `summary.csv` (and `.xlsx` when `openpyxl` is available), plus
-  `performance.png` and `accuracy.png`.
+  `summary.csv` (and `.xlsx` when an Excel writer, `openpyxl` or
+  `xlsxwriter`, is available), plus `performance.png` and `accuracy.png`.
 - A11. A smoke test runs the harness at small n and asserts the files and
   columns exist, that the decaying-ridge error is < 1e-8, and that the
   constant-ridge error is zero at refresh steps and grows between them.
@@ -183,6 +183,17 @@ Implemented on 2026-10-20 on `mujoco_sim`.
   The solve-only figure is not a full step and is shown only to match the
   original measurement. The fair full-step ordering is
   `no-refresh < K_max=10 < old direct`. Timings are BLAS/CPU-dependent.
+- **Full harness** (`benchmarks/recursive_inverse`, median of 3 repeats over
+  3 seeds): at `n=1024`, direct full step `59.02 ms`, recursive `K_max=10`
+  `45.31 ms` (1.30x), recursive no-refresh `30.59 ms` (1.93x); at `n=458`,
+  `7.70`, `6.78` (1.14x), and `5.23 ms` (1.47x). At `n=64`, the `K_max=10`
+  refresh overhead makes it roughly equal to direct. Same-ridge accuracy is
+  at machine precision (max relative error `1.43e-12`); the constant-ridge
+  drift is `1.11e-12` at a refresh and at most `4.61%` at `k=9`, inside the
+  5% design bound; the minimum cosine similarity is `0.999905`. The harness
+  writes `performance.csv`, `accuracy.csv`, `summary.csv`,
+  `recursive_inverse_results.xlsx`, `performance.png`, `accuracy.png`, and
+  `README.md`.
 
 ## 10. Benchmark harness
 
@@ -200,8 +211,8 @@ writes spreadsheet-ready tables and figures:
   with the cosine similarity of the resulting `dmu`.
 - **Artifacts:** `performance.csv`, `accuracy.csv`, `summary.csv`,
   `performance.png`, `accuracy.png`, and `recursive_inverse_results.xlsx`
-  when `openpyxl` is installed. The files open directly in Excel or any
-  spreadsheet program.
+  when `openpyxl` or `xlsxwriter` is installed. The files open directly in
+  Excel or any spreadsheet program.
 
 ## 11. Risks
 
