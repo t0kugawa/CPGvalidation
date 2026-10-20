@@ -5,9 +5,20 @@ Runs the CPG + MuJoCo + PERSONA loop for `--duration-s` (default 120 s at
 dt = 10 ms = 12000 steps) and writes `run.h5` (all data), `run_log.csv`, the
 validation figures, and (unless `--no-render`) an mp4 into `--out`.
 
+This always uses the full `cpg_2legs_fast` population sizes
+(`POPULATIONS_FINAL`), matching `run_validation.py --final`. It used to hardcode
+a 10-neuron network, which made a "2 min run" measure a mostly-disconnected CPG.
+
 Usage:
-    python run_2min.py --out validation_2min
     python run_2min.py --out validation_2min --no-render      # headless server
+    python run_2min.py --out validation_2min                  # with mp4
+
+Server notes:
+    --snapshot-s 900        atomic run.h5/run_log.csv checkpoints every 15 min
+    --realize-every-k K     sample+realize every K steps (1 = full fidelity).
+                            At FINAL, K=1 costs ~2.6 s/step on a laptop, so a
+                            120 s run is ~8.6 h there and much less on a server.
+    --budget-s N            stop after N seconds of wall clock (0/absent = off)
 """
 import os
 
@@ -19,6 +30,7 @@ for _v in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS",
 import argparse  # noqa: E402
 
 import run_validation  # noqa: E402
+from t2xcpg.cfg import POPULATIONS_FINAL  # noqa: E402
 
 
 def main():
@@ -28,13 +40,30 @@ def main():
     ap.add_argument("--view", default="oblique_view")
     ap.add_argument("--no-render", action="store_true",
                     help="skip the mp4 (headless server)")
+    ap.add_argument("--ref-hz", type=float, default=run_validation.DEFAULT_REF_HZ,
+                    help="motor rate mapped to full muscle drive")
+    ap.add_argument("--belt", type=str, default="dataset",
+                    choices=("dataset", "model"))
+    ap.add_argument("--snapshot-s", type=float, default=900.0,
+                    help="wall-clock interval between atomic checkpoints (0 disables)")
+    ap.add_argument("--realize-every-k", type=int, default=1,
+                    help="sample + realize + record the network every k steps")
+    ap.add_argument("--budget-s", type=float, default=None,
+                    help="stop after this many seconds of real time")
+    ap.add_argument("--pose-max-s", type=float, default=1.0,
+                    help="cap on the settling (pose) stage, in seconds")
     args = ap.parse_args()
     run_validation.run(
         duration_s=args.duration_s, view=args.view,
         width=1920, height=1080, fps=40, out_dir=args.out,
-        w_scale=1.0, ref_hz=100.0, belt_mps=0.2, belt_start_s=0.5,
-        belt_ramp_s=0.5, n_rg=10, n_mn=8, n_int=8, n_aff=6, n_bs=8,
-        render=not args.no_render)
+        w_scale=1.0, ref_hz=args.ref_hz, belt_mps=0.2, belt_start_s=0.5,
+        belt_ramp_s=0.5,
+        n_rg=POPULATIONS_FINAL["n_rg"], n_mn=POPULATIONS_FINAL["n_mn"],
+        n_int=POPULATIONS_FINAL["n_int"], n_aff=POPULATIONS_FINAL["n_aff"],
+        n_bs=POPULATIONS_FINAL["n_bs"],
+        render=not args.no_render, budget_s=args.budget_s,
+        pose_max_s=args.pose_max_s, belt_mode=args.belt,
+        snapshot_s=args.snapshot_s, realize_every_k=args.realize_every_k)
 
 
 if __name__ == "__main__":

@@ -40,6 +40,12 @@ from persona.h5io import save_run
 from model.render import LegRenderer, hud_lines
 from t2xcpg.cfg import POPULATIONS_FINAL
 
+# Muscle drive is motor-pool rate / ref_hz, clipped to [0, 1]. Measured motor
+# rates in the committed network (FINAL, 0.2 ms, BS 60) are p95 = 569 Hz
+# extensor / 342 Hz flexor, so the historical 100 Hz clipped 44% of steps and
+# made the drive bang-bang. 700 Hz is the pooled p95 rounded up: ~3-5% clipping.
+DEFAULT_REF_HZ = 700.0
+
 
 def _atomic_write(path, write_fn):
     """Writes via `<path>.tmp` then renames, so a crash cannot truncate `path`."""
@@ -158,7 +164,21 @@ def run(duration_s, view, width, height, fps, out_dir,
         save_run(os.path.join(out_dir, "run.h5"), log, agent,
                  meta={"duration_s": float(duration_s), "dt_ms": float(DT_MS),
                        "belt_mode": str(belt_mode), "belt_z": float(rig.belt_z),
-                       "n_steps": int(len(log.time_ms))})
+                       "n_steps": int(len(log.time_ms)),
+                       # Provenance: a server run must be interpretable from its
+                       # own output. Without these, ref_hz and the population
+                       # sizes (--final vs --debug-small) are invisible.
+                       "ref_hz": float(ref_hz),
+                       "w_scale": float(w_scale),
+                       "n_rg": int(n_rg), "n_mn": int(n_mn),
+                       "n_int": int(n_int), "n_aff": int(n_aff),
+                       "n_bs": int(n_bs),
+                       "belt_mps": float(belt_mps),
+                       "belt_start_s": float(belt_start_s),
+                       "belt_ramp_s": float(belt_ramp_s),
+                       "tau_mem_s": float(tau_mem_s),
+                       "realize_every_k": int(realize_every_k),
+                       "pose_max_s": float(pose_max_s)})
         status["run.h5"] = "ok"
     except Exception as e:
         status["run.h5"] = f"ERROR {e}"
@@ -205,7 +225,7 @@ if __name__ == "__main__":
     ap.add_argument("--height", type=int, default=1080)
     ap.add_argument("--out", type=str, default=os.path.join(BASE_DIR, "validation_run"))
     ap.add_argument("--w-scale", type=float, default=1.0)
-    ap.add_argument("--ref-hz", type=float, default=100.0)
+    ap.add_argument("--ref-hz", type=float, default=DEFAULT_REF_HZ)
     ap.add_argument("--belt-mps", type=float, default=0.2)
     ap.add_argument("--belt-start-s", type=float, default=0.5)
     ap.add_argument("--belt-ramp-s", type=float, default=0.5)
