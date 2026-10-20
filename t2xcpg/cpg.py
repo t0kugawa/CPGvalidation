@@ -93,16 +93,28 @@ class L2CPG(CPGAdapter):
 
     def _build_commissural_connections(self, p_comm: float = 0.40):
         """
-        Bilateral commissural inhibition (cpg_2legs_fast):
-          RGF -| contralateral RGF  (P_COMM_F=0.22, W_COMM_F_INH=-20)
-          RGE -| contralateral RGE  (P_COMM_E=0.10, W_COMM_E_INH=-8)
+        Commissural V-cell relay (NEURON `memcpg/leg.py` +
+        `utils_cpg.py::add_external_connections`). Replaces the direct RG<->RG
+        commissural inhibition that `cpg_2legs_fast` abstracts as
+        "V0v/V0d/V2a/In1 classes":
+
+          RG_F -> V2a -> V0v -> (contralateral) In1 -| RG_F
+          RG_F -> V0d -| (contralateral) RG_F
+          RG_F -> V3F -> (contralateral) RG_F
+
+        V3F cross weight: memcpg's WALK mode leaves it at 0.0 and RUN uses 0.5;
+        the scheme draws the projection, so the enabled reference value seeds it
+        and PERSONA can tune it down to zero.
         """
-        if "L" in self.legs and "R" in self.legs:
-            d = 1.0  # DELAY_COMM_MS
-            self._connect("rg_f_L", "rg_f_R", weight=-20.0, p=0.22, delay=d)  # W_COMM_F_INH, P_COMM_F
-            self._connect("rg_f_R", "rg_f_L", weight=-20.0, p=0.22, delay=d)
-            self._connect("rg_e_L", "rg_e_R", weight=-8.0, p=0.10, delay=d)   # W_COMM_E_INH, P_COMM_E
-            self._connect("rg_e_R", "rg_e_L", weight=-8.0, p=0.10, delay=d)
+        if "L" not in self.legs or "R" not in self.legs:
+            return
+        d = 3.0  # memcpg commissural delay
+        self._connect("v0v_L", "in1_R", weight=1.3, p=p_comm, delay=d)
+        self._connect("v0v_R", "in1_L", weight=1.3, p=p_comm, delay=d)
+        self._connect("v0d_L", "rg_f_R", weight=-1.3, p=p_comm, delay=d)
+        self._connect("v0d_R", "rg_f_L", weight=-1.3, p=p_comm, delay=d)
+        self._connect("v3f_L", "rg_f_R", weight=0.5, p=p_comm, delay=d)
+        self._connect("v3f_R", "rg_f_L", weight=0.5, p=p_comm, delay=d)
 
     def update(self, cpg_in: CPGInput):
         """

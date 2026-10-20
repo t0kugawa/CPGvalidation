@@ -181,6 +181,26 @@ class Leg:
             Population(model="izhikevich", n=self.n_int, params=inh(), name=f"in_f_{self.leg}")
         )
 
+        # Commissural premotor interneurons (NEURON `memcpg/leg.py`): V2a/V0v/V3F
+        # are excitatory relays, V0d and In1 are inhibitory. They replace the
+        # direct RG<->RG commissural projection that `cpg_2legs_fast` abstracts
+        # as "V0v/V0d/V2a/In1 classes".
+        self.v2a = self.registry.create_population(
+            Population(model="izhikevich", n=self.n_int, params=exc(), name=f"v2a_{self.leg}")
+        )
+        self.v0v = self.registry.create_population(
+            Population(model="izhikevich", n=self.n_int, params=exc(), name=f"v0v_{self.leg}")
+        )
+        self.v3f = self.registry.create_population(
+            Population(model="izhikevich", n=self.n_int, params=exc(), name=f"v3f_{self.leg}")
+        )
+        self.v0d = self.registry.create_population(
+            Population(model="izhikevich", n=self.n_int, params=inh(), name=f"v0d_{self.leg}")
+        )
+        self.in1 = self.registry.create_population(
+            Population(model="izhikevich", n=self.n_int, params=inh(), name=f"in1_{self.leg}")
+        )
+
         # Muscles (Parrot readout)
         self.mus_e = self.registry.create_parrot_nodes(f"mus_e_{self.leg}", self.n_mn)
         self.mus_f = self.registry.create_parrot_nodes(f"mus_f_{self.leg}", self.n_mn)
@@ -334,6 +354,17 @@ class Leg:
         self._connect(f"cut_in_{leg}", f"rg_e_{leg}", weight=14.0, p=0.35,
                       is_stdp=True, key=f"cut_rge_{leg}")   # W_CUT2RGE, P_CUT2RGE_STATIC
         self._connect(f"cut_in_{leg}", f"in_e_{leg}", weight=6.0, p=0.30)   # W_CUT2INE, P_CUT2INE
+
+        # --- Commissural V-cell relay, ipsilateral half (NEURON memcpg/leg.py) ---
+        # RG_F drives the three V-cell classes; V2a feeds V0v, whose
+        # contralateral projection is built in L2CPG. In1 is the inhibitory
+        # relay onto the ipsilateral RG_F. Weights and delays are memcpg's; p is
+        # the port's int->int density.
+        self._connect(f"rg_f_{leg}", f"v2a_{leg}", weight=0.75, p=0.50, delay=3.0)
+        self._connect(f"rg_f_{leg}", f"v0d_{leg}", weight=0.75, p=0.50, delay=3.0)
+        self._connect(f"rg_f_{leg}", f"v3f_{leg}", weight=1.5, p=0.50, delay=3.0)
+        self._connect(f"v2a_{leg}", f"v0v_{leg}", weight=1.2, p=0.50, delay=3.0)
+        self._connect(f"in1_{leg}", f"rg_f_{leg}", weight=-0.5, p=0.50, delay=1.0)
 
     def update_sensory_feedback(self, cut_hz: float,
                                 ia_e_hz: float, ia_f_hz: float,
