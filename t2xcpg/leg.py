@@ -12,8 +12,8 @@ from t2xcpg.utils import (
 
 # Ib -> antagonist rhythm generator. Inhibitory: an Ib interneuron must not
 # excite the antagonist half-centre. Value is the reference's paired constant
-# W_IN2RG (cpg_2legs_fast.py:90); our rg_*->in_ib_* already uses its pair
-# W_RG2IN = 8.0.
+# W_IN2RG (cpg_2legs_fast.py:90). The RG->Ib counterpart was removed: it drove
+# the network past its operating band and has no counterpart in the reference.
 W_IB2RG = -18.0
 
 
@@ -321,8 +321,6 @@ class Leg:
         # --- Ib interneuron convergence (spindle, CPG) ---
         self._connect(f"ia_e_in_{leg}", f"in_ib_e_{leg}", weight=8.0, p=0.30)    # Ia -> InIb-E
         self._connect(f"ia_f_in_{leg}", f"in_ib_f_{leg}", weight=8.0, p=0.30)    # Ia -> InIb-F
-        self._connect(f"rg_e_{leg}", f"in_ib_e_{leg}", weight=8.0, p=0.30)       # RGE -> InIb-E
-        self._connect(f"rg_f_{leg}", f"in_ib_f_{leg}", weight=8.0, p=0.30)       # RGF -> InIb-F
 
         # --- Cutaneous (CUT) stance reinforcement ---
         self._connect(f"cut_in_{leg}", f"rg_e_{leg}", weight=14.0, p=0.35,
