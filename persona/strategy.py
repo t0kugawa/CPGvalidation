@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Dict, List
 import numpy as np
+from scipy.linalg import cho_factor, cho_solve
 
 
 @dataclass
@@ -53,16 +54,20 @@ class FisherMatrix:
                                        every site a spurious σ_s² gain)
         a^σ_s = Δlogσ_s(t)             σ change actually applied this step
 
-    Update step: ``g = G·1₂`` (noise rows excluded), ``Δμ = lr_mu · (F + λI)⁻¹ g``
-    (pinv fallback). The σ coordinates are updated by the Agent's log-σ rule;
-    ``lr_sigma`` is kept here only for interface compatibility.
+    Update step: ``g = G·1₂`` (noise rows excluded), ``Δμ = lr_mu · P g``,
+    where ``P`` starts at ``(1/λ)I`` and is updated by Sherman–Morrison
+    between refreshes: ``P_t = (F_t + λβᵏI)⁻¹``. Every ``refresh_every``
+    steps, and at a phase shift, ``P`` is recomputed exactly as
+    ``(F + λI)⁻¹`` by Cholesky, restoring the constant ridge. The σ
+    coordinates are updated by the Agent's log-σ rule; ``lr_sigma`` is kept
+    here only for interface compatibility.
 
     Warm-up: F/Xbar/G accumulate from step 1, Δμ is applied from step
     ``warmup``+1. Advantage baselines are per-component, per-phase
     (α = 0.90, unchanged).
 
-    TODO(perf): the (F + λI) solve is O(n³) per step; n ≈ 300–400 now, prefer
-    a low-rank/rank-1 update (Sherman–Morrison) so the cost is O(n²).
+    TODO(perf): the recursive inverse removes the O(n³) solve; F is still
+    O(n²) per step and O(n²) memory.
     """
     def __init__(self,
                  param_names: List[str],
@@ -72,7 +77,8 @@ class FisherMatrix:
                  lambda_reg: float = 1e-3,
                  beta: float = 0.995,
                  warmup: int = 3,
-                 baseline_alpha: float = 0.90):
+                 baseline_alpha: float = 0.90,
+                 refresh_every: int | None = None):
         self.param_names = list(param_names)
         self.noise_names = list(noise_names or [])
         self.noise_scales: Dict[str, float] = {}
@@ -89,6 +95,47 @@ class FisherMatrix:
         self.F = np.zeros((n, n), dtype=np.float64)
         self.Xbar = np.zeros(n, dtype=np.float64)
         self.G = np.zeros((n, 2), dtype=np.float64)
+
+        if self.lambda_reg <= 0.0:
+            raise ValueError("lambda_reg must be positive for the recursive inverse")
+        self.refresh_every = self._resolve_refresh_every(refresh_every, self.beta)
+        self._steps_since_refresh = 0
+        self.P = np.eye(n, dtype=np.float64) / self.lambda_reg
+
+    @staticmethod
+    def _resolve_refresh_every(value, beta):
+        if value is not None:
+            return max(1, int(value))
+        if beta >= 1.0:
+            return 10**9
+        if beta <= 0.0:
+            return 1
+        return max(1, int(np.floor(np.log(0.95) / np.log(beta))))
+
+    def _rank1_update_inverse(self, s):
+        u = self.P @ s
+        v = float(s @ u)
+        denom = self.beta + (1.0 - self.beta) * v
+        if denom <= 0.0 or not np.isfinite(denom):
+            self._refresh_inverse()
+            return
+        self.P = (self.P - ((1.0 - self.beta) / denom) * np.outer(u, u)) / self.beta
+        self.P = 0.5 * (self.P + self.P.T)
+
+    def _refresh_inverse(self):
+        n = self.n_total
+        if n == 0:
+            self.P = np.zeros((0, 0), dtype=np.float64)
+            self._steps_since_refresh = 0
+            return
+        M = self.F + self.lambda_reg * np.eye(n)
+        try:
+            cf = cho_factor(M, lower=True, check_finite=False)
+            P = cho_solve(cf, np.eye(n), check_finite=False)
+        except np.linalg.LinAlgError:
+            P = np.linalg.pinv(M)
+        self.P = 0.5 * (P + P.T)
+        self._steps_since_refresh = 0
 
     # --- layout helpers ------------------------------------------------------
 
@@ -140,6 +187,7 @@ class FisherMatrix:
         X[new_idx] = self.Xbar[old_idx]
         G[new_idx, :] = self.G[old_idx, :]
         self.F, self.Xbar, self.G = F, X, G
+        self._refresh_inverse()
 
     # --- advantage / updates -------------------------------------------------
 
@@ -216,17 +264,28 @@ class FisherMatrix:
         self.G = b * self.G + (1.0 - b) * np.outer(self.Xbar, A)
         self.steps += 1
 
+        self._steps_since_refresh += 1
+        if self._steps_since_refresh >= self.refresh_every:
+            self._refresh_inverse()
+        else:
+            self._rank1_update_inverse(s)
+
         deltas = {name: 0.0 for name in self.param_names}
         if self.steps <= self.warmup:
             return deltas
 
         g = self.G.sum(axis=1)
         g[2 * m:] = 0.0                      # noise rows never receive credit
-        M = self.F + self.lambda_reg * np.eye(n)
-        try:
-            nat = np.linalg.solve(M, g)
-        except np.linalg.LinAlgError:
-            nat = np.linalg.pinv(M) @ g
+        nat = self.P @ g
+        if not np.all(np.isfinite(nat)):
+            self._refresh_inverse()
+            nat = self.P @ g
+        if not np.all(np.isfinite(nat)):
+            M = self.F + self.lambda_reg * np.eye(n)
+            try:
+                nat = np.linalg.solve(M, g)
+            except np.linalg.LinAlgError:
+                nat = np.linalg.pinv(M) @ g
         for i, name in enumerate(self.param_names):
             deltas[name] = float(self.lr_mu * nat[i])
         return deltas

@@ -216,3 +216,77 @@ def test_ensure_names_pads_and_preserves_order():
     assert np.array_equal(fm.Xbar[[0, 2, 4]], X0)
     assert fm.Xbar[1] == 0.0
     assert np.array_equal(fm.G[[0, 2, 4]], G0)
+
+
+def _direct(fm, ridge):
+    return np.linalg.inv(fm.F + ridge * np.eye(fm.n_total))
+
+
+def test_recursive_inverse_tracks_the_decaying_ridge():
+    beta, lam = 0.9, 0.5
+    fm = FisherMatrix(param_names=["p"], beta=beta, lambda_reg=lam,
+                      warmup=0, refresh_every=10**9)
+    fm.step({"p": (0.2, 0.5, 0.1)}, {}, np.array([1.0, 0.0]))
+    assert np.allclose(fm.P, _direct(fm, lam * beta), atol=1e-10)
+    fm.step({"p": (-0.1, 0.4, 0.0)}, {}, np.array([0.0, 1.0]))
+    assert np.allclose(fm.P, _direct(fm, lam * beta ** 2), atol=1e-10)
+
+
+def test_kmax_refresh_restores_the_constant_ridge():
+    beta, lam = 0.9, 0.5
+    fm = FisherMatrix(param_names=["p"], beta=beta, lambda_reg=lam,
+                      warmup=0, refresh_every=2)
+    fm.step({"p": (0.2, 0.5, 0.1)}, {}, np.array([1.0, 0.0]))
+    assert np.allclose(fm.P, _direct(fm, lam * beta), atol=1e-10)
+    fm.step({"p": (-0.1, 0.4, 0.0)}, {}, np.array([0.0, 1.0]))
+    assert np.allclose(fm.P, _direct(fm, lam), atol=1e-10)
+
+
+def test_default_kmax_tracks_beta():
+    assert FisherMatrix(param_names=["p"], beta=0.995).refresh_every == 10
+    assert FisherMatrix(param_names=["p"], beta=0.99).refresh_every == 5
+    assert FisherMatrix(param_names=["p"], beta=0.9).refresh_every == 1
+    assert FisherMatrix(param_names=["p"], beta=1.0).refresh_every >= 10**6
+
+
+def test_ensure_names_rebuilds_the_inverse():
+    fm = FisherMatrix(param_names=["a"], beta=0.9, lambda_reg=0.5,
+                      warmup=0, refresh_every=10**9)
+    for _ in range(3):
+        fm.step({"a": (0.1, 0.5, 0.0)}, {}, np.array([1.0, 0.0]))
+    fm.ensure_names(["a", "b"], [])
+    assert fm.P.shape == (4, 4)
+    assert np.allclose(fm.P @ (fm.F + fm.lambda_reg * np.eye(4)), np.eye(4),
+                       atol=1e-10)
+
+
+def test_recursive_step_matches_the_direct_solve():
+    rng = np.random.default_rng(11)
+    beta, lam, kmax = 0.95, 1e-3, 4
+    fm = FisherMatrix(param_names=["p"], noise_names=["n"], beta=beta,
+                      lambda_reg=lam, warmup=0, refresh_every=kmax, lr_mu=0.1)
+    for _ in range(40):
+        d = rng.normal(0, 0.2); sig = rng.uniform(0.2, 0.8)
+        nd = (rng.normal(0, 0.1), 1.0)
+        out = fm.step({"p": (d, sig, 0.0)}, {"n": nd},
+                      np.array([1.0, -1.0]))
+        g = fm.G.sum(axis=1); g[2 * fm.n_sites:] = 0.0
+        k = fm._steps_since_refresh
+        ridge = lam if k == 0 else lam * beta ** k
+        expected = np.linalg.solve(fm.F + ridge * np.eye(fm.n_total), g)
+        assert np.allclose(fm.P @ g, expected, rtol=1e-8, atol=1e-10)
+        assert np.isclose(out["p"], fm.lr_mu * expected[0],
+                          rtol=1e-8, atol=1e-10)
+
+
+def test_inverse_stays_symmetric_and_positive_definite():
+    rng = np.random.default_rng(12)
+    fm = FisherMatrix(param_names=[f"p{i}" for i in range(10)],
+                      beta=0.99, warmup=0, refresh_every=5)
+    for _ in range(200):
+        sites = {f"p{i}": (float(rng.normal(0, 0.2)), 0.5, 0.0)
+                 for i in range(10)}
+        fm.step(sites, {}, rng.normal(0, 1, 2))
+    assert np.all(np.isfinite(fm.P))
+    assert np.allclose(fm.P, fm.P.T, atol=1e-10)
+    assert np.linalg.eigvalsh(fm.P).min() > 0.0
