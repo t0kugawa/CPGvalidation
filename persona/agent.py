@@ -36,6 +36,7 @@ class Agent:
 
         self.current_actions: Dict[str, float] = {}
         self.current_step = 0
+        self._prev_phase = None
         self._snap: Dict[str, tuple[float, float, float]] = {}
         self.output_buffer: List[np.ndarray] = []
         self.target_buffer: List[np.ndarray] = []
@@ -152,7 +153,8 @@ class Agent:
         2. Vector error and component-wise advantage (phase baselines).
         3. Per-site sampling-time snapshot channels; producer deltas are read
            fresh (read-and-clear, zero if the step recorded nothing).
-        4. Strategy step: F/Xbar/G recurrences + natural-gradient Δμ.
+        4. Strategy step: F/Xbar/G recurrences + natural-gradient Δμ; the
+           recursive inverse refreshes on a phase shift or at K_max.
         5. From step warmup+1 on, applies Δμ and the log-σ update; during
            warm-up both are 0.0 — and the trace records exactly that, so
            "traced = applied" holds by construction.
@@ -175,6 +177,10 @@ class Agent:
             phase_key = phase
         else:
             phase_key = tuple(phase)
+
+        phase_shift = (self._prev_phase is not None
+                       and phase_key != self._prev_phase)
+        self._prev_phase = phase_key
 
         advantage_vec = self.strategy.compute_advantage(error_vec, phase=phase_key)
         adv_scalar = float(np.mean(advantage_vec))
@@ -204,7 +210,8 @@ class Agent:
             noise[rec_name] = (0.0 if delta is None else float(delta),
                                0.0 if rec.scale is None else float(rec.scale))
 
-        delta_means = self.strategy.step(sites, noise, advantage_vec)
+        delta_means = self.strategy.step(
+            sites, noise, advantage_vec, phase_shift=phase_shift)
 
         # Apply to the host (from warmup+1): means first, then sigma — both from
         # the sampling-time snapshot, so neither depends on the other's change.

@@ -216,7 +216,9 @@ class FisherMatrix:
     def step(self,
              sites: Dict[str, tuple],
              noise: Dict[str, tuple],
-             advantage: np.ndarray) -> Dict[str, float]:
+             advantage: np.ndarray,
+             *,
+             phase_shift: bool = False) -> Dict[str, float]:
         """
         One strategy step.
 
@@ -226,8 +228,9 @@ class FisherMatrix:
         contribute δ=0); ``advantage`` is the per-component advantage vector
         A(t) (length 2, one per limb).
 
-        Updates F/Xbar/G, counts the step, and returns the per-site Δμ (all
-        zero during warm-up).
+        Updates F/Xbar/G, refreshes the recursive inverse on ``phase_shift``
+        or at ``refresh_every``, counts the step, and returns the per-site Δμ
+        (all zero during warm-up).
         """
         self.ensure_names(list(sites.keys()), list(noise.keys()))
         m, k = self.n_sites, self.n_noise
@@ -265,7 +268,7 @@ class FisherMatrix:
         self.steps += 1
 
         self._steps_since_refresh += 1
-        if self._steps_since_refresh >= self.refresh_every:
+        if phase_shift or self._steps_since_refresh >= self.refresh_every:
             self._refresh_inverse()
         else:
             self._rank1_update_inverse(s)

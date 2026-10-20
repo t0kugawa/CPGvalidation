@@ -290,3 +290,15 @@ def test_inverse_stays_symmetric_and_positive_definite():
     assert np.all(np.isfinite(fm.P))
     assert np.allclose(fm.P, fm.P.T, atol=1e-10)
     assert np.linalg.eigvalsh(fm.P).min() > 0.0
+
+
+def test_phase_shift_refreshes_before_kmax():
+    beta, lam = 0.9, 0.5
+    fm = FisherMatrix(param_names=["p"], beta=beta, lambda_reg=lam,
+                      warmup=0, refresh_every=100)
+    fm.step({"p": (0.2, 0.5, 0.1)}, {}, np.array([1.0, 0.0]))
+    fm.step({"p": (-0.1, 0.4, 0.0)}, {}, np.array([0.0, 1.0]))
+    assert np.allclose(fm.P, _direct(fm, lam * beta ** 2), atol=1e-10)
+    fm.step({"p": (0.05, 0.6, 0.0)}, {}, np.array([1.0, 0.0]),
+            phase_shift=True)
+    assert np.allclose(fm.P, _direct(fm, lam), atol=1e-10)
