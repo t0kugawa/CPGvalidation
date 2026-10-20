@@ -148,6 +148,43 @@ def test_agent_refreshes_on_phase_shift_only(nest_kernel):
     assert calls == [3]
 
 
+def test_agent_first_step_swing_does_not_refresh(nest_kernel):
+    agent, _ = _agent()
+    agent.strategy.refresh_every = 1000
+    calls = []
+    orig = agent.strategy._refresh_inverse
+
+    def spy():
+        calls.append(agent.strategy.steps)
+        return orig()
+
+    agent.strategy._refresh_inverse = spy
+    for t, phase in enumerate(["swing", "swing"]):
+        agent.sample_actions(t_ms=t * 10.0)
+        agent.step(np.zeros(2), np.zeros(2), phase=phase,
+                   t_ms=(t + 1) * 10.0)
+    assert calls == []
+
+
+def test_agent_normalizes_string_and_tuple_phase_keys(nest_kernel):
+    agent, _ = _agent()
+    agent.strategy.refresh_every = 1000
+    calls = []
+    orig = agent.strategy._refresh_inverse
+
+    def spy():
+        calls.append(agent.strategy.steps)
+        return orig()
+
+    agent.strategy._refresh_inverse = spy
+    phases = ["stance", ("stance", "stance")]
+    for t, phase in enumerate(phases):
+        agent.sample_actions(t_ms=t * 10.0)
+        agent.step(np.zeros(2), np.zeros(2), phase=phase,
+                   t_ms=(t + 1) * 10.0)
+    assert calls == []
+
+
 def test_agent_refreshes_when_one_leg_changes_phase(nest_kernel):
     agent, _ = _agent()
     agent.strategy.refresh_every = 1000
@@ -160,6 +197,26 @@ def test_agent_refreshes_when_one_leg_changes_phase(nest_kernel):
 
     agent.strategy._refresh_inverse = spy
     phases = [["stance", "swing"], ["stance", "swing"], ["swing", "swing"]]
+    for t, phase in enumerate(phases):
+        agent.sample_actions(t_ms=t * 10.0)
+        agent.step(np.zeros(2), np.zeros(2), phase=phase,
+                   t_ms=(t + 1) * 10.0)
+    assert calls == [3]
+
+
+def test_agent_refreshes_when_the_second_leg_changes_phase(nest_kernel):
+    agent, _ = _agent()
+    agent.strategy.refresh_every = 1000
+    calls = []
+    orig = agent.strategy._refresh_inverse
+
+    def spy():
+        calls.append(agent.strategy.steps)
+        return orig()
+
+    agent.strategy._refresh_inverse = spy
+    phases = [["stance", "stance"], ["stance", "stance"],
+              ["stance", "swing"]]
     for t, phase in enumerate(phases):
         agent.sample_actions(t_ms=t * 10.0)
         agent.step(np.zeros(2), np.zeros(2), phase=phase,

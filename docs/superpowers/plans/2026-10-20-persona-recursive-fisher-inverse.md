@@ -516,7 +516,10 @@ git commit -m "docs(persona): record recursive-inverse acceptance and benchmark"
   - `summary.csv`: `table, group, metric, mean, std, median, q25, q75`;
   - `performance.png`, `accuracy.png`;
   - `recursive_inverse_results.xlsx` when `openpyxl` or `xlsxwriter` is
-    importable.
+    importable;
+  - `MODES = ("direct", "recursive_no_refresh", "recursive_kmax",
+    "recursive_chatter")`, with `CHATTER_EVERY = 3`; the chatter mode models
+    the observed ~2.9-step phase-change interval.
 
 - [x] **Step 1: Write the failing smoke test**
 
@@ -525,7 +528,7 @@ Create `tests/test_bench_recursive_inverse.py`:
 ```python
 import pandas as pd
 
-from bench_recursive_inverse import run_benchmark
+from bench_recursive_inverse import MODES, run_benchmark
 
 
 def test_benchmark_writes_tables_and_figures(tmp_path):
@@ -535,16 +538,32 @@ def test_benchmark_writes_tables_and_figures(tmp_path):
         assert (tmp_path / name).exists()
     perf = pd.read_csv(tmp_path / "performance.csv")
     acc = pd.read_csv(tmp_path / "accuracy.csv")
+    summary = pd.read_csv(tmp_path / "summary.csv")
     assert {"n", "mode", "seed", "repeat", "step_ms"}.issubset(perf.columns)
+    assert set(perf["mode"]) == set(MODES)
     assert {"n", "seed", "step", "k", "rel_error_decaying",
             "rel_error_constant", "cosine_constant",
             "dmu_rel_error_constant"}.issubset(acc.columns)
+    assert {"table", "group", "metric", "mean", "std", "median",
+            "q25", "q75"}.issubset(summary.columns)
     assert (perf["step_ms"] > 0.0).all()
     assert acc["rel_error_decaying"].max() < 1e-8
     assert acc.loc[acc["k"] == 0, "rel_error_constant"].max() < 1e-8
     assert acc.loc[acc["k"] > 0, "rel_error_constant"].max() > 0.0
     assert (tmp_path / "performance.png").exists()
     assert (tmp_path / "accuracy.png").exists()
+    assert (tmp_path / "README.md").exists()
+    try:
+        import openpyxl  # noqa: F401
+        has_writer = True
+    except ImportError:
+        try:
+            import xlsxwriter  # noqa: F401
+            has_writer = True
+        except ImportError:
+            has_writer = False
+    if has_writer:
+        assert (tmp_path / "recursive_inverse_results.xlsx").exists()
 ```
 
 - [x] **Step 2: Run the test to verify failure**
@@ -571,7 +590,8 @@ def _layout(n):
 
 `run_benchmark`:
 
-1. Create `out_dir`; seed each `(n, mode, repeat)` independently.
+1. Create `out_dir`; for each `(n, seed)`, generate one score/gradient stream
+   shared by all modes and repeats, so the modes see the same data.
 2. **Performance** (no `FisherMatrix`, to isolate the linear algebra):
    pre-generate `S` (`steps x n`) and `G` (`steps x n`); for each mode run:
    - `direct`: `F = beta*F + (1-beta)*outer(s,s)`;
@@ -580,6 +600,8 @@ def _layout(n):
      `F`, apply the Sherman-Morrison update, `nat = P @ g`; no refresh.
    - `recursive_kmax`: same but refresh every `refresh_every` steps after
      the `F` update, using `scipy.linalg.cho_factor/cho_solve`.
+   - `recursive_chatter`: same as `recursive_kmax`, but also refresh every
+     `CHATTER_EVERY = 3` steps to model the observed phase-change interval.
    Time `steps` iterations with `time.perf_counter()`; append one row per
    `(n, mode, seed, repeat)`.
 3. **Accuracy** (use `FisherMatrix`): for each `(n, seed)`, construct
@@ -634,7 +656,9 @@ Expected: `performance.csv`, `accuracy.csv`, `summary.csv`,
 Excel writer is available), and `README.md` exist. Check that
 `accuracy.csv` has `rel_error_decaying < 1e-8`, `rel_error_constant` is
 ~0 at `k=0`, and grows with `k`; check that the performance plot shows the
-direct solve above the recursive modes at large `n`.
+direct solve above the stable-phase recursive modes at large `n`, while the
+chatter mode approaches or exceeds direct. Report means and medians, not one
+as the other.
 
 - [x] **Step 6: Update the design doc and commit**
 
@@ -656,10 +680,16 @@ git commit -m "test(persona): recursive-inverse performance and accuracy harness
 - **Spec coverage:** A1/A2 -> Task 1 (`test_recursive_inverse_tracks_the_decaying_ridge`,
   `test_kmax_refresh_restores_the_constant_ridge`); A3 -> Task 1
   (`test_recursive_step_matches_the_direct_solve`); A4 -> Task 1
-  (`test_inverse_stays_symmetric_and_positive_definite`); A5/A6 -> Task 2
-  (`test_phase_shift_refreshes_before_kmax`, the two Agent tests); A7 -> Task 1
-  (`test_ensure_names_rebuilds_the_inverse`); A8/A9 -> Task 3; A10/A11 ->
-  Task 4 (`test_benchmark_writes_tables_and_figures`).
+  (`test_inverse_stays_symmetric_and_positive_definite`, asserted after every
+  step); A5/A6 -> Task 2 (`test_phase_shift_refreshes_before_kmax`, the Agent
+  first-step, string/tuple, first-leg, and second-leg tests); A7 -> Task 1
+  (`test_ensure_names_rebuilds_the_inverse`, including the counter reset);
+  A8/A9 -> Task 3; A10/A11 -> Task 4
+  (`test_benchmark_writes_tables_and_figures`, which checks summary columns,
+  README, and the optional XLSX); A12 -> Task 1
+  (`test_k1_step_uses_direct_solve_without_building_p`,
+  `test_beta_zero_forces_constant_ridge_and_stays_finite`,
+  `test_invalid_beta_and_ridge_are_rejected`).
 - **Step scan:** every step names the file, the test, the command, or the exact
   implementation change. No `TBD` or open-ended "handle edge cases".
 - **Type consistency:** `P`, `refresh_every`, `_steps_since_refresh`,
@@ -668,9 +698,37 @@ git commit -m "test(persona): recursive-inverse performance and accuracy harness
 - **Review Focus tests:** cold start (existing `test_few_steps_singular_no_crash`
   plus `test_agent_refreshes_on_phase_shift_only`), long phase
   (`test_kmax_refresh_restores_the_constant_ridge`), per-leg phase
-  (`test_agent_refreshes_when_one_leg_changes_phase`), new site
-  (`test_ensure_names_rebuilds_the_inverse`), beta edges
-  (`test_default_kmax_tracks_beta`).
+  (`test_agent_refreshes_when_one_leg_changes_phase` and the second-leg test),
+  new site (`test_ensure_names_rebuilds_the_inverse`), beta edges
+  (`test_default_kmax_tracks_beta`, `test_invalid_beta_and_ridge_are_rejected`,
+  and the beta-zero/beta-one tests), non-finite repair
+  (`test_nonfinite_inverse_is_repaired`).
 - **Proportion:** two small code tasks plus one acceptance task; the plan
   specifies interfaces and tests, not full function bodies beyond the
   Sherman-Morrison/refresh core.
+
+## Review follow-up (2026-10-20)
+
+A fresh-context review found no critical issues and five important items.
+The follow-up addressed them without changing the numerical semantics:
+
+- A4 now asserts symmetry, finiteness, positive definiteness, and the refresh
+  counter after every step, not only at a refresh boundary.
+- `K_max=1` now solves `F + lambda*I` directly and invalidates a lazy `P`
+  cache; `test_k1_step_uses_direct_solve_without_building_p` enforces that the
+  full inverse is not built. Reading `P` rebuilds it correctly.
+- The harness now includes `recursive_chatter` (refresh every 3 steps) to
+  model the observed ~2.9-step phase-change interval, and the Results section
+  reports both stable-phase and chatter timings.
+- `beta` is validated as finite in `[0, 1]`; `beta=0` forces `K_max=1` and
+  stays finite with an explicit refresh interval. `lambda` must be finite and
+  positive.
+- The design/plan now label harness statistics as means/medians, not
+  medians-only, and report the actual medians and ratios.
+
+Minor review items also fixed: phase-key canonicalization (with history
+compatibility), first-step-swing and second-leg phase tests, an
+`ensure_names` counter assertion, a non-finite repair test, the accuracy
+figure's std band, the README's μ/σ description, summary/README/XLSX smoke
+assertions, and the one-off microbenchmark's provenance. Phase debouncing is
+still deliberately out of scope; the chatter benchmark quantifies the cost.

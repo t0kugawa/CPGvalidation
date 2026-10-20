@@ -96,23 +96,50 @@ class FisherMatrix:
         self.Xbar = np.zeros(n, dtype=np.float64)
         self.G = np.zeros((n, 2), dtype=np.float64)
 
-        if self.lambda_reg <= 0.0:
-            raise ValueError("lambda_reg must be positive for the recursive inverse")
+        if not np.isfinite(self.lambda_reg) or self.lambda_reg <= 0.0:
+            raise ValueError(
+                "lambda_reg must be finite and positive for the recursive inverse")
+        if not np.isfinite(self.beta) or self.beta < 0.0 or self.beta > 1.0:
+            raise ValueError("beta must be finite and in [0, 1]")
         self.refresh_every = self._resolve_refresh_every(refresh_every, self.beta)
         self._steps_since_refresh = 0
+        self._P_valid = True
         self.P = np.eye(n, dtype=np.float64) / self.lambda_reg
+
+    @property
+    def P(self):
+        """Inverse of ``F + lambda*beta**k I``; rebuilt lazily when stale."""
+        if not self._P_valid:
+            self._refresh_inverse()
+        return self._P
+
+    @P.setter
+    def P(self, value):
+        self._P = value
+        self._P_valid = True
 
     @staticmethod
     def _resolve_refresh_every(value, beta):
+        # beta == 0 has no finite recursive ridge: use the exact solve every step.
+        if beta <= 0.0:
+            return 1
         if value is not None:
             return max(1, int(value))
         if beta >= 1.0:
             return 10**9
-        if beta <= 0.0:
-            return 1
         return max(1, int(np.floor(np.log(0.95) / np.log(beta))))
 
+    def _solve_direct(self, g):
+        M = self.F + self.lambda_reg * np.eye(self.n_total)
+        try:
+            return np.linalg.solve(M, g)
+        except np.linalg.LinAlgError:
+            return np.linalg.pinv(M) @ g
+
     def _rank1_update_inverse(self, s):
+        if self.beta <= 0.0:
+            self._refresh_inverse()
+            return
         u = self.P @ s
         v = float(s @ u)
         denom = self.beta + (1.0 - self.beta) * v
@@ -268,7 +295,12 @@ class FisherMatrix:
         self.steps += 1
 
         self._steps_since_refresh += 1
-        if phase_shift or self._steps_since_refresh >= self.refresh_every:
+        if self.refresh_every == 1:
+            # Every step has the constant ridge. Solve directly instead of
+            # building the full inverse, and invalidate the lazy P cache.
+            self._steps_since_refresh = 0
+            self._P_valid = False
+        elif phase_shift or self._steps_since_refresh >= self.refresh_every:
             self._refresh_inverse()
         else:
             self._rank1_update_inverse(s)
@@ -279,16 +311,12 @@ class FisherMatrix:
 
         g = self.G.sum(axis=1)
         g[2 * m:] = 0.0                      # noise rows never receive credit
-        nat = self.P @ g
+        nat = self._solve_direct(g) if self.refresh_every == 1 else self.P @ g
         if not np.all(np.isfinite(nat)):
             self._refresh_inverse()
             nat = self.P @ g
         if not np.all(np.isfinite(nat)):
-            M = self.F + self.lambda_reg * np.eye(n)
-            try:
-                nat = np.linalg.solve(M, g)
-            except np.linalg.LinAlgError:
-                nat = np.linalg.pinv(M) @ g
+            nat = self._solve_direct(g)
         for i, name in enumerate(self.param_names):
             deltas[name] = float(self.lr_mu * nat[i])
         return deltas

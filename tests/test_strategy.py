@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from persona.strategy import FisherMatrix
 
@@ -246,7 +247,72 @@ def test_default_kmax_tracks_beta():
     assert FisherMatrix(param_names=["p"], beta=0.995).refresh_every == 10
     assert FisherMatrix(param_names=["p"], beta=0.99).refresh_every == 5
     assert FisherMatrix(param_names=["p"], beta=0.9).refresh_every == 1
+    assert FisherMatrix(param_names=["p"], beta=0.0, refresh_every=5).refresh_every == 1
     assert FisherMatrix(param_names=["p"], beta=1.0).refresh_every >= 10**6
+
+
+def test_invalid_beta_and_ridge_are_rejected():
+    for beta in (-0.1, 1.1, np.nan, np.inf):
+        with pytest.raises(ValueError):
+            FisherMatrix(param_names=["p"], beta=beta)
+    for lam in (0.0, -1.0, np.nan, np.inf):
+        with pytest.raises(ValueError):
+            FisherMatrix(param_names=["p"], lambda_reg=lam)
+
+
+def test_k1_step_uses_direct_solve_without_building_p():
+    beta, lam = 0.9, 0.5
+    fm = FisherMatrix(param_names=["p"], beta=beta, lambda_reg=lam,
+                      warmup=0, refresh_every=1, lr_mu=0.1)
+    calls = []
+    orig = fm._refresh_inverse
+
+    def spy():
+        calls.append(1)
+        return orig()
+
+    fm._refresh_inverse = spy
+    out = fm.step({"p": (0.2, 0.5, 0.1)}, {}, np.array([1.0, 0.0]))
+    assert calls == []
+    g = fm.G.sum(axis=1)
+    g[2 * fm.n_sites:] = 0.0
+    expected = np.linalg.solve(fm.F + lam * np.eye(fm.n_total), g)
+    assert np.isclose(out["p"], 0.1 * expected[0])
+    P = fm.P
+    assert calls == [1]
+    assert np.allclose(P, np.linalg.inv(fm.F + lam * np.eye(fm.n_total)),
+                       atol=1e-10)
+
+
+def test_beta_zero_forces_constant_ridge_and_stays_finite():
+    fm = FisherMatrix(param_names=["p"], beta=0.0, lambda_reg=0.5,
+                      warmup=0, refresh_every=5, lr_mu=0.1)
+    assert fm.refresh_every == 1
+    out = fm.step({"p": (0.2, 0.5, 0.1)}, {}, np.array([1.0, 0.0]))
+    g = fm.G.sum(axis=1)
+    g[2 * fm.n_sites:] = 0.0
+    expected = np.linalg.solve(fm.F + 0.5 * np.eye(fm.n_total), g)
+    assert np.isclose(out["p"], 0.1 * expected[0])
+    assert np.all(np.isfinite(fm.P))
+
+
+def test_beta_one_keeps_the_state_finite():
+    fm = FisherMatrix(param_names=["p"], beta=1.0, lambda_reg=0.5,
+                      warmup=0)
+    out = fm.step({"p": (0.2, 0.5, 0.1)}, {}, np.array([1.0, 0.0]))
+    assert out["p"] == 0.0
+    assert np.array_equal(fm.F, np.zeros_like(fm.F))
+    assert np.allclose(fm.P, 2.0 * np.eye(fm.n_total))
+
+
+def test_nonfinite_inverse_is_repaired():
+    fm = FisherMatrix(param_names=["p"], beta=0.9, lambda_reg=0.5,
+                      warmup=0, refresh_every=10**9)
+    fm.step({"p": (0.2, 0.5, 0.1)}, {}, np.array([1.0, 0.0]))
+    fm.P = np.full_like(fm.P, np.nan)
+    out = fm.step({"p": (0.1, 0.4, 0.0)}, {}, np.array([0.0, 1.0]))
+    assert np.all(np.isfinite(fm.P))
+    assert np.isfinite(out["p"])
 
 
 def test_ensure_names_rebuilds_the_inverse():
@@ -254,7 +320,9 @@ def test_ensure_names_rebuilds_the_inverse():
                       warmup=0, refresh_every=10**9)
     for _ in range(3):
         fm.step({"a": (0.1, 0.5, 0.0)}, {}, np.array([1.0, 0.0]))
+    assert fm._steps_since_refresh == 3
     fm.ensure_names(["a", "b"], [])
+    assert fm._steps_since_refresh == 0
     assert fm.P.shape == (4, 4)
     assert np.allclose(fm.P @ (fm.F + fm.lambda_reg * np.eye(4)), np.eye(4),
                        atol=1e-10)
@@ -287,9 +355,10 @@ def test_inverse_stays_symmetric_and_positive_definite():
         sites = {f"p{i}": (float(rng.normal(0, 0.2)), 0.5, 0.0)
                  for i in range(10)}
         fm.step(sites, {}, rng.normal(0, 1, 2))
-    assert np.all(np.isfinite(fm.P))
-    assert np.allclose(fm.P, fm.P.T, atol=1e-10)
-    assert np.linalg.eigvalsh(fm.P).min() > 0.0
+        assert 0 <= fm._steps_since_refresh < 5
+        assert np.all(np.isfinite(fm.P))
+        assert np.allclose(fm.P, fm.P.T, atol=1e-10)
+        assert np.linalg.eigvalsh(fm.P).min() > 0.0
 
 
 def test_phase_shift_refreshes_before_kmax():

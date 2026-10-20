@@ -171,12 +171,11 @@ class Agent:
         error_vec = self.compute_vector_error(smoothed_out, smoothed_tgt)
         loss = float(np.mean(error_vec))
 
-        # Normalize phase: str broadcasts to one key per output component;
-        # a sequence is keyed per component (per-leg phase).
-        if isinstance(phase, str):
-            phase_key = phase
-        else:
-            phase_key = tuple(phase)
+        # Normalize phase to one key per output component so a string and an
+        # equivalent per-leg tuple compare equal ("stance" == ("stance",)*n).
+        phase_key = tuple(
+            self.strategy._per_component_phases(phase, len(error_vec)))
+        phase_record = phase if isinstance(phase, str) else phase_key
 
         phase_shift = (self._prev_phase is not None
                        and phase_key != self._prev_phase)
@@ -230,7 +229,7 @@ class Agent:
         self.history["error_vector"].append(np.asarray(error_vec, dtype=np.float64))
         self.history["loss"].append(loss)
         self.history["advantage_vector"].append(np.asarray(advantage_vec, dtype=np.float64))
-        self.history["phase"].append(phase_key)
+        self.history["phase"].append(phase_record)
         self.history["influence"].append(self.strategy.influence())
         for name, param in self.params.items():
             self.history["means"].setdefault(name, []).append(float(param.mean))
@@ -241,7 +240,7 @@ class Agent:
             "error_vector": np.asarray(error_vec, dtype=np.float64),
             "loss": loss,
             "advantage_vector": np.asarray(advantage_vec, dtype=np.float64),
-            "phase": phase_key,
+            "phase": phase_record,
             "influence": self.strategy.influence(),
             "delta_means": dict(delta_means),
         }
