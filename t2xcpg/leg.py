@@ -10,6 +10,13 @@ from t2xcpg.utils import (
 )
 
 
+# Ib -> antagonist rhythm generator. Inhibitory: an Ib interneuron must not
+# excite the antagonist half-centre. Value is the reference's paired constant
+# W_IN2RG (cpg_2legs_fast.py:90); our rg_*->in_ib_* already uses its pair
+# W_RG2IN = 8.0.
+W_IB2RG = -18.0
+
+
 class Leg:
     """
     CPG Leg network matching Diagram 2.
@@ -300,16 +307,16 @@ class Leg:
         self._connect(f"r_f_{leg}", f"ia_f_{leg}", weight=-12.0, p=0.40)   # R-F -| Ia-F
 
         # --- Ib Golgi tendon organ, disynaptic via Ib interneurons (project values) ---
-        # Extensor Ib: GTO -> InIb-E -> {M-E inh, M-F exc, RGF exc}
+        # Extensor Ib: GTO -> InIb-E -> {M-E inh, M-F exc, RGF inh}
         self._connect(f"ib_e_in_{leg}", f"in_ib_e_{leg}", weight=16.0, p=0.40)   # GTO -> InIb-E
         self._connect(f"in_ib_e_{leg}", f"m_e_{leg}", weight=-18.0, p=0.40)      # autogenic inhibition
         self._connect(f"in_ib_e_{leg}", f"m_f_{leg}", weight=12.0, p=0.35)       # disinhibit flexor
-        self._connect(f"in_ib_e_{leg}", f"rg_f_{leg}", weight=10.0, p=0.35)      # phase switch -> flexion
-        # Flexor Ib: GTO -> InIb-F -> {M-F inh, M-E exc, RGE exc}
+        self._connect(f"in_ib_e_{leg}", f"rg_f_{leg}", weight=W_IB2RG, p=0.35)  # Ib-E inhibits RG-F
+        # Flexor Ib: GTO -> InIb-F -> {M-F inh, M-E exc, RGE inh}
         self._connect(f"ib_f_in_{leg}", f"in_ib_f_{leg}", weight=16.0, p=0.40)   # GTO -> InIb-F
         self._connect(f"in_ib_f_{leg}", f"m_f_{leg}", weight=-18.0, p=0.40)      # autogenic inhibition
         self._connect(f"in_ib_f_{leg}", f"m_e_{leg}", weight=12.0, p=0.35)       # disinhibit extensor
-        self._connect(f"in_ib_f_{leg}", f"rg_e_{leg}", weight=10.0, p=0.35)      # phase switch -> extension
+        self._connect(f"in_ib_f_{leg}", f"rg_e_{leg}", weight=W_IB2RG, p=0.35)  # Ib-F inhibits RG-E
 
         # --- Ib interneuron convergence (spindle, CPG) ---
         self._connect(f"ia_e_in_{leg}", f"in_ib_e_{leg}", weight=8.0, p=0.30)    # Ia -> InIb-E
