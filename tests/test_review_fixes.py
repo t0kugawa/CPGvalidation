@@ -235,6 +235,12 @@ def test_rg_recorders_are_read_and_cleared(nest_kernel):
 
     reg = Registry()
     leg = CPG_Leg("L", reg, n_rg=8, n_mn=8, n_int=6, n_aff=6)
+    # A bare leg has no brainstem, so whether RG-E has fired within 50 ms is a
+    # marginal stochastic transient (measured 0-11 spikes, depending on the
+    # connection draw; 17-45 by 250 ms). This test is about the recorders being
+    # read and cleared, not about excitability, so make the spiking precondition
+    # deterministic rather than dependent on the RNG stream position.
+    leg.rg_e.set({"I_e": 100.0})
     nest.Simulate(50.0)
     assert leg.rec_rge.get("events")["times"].size > 0, "RGE must have spiked"
     rg_e, rg_f = leg.get_rg_rates(10.0, 50.0)
