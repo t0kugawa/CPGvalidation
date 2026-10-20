@@ -618,6 +618,18 @@ and accuracy**:
 - **Design:** ≥10 seeds per cell, report median/IQR; the fast e2e is only a
   smoke test, not a statistical result.
 
+## Remaining acceptance (not blockers for the rework)
+
+- [ ] **Long run with production settings** (`lr_mu=0.03`, `tau_mem_s=2.0`,
+  `realize_every_k=1`): confirm the loss trend and `max|Δμ|` over ≥20 s. The
+  fast 400-step e2e is a smoke test; `(1−β)=0.005` makes the effective credit
+  gain small, so learning may need a longer horizon. Do not rescale `g`
+  silently (reviewer checklist, T7).
+- [ ] **Paper status/future sections**: refresh `docs/main.tex` §Status and
+  §Further improvements after the recent drive/BS fixes; the PERSONA and
+  pipeline sections are already in sync with the single-σ + declared-R design.
+- [ ] **(Deferred)** noise characterization matrix (above).
+
 ## Self-Review
 
 - Spec coverage: §5.1→T1; §5.2→T4; §5.3→T2; §5.4→T3; §5.5→T2+T4; §5.6→T3+T5; §8→spread; V22→T1;
