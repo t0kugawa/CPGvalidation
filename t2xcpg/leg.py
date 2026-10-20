@@ -10,11 +10,12 @@ from t2xcpg.utils import (
 )
 
 
-# Ib -> antagonist rhythm generator. Inhibitory: an Ib interneuron must not
-# excite the antagonist half-centre. Value is the reference's paired constant
-# W_IN2RG (cpg_2legs_fast.py:90). The RG->Ib counterpart was removed: it drove
-# the network past its operating band and has no counterpart in the reference.
-W_IB2RG = -18.0
+# Ib -> antagonist rhythm generator. Excitatory phase switch: rising extensor
+# force must drive the flexor half-centre (CPG spec §5.3, "contralateral-phase
+# RG exc"), not clamp it. Magnitude keeps the reference's paired constant
+# W_IN2RG (cpg_2legs_fast.py:90) with the sign inverted. The RG->Ib counterpart
+# was removed: it drove the network past its operating band.
+W_IB2RG = 18.0
 
 
 class Leg:
@@ -335,16 +336,16 @@ class Leg:
         self._connect(f"r_f_{leg}", f"ia_f_{leg}", weight=-2.4, p=0.40)    # R-F -| Ia-F
 
         # --- Ib Golgi tendon organ, disynaptic via Ib interneurons (project values) ---
-        # Extensor Ib: GTO -> InIb-E -> {M-E inh, M-F exc, RGF inh}
+        # Extensor Ib: GTO -> InIb-E -> {M-E inh, M-F exc, RGF exc (phase switch)}
         self._connect(f"ib_e_in_{leg}", f"in_ib_e_{leg}", weight=16.0, p=0.40)   # GTO -> InIb-E
         self._connect(f"in_ib_e_{leg}", f"m_e_{leg}", weight=-18.0, p=0.40)      # autogenic inhibition
         self._connect(f"in_ib_e_{leg}", f"m_f_{leg}", weight=12.0, p=0.35)       # disinhibit flexor
-        self._connect(f"in_ib_e_{leg}", f"rg_f_{leg}", weight=W_IB2RG, p=0.35)  # Ib-E inhibits RG-F
-        # Flexor Ib: GTO -> InIb-F -> {M-F inh, M-E exc, RGE inh}
+        self._connect(f"in_ib_e_{leg}", f"rg_f_{leg}", weight=W_IB2RG, p=0.35)  # Ib-E excites RG-F (phase switch)
+        # Flexor Ib: GTO -> InIb-F -> {M-F inh, M-E exc, RGE exc (phase switch)}
         self._connect(f"ib_f_in_{leg}", f"in_ib_f_{leg}", weight=16.0, p=0.40)   # GTO -> InIb-F
         self._connect(f"in_ib_f_{leg}", f"m_f_{leg}", weight=-18.0, p=0.40)      # autogenic inhibition
         self._connect(f"in_ib_f_{leg}", f"m_e_{leg}", weight=12.0, p=0.35)       # disinhibit extensor
-        self._connect(f"in_ib_f_{leg}", f"rg_e_{leg}", weight=W_IB2RG, p=0.35)  # Ib-F inhibits RG-E
+        self._connect(f"in_ib_f_{leg}", f"rg_e_{leg}", weight=W_IB2RG, p=0.35)  # Ib-F excites RG-E (phase switch)
 
         # --- Ib interneuron convergence (spindle, CPG) ---
         self._connect(f"ia_e_in_{leg}", f"in_ib_e_{leg}", weight=8.0, p=0.30)    # Ia -> InIb-E

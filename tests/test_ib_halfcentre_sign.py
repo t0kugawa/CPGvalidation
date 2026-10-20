@@ -1,4 +1,10 @@
-"""Ib interneurons must inhibit the antagonist half-centre; mutual excitation is the defect, not a tuning choice."""
+"""Ib interneurons must excite the antagonist half-centre (phase switch).
+
+The 2026-10-20 detailed scheme draws the Ib projection into the CPG as a
+"phase-switch signal"; the CPG spec (§5.3) resolves it as
+`contralateral-phase RG exc`. Excitation is the functional requirement: rising
+extensor force must drive the flexor half-centre, not clamp it.
+"""
 import pytest
 
 from persona.registry import Registry
@@ -6,23 +12,22 @@ from t2xcpg.leg import Leg
 
 
 @pytest.mark.parametrize("leg_name", ["L", "R"])
-def test_ib_inhibits_antagonist_rg(nest_kernel, leg_name):
+def test_ib_excites_antagonist_rg(nest_kernel, leg_name):
     reg = Registry()
     Leg(leg_name, reg, n_rg=8, n_mn=8, n_int=6, n_aff=6)
 
     w = lambda k: reg.connection_cfgs[k].parameters["weight"].mean
 
-    # Second hop of the Ib motif: excitatory Ib interneurons must not close a
-    # positive loop onto the antagonist rhythm generator.
+    # Second hop of the Ib motif: the phase-switch signal is excitatory.
     for agonist, antagonist in (("e", "f"), ("f", "e")):
-        assert w(f"in_ib_{agonist}_{leg_name}_rg_{antagonist}_{leg_name}") < 0.0
+        assert w(f"in_ib_{agonist}_{leg_name}_rg_{antagonist}_{leg_name}") > 0.0
 
         # Guard against a future re-inversion: every in_ib_* projection onto
-        # the antagonist RG population must be inhibitory.
+        # the antagonist RG population must be excitatory.
         target = f"rg_{antagonist}_{leg_name}"
         for key, cfg in reg.connection_cfgs.items():
             if cfg.source.startswith(f"in_ib_{agonist}_{leg_name}") and cfg.target == target:
-                assert cfg.parameters["weight"].mean < 0.0, key
+                assert cfg.parameters["weight"].mean > 0.0, key
 
 
 @pytest.mark.parametrize("leg_name", ["L", "R"])

@@ -5,6 +5,12 @@ Status: approved (chat, 2026-10-15; strategy revision agreed 2026-10-16)
 Supersedes the PERSONA-strategy and CPG-initialisation sections of
 `2026-10-14-persona-cpg-mujoco-design.md`. Everything else there still holds.
 
+> **Superseded (CPG circuit, 2026-10-20):** §3, §5.3, §5.4 and the CPG part of
+> §5.6 are superseded by
+> `2026-10-20-persona-variantB-cpg-mvp-v2-design.md` (V-cell commissural relay,
+> excitatory Ib→RG, no M↔M, explicit Ia project additions). The PERSONA
+> strategy sections remain as revised.
+
 ## 1. Intent
 
 Close the final gap to a ready MVP. Three coupled problems:
