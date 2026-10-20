@@ -1,15 +1,14 @@
 # Design (revision): PERSONA perturbation–advantage natural gradient + CPG bio-plausible init + render fix
 
+> **Superseded for CPG wiring (§5.3–5.4)** by
+> `2026-10-20-persona-variantB-cpg-vcells-design.md` (V-cell commissural relay,
+> scheme-confirmed Ia/Ib wiring). The PERSONA and render sections here remain
+> current.
+
 Date: 2026-10-15 (strategy revised 2026-10-16)
 Status: approved (chat, 2026-10-15; strategy revision agreed 2026-10-16)
 Supersedes the PERSONA-strategy and CPG-initialisation sections of
 `2026-10-14-persona-cpg-mujoco-design.md`. Everything else there still holds.
-
-> **Superseded (CPG circuit, 2026-10-20):** §3, §5.3, §5.4 and the CPG part of
-> §5.6 are superseded by
-> `2026-10-20-persona-variantB-cpg-mvp-v2-design.md` (V-cell commissural relay,
-> excitatory Ib→RG, no M↔M, explicit Ia project additions). The PERSONA
-> strategy sections remain as revised.
 
 ## 1. Intent
 

@@ -10,11 +10,11 @@ from t2xcpg.utils import (
 )
 
 
-# Ib -> antagonist rhythm generator. Excitatory phase switch: rising extensor
-# force must drive the flexor half-centre (CPG spec §5.3, "contralateral-phase
-# RG exc"), not clamp it. Magnitude keeps the reference's paired constant
-# W_IN2RG (cpg_2legs_fast.py:90) with the sign inverted. The RG->Ib counterpart
-# was removed: it drove the network past its operating band.
+# Ib -> antagonist rhythm generator. Excitatory: the detailed scheme draws the
+# InIb-E/F -> RGF/RGE projection with an excitatory arrow (the "CPG
+# phase-switch signal"), and the 2026-10-15 spec calls it "contralateral-phase
+# RG exc". The earlier -18.0 came from W_IN2RG, a cpg_2legs_fast constant that
+# is defined but never connected; the sign was the error, the magnitude is kept.
 W_IB2RG = 18.0
 
 
@@ -336,12 +336,12 @@ class Leg:
         self._connect(f"r_f_{leg}", f"ia_f_{leg}", weight=-2.4, p=0.40)    # R-F -| Ia-F
 
         # --- Ib Golgi tendon organ, disynaptic via Ib interneurons (project values) ---
-        # Extensor Ib: GTO -> InIb-E -> {M-E inh, M-F exc, RGF exc (phase switch)}
+        # Extensor Ib: GTO -> InIb-E -> {M-E inh, M-F exc, RGF inh}
         self._connect(f"ib_e_in_{leg}", f"in_ib_e_{leg}", weight=16.0, p=0.40)   # GTO -> InIb-E
         self._connect(f"in_ib_e_{leg}", f"m_e_{leg}", weight=-18.0, p=0.40)      # autogenic inhibition
         self._connect(f"in_ib_e_{leg}", f"m_f_{leg}", weight=12.0, p=0.35)       # disinhibit flexor
         self._connect(f"in_ib_e_{leg}", f"rg_f_{leg}", weight=W_IB2RG, p=0.35)  # Ib-E excites RG-F (phase switch)
-        # Flexor Ib: GTO -> InIb-F -> {M-F inh, M-E exc, RGE exc (phase switch)}
+        # Flexor Ib: GTO -> InIb-F -> {M-F inh, M-E exc, RGE inh}
         self._connect(f"ib_f_in_{leg}", f"in_ib_f_{leg}", weight=16.0, p=0.40)   # GTO -> InIb-F
         self._connect(f"in_ib_f_{leg}", f"m_f_{leg}", weight=-18.0, p=0.40)      # autogenic inhibition
         self._connect(f"in_ib_f_{leg}", f"m_e_{leg}", weight=12.0, p=0.35)       # disinhibit extensor

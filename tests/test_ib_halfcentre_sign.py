@@ -1,9 +1,9 @@
 """Ib interneurons must excite the antagonist half-centre (phase switch).
 
-The 2026-10-20 detailed scheme draws the Ib projection into the CPG as a
-"phase-switch signal"; the CPG spec (§5.3) resolves it as
-`contralateral-phase RG exc`. Excitation is the functional requirement: rising
-extensor force must drive the flexor half-centre, not clamp it.
+The detailed scheme draws InIb-E/F -> RGF/RGE with an excitatory arrow, and
+the 2026-10-15 spec lists it as `contralateral-phase RG exc`. The earlier
+inhibitory sign came from W_IN2RG, a cpg_2legs_fast constant that is defined
+but never connected.
 """
 import pytest
 
@@ -18,16 +18,20 @@ def test_ib_excites_antagonist_rg(nest_kernel, leg_name):
 
     w = lambda k: reg.connection_cfgs[k].parameters["weight"].mean
 
-    # Second hop of the Ib motif: the phase-switch signal is excitatory.
+    # Extensor force (InIb-E) drives the flexor half-centre and vice versa:
+    # the Ib "phase-switch" signal must be excitatory.
     for agonist, antagonist in (("e", "f"), ("f", "e")):
-        assert w(f"in_ib_{agonist}_{leg_name}_rg_{antagonist}_{leg_name}") > 0.0
+        key = f"in_ib_{agonist}_{leg_name}_rg_{antagonist}_{leg_name}"
+        assert w(key) > 0.0, key
 
-        # Guard against a future re-inversion: every in_ib_* projection onto
-        # the antagonist RG population must be excitatory.
         target = f"rg_{antagonist}_{leg_name}"
-        for key, cfg in reg.connection_cfgs.items():
+        for name, cfg in reg.connection_cfgs.items():
             if cfg.source.startswith(f"in_ib_{agonist}_{leg_name}") and cfg.target == target:
-                assert cfg.parameters["weight"].mean > 0.0, key
+                assert cfg.parameters["weight"].mean > 0.0, name
+
+    # The autogenic inhibition of the homonymous motor pool stays inhibitory.
+    for m in ("e", "f"):
+        assert w(f"in_ib_{m}_{leg_name}_m_{m}_{leg_name}") < 0.0
 
 
 @pytest.mark.parametrize("leg_name", ["L", "R"])
