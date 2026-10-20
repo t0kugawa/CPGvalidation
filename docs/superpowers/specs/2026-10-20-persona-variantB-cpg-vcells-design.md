@@ -204,7 +204,39 @@ is upstream (half-centre / BS drive), not commissural. If the relay is meant
 to carry functional interlimb coupling, its weights need scaling after the
 half-centre is out of the co-active regime.
 
-## 8. Open issues
+## 8. Runtime resolution (2026-10-21)
+
+The closed loop must run at **0.2 ms**, the `cpg_2legs_fast` default. The port
+had hardcoded **1.0 ms** in `personalize.py`; at that step the izhikevich
+network locks into a resolution-induced limit cycle and the drive readout
+saturates. Same FINAL network, zero sensory input, seed 0:
+
+| resolution (ms) | mE (Hz) | mF (Hz) | rgE (Hz) | rgF (Hz) |
+|---:|---:|---:|---:|---:|
+| 0.1 | 75 | 63 | 105 | 136 |
+| 0.2 | 197 | 83 | 421 | 141 |
+| 0.5 | 180 | 38 | 476 | 27 |
+| **1.0** | **471** | **500** | **500** | **459** |
+| 2.0 | 252 | 248 | 248 | 175 |
+
+At 1.0 ms both motor pools sit at the step ceiling (~500 Hz = one spike every
+two steps). Fixed sensory inputs barely move them (flexor: no sensory 500,
+IaF 100 422, IaF 250 405 Hz; removing the homonymous `Ia_F→M_F` raised it to
+476 — an attractor flip), so the **step, not the synaptic weights, sets the
+rate**. That is why PERSONA could not move the flexor: the flexor drive was
+pinned at 1.0 by numerics, not by the CPG.
+
+`ref_hz=700` was calibrated at 0.2 ms (p95 569 extensor / 342 flexor); running
+the loop at 1.0 ms made the calibration and the dynamics disagree.
+
+The production path now uses `DEFAULT_RESOLUTION_MS = 0.2`, exposes
+`--resolution-ms` in `run_validation.py` and `run_2min.py`, and records
+`resolution_ms` in `run.h5`. `tests/test_run_resolution.py` guards the default
+and checks that the flexor drive stays graded at 0.2 ms. The 33 s server log
+(1.0 ms) is not a valid C1 measurement; rerun at 0.2 ms. The 0.2 ms NEST step
+is 5× more work than 1.0 ms, so use `--realize-every-k` to bound wall time.
+
+## 9. Open issues
 
 - Half-centre co-activation (E/F corr +0.58…+0.91; reference alternates).
 - V-cell relay gain: 0.75/1.2/1.3/1.5 vs the removed −20/−8. Scaling is a

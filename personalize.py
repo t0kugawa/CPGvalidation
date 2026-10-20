@@ -64,15 +64,22 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
                        ref_hz: float = 100.0,
                        belt_mode: str = "dataset",
                        loop: bool = True,
-                       tau_mem_s: float = 2.0) -> tuple[Personalizer, MocapLoader]:
+                       tau_mem_s: float = 2.0,
+                       resolution_ms: float = 0.2) -> tuple[Personalizer, MocapLoader]:
     """
     Builds the full closed loop: bilateral CPG (via the PERSONA registry),
     bilateral MuJoCo rig, PERSONA agent, and the mocap-driven target limb.
     """
+    if resolution_ms <= 0:
+        raise ValueError(f"resolution_ms must be > 0, got {resolution_ms}")
     np.random.seed(seed)
     reset_rng_stream(seed)
     nest.ResetKernel()
-    nest.SetKernelStatus({"resolution": 1.0, "print_time": False})
+    # 0.2 ms is the `cpg_2legs_fast` default. At 1.0 ms the izhikevich network
+    # locks into a resolution-induced limit cycle (~500 Hz motor pools at zero
+    # sensory input), which pins the flexor drive at 1.0 regardless of PERSONA.
+    nest.SetKernelStatus({"resolution": float(resolution_ms),
+                          "print_time": False})
     try:
         nest.verbosity = nest.VerbosityLevel.ERROR
     except Exception:

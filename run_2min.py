@@ -15,9 +15,13 @@ Usage:
 
 Server notes:
     --snapshot-s 900        atomic run.h5/run_log.csv checkpoints every 15 min
+    --resolution-ms 0.2     NEST resolution (default: the cpg_2legs_fast value).
+                            Do not raise it to 1.0: the izhikevich network then
+                            locks into a ~500 Hz limit cycle and the flexor drive
+                            pins at 1.0 no matter what PERSONA samples.
     --realize-every-k K     sample+realize every K steps (1 = full fidelity).
-                            At FINAL, K=1 costs ~2.6 s/step on a laptop, so a
-                            120 s run is ~8.6 h there and much less on a server.
+                            At FINAL, K=1 costs several s/step on a laptop, so a
+                            120 s run is many hours there and much less on a server.
     --budget-s N            stop after N seconds of wall clock (0/absent = off)
 """
 import os
@@ -42,6 +46,10 @@ def main():
                     help="skip the mp4 (headless server)")
     ap.add_argument("--ref-hz", type=float, default=run_validation.DEFAULT_REF_HZ,
                     help="motor rate mapped to full muscle drive")
+    ap.add_argument("--resolution-ms", type=float,
+                    default=run_validation.DEFAULT_RESOLUTION_MS,
+                    help="NEST resolution in ms (default 0.2; 1.0 saturates the "
+                         "izhikevich network and pins the flexor drive)")
     ap.add_argument("--belt", type=str, default="dataset",
                     choices=("dataset", "model"))
     ap.add_argument("--snapshot-s", type=float, default=900.0,
@@ -63,7 +71,8 @@ def main():
         n_bs=POPULATIONS_FINAL["n_bs"],
         render=not args.no_render, budget_s=args.budget_s,
         pose_max_s=args.pose_max_s, belt_mode=args.belt,
-        snapshot_s=args.snapshot_s, realize_every_k=args.realize_every_k)
+        snapshot_s=args.snapshot_s, realize_every_k=args.realize_every_k,
+        resolution_ms=args.resolution_ms)
 
 
 if __name__ == "__main__":
