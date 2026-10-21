@@ -60,6 +60,9 @@ def main():
                     help="stop after this many seconds of real time")
     ap.add_argument("--pose-max-s", type=float, default=1.0,
                     help="cap on the settling (pose) stage, in seconds")
+    ap.add_argument("--cut-multisite", action="store_true",
+                    help="Option B: one CUT Poisson relay and STDP projection "
+                         "per plantar site (requires the PERSONA update)")
     args = ap.parse_args()
     run_validation.run(
         duration_s=args.duration_s, view=args.view,
@@ -72,7 +75,8 @@ def main():
         render=not args.no_render, budget_s=args.budget_s,
         pose_max_s=args.pose_max_s, belt_mode=args.belt,
         snapshot_s=args.snapshot_s, realize_every_k=args.realize_every_k,
-        resolution_ms=args.resolution_ms)
+        resolution_ms=args.resolution_ms,
+        cut_multisite=args.cut_multisite)
 
 
 if __name__ == "__main__":

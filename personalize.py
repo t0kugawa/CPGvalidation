@@ -65,10 +65,15 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
                        belt_mode: str = "dataset",
                        loop: bool = True,
                        tau_mem_s: float = 2.0,
-                       resolution_ms: float = 0.2) -> tuple[Personalizer, MocapLoader]:
+                       resolution_ms: float = 0.2,
+                       cut_multisite: bool = False) -> tuple[Personalizer, MocapLoader]:
     """
     Builds the full closed loop: bilateral CPG (via the PERSONA registry),
     bilateral MuJoCo rig, PERSONA agent, and the mocap-driven target limb.
+
+    `cut_multisite` opts into one CUT Poisson relay and STDP projection per
+    plantar site (Option B). It changes the PERSONA parameter dimension, so it
+    defaults off until the policy is updated for the per-site keys.
     """
     if resolution_ms <= 0:
         raise ValueError(f"resolution_ms must be > 0, got {resolution_ms}")
@@ -89,9 +94,11 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
     bs = BrainStem(registry=reg, n_bs=n_bs, bs_e_hz=40.0, bs_f_hz=40.0)
     base = BaseDrive(registry=reg, n_bs=n_bs, base_hz=2.0)
     leg_l = CPG_Leg("L", reg, n_rg=n_rg, n_mn=n_mn, n_int=n_int, n_aff=n_aff,
-                    w_scale=w_scale, ref_hz=ref_hz)
+                    w_scale=w_scale, ref_hz=ref_hz,
+                    cut_multisite=cut_multisite)
     leg_r = CPG_Leg("R", reg, n_rg=n_rg, n_mn=n_mn, n_int=n_int, n_aff=n_aff,
-                    w_scale=w_scale, ref_hz=ref_hz)
+                    w_scale=w_scale, ref_hz=ref_hz,
+                    cut_multisite=cut_multisite)
     cpg = L2CPG(registry=reg, bs=bs, legs={"L": leg_l, "R": leg_r}, dt_ms=DT_MS,
                 leading_leg="L", leading_gain=1.5, base=base)
 
@@ -187,7 +194,8 @@ def run_personalization(reference_path: str = DEFAULT_REFERENCE,
                         log_every: int = 20,
                         belt_mode: str = "dataset",
                         tau_mem_s: float = 2.0,
-                        realize_every_k: int = 1) -> dict:
+                        realize_every_k: int = 1,
+                        cut_multisite: bool = False) -> dict:
     """
     Full experiment: build the loop, run the two-stage PERSONA optimization,
     write the validation figure, the CSV/npz logs, and return the acceptance dict.
@@ -204,7 +212,7 @@ def run_personalization(reference_path: str = DEFAULT_REFERENCE,
         reference_path=reference_path, max_steps=n_steps,
         eps_pose=eps_pose, pose_hold_steps=pose_hold_steps,
         loss_stop=loss_stop, loss_window=loss_window, belt_mode=belt_mode,
-        tau_mem_s=tau_mem_s, **sizes)
+        tau_mem_s=tau_mem_s, cut_multisite=cut_multisite, **sizes)
     personalizer.verbose = verbose
     personalizer.log_every = log_every
 
@@ -282,10 +290,12 @@ def _save_combined_figure(log, output_dir: str):
 
 def main(n_steps: int = 200, small: bool = False, output_dir: str | None = None,
          verbose: bool = True, log_every: int = 20,
-         tau_mem_s: float = 2.0, realize_every_k: int = 1) -> dict:
+         tau_mem_s: float = 2.0, realize_every_k: int = 1,
+         cut_multisite: bool = False) -> dict:
     res = run_personalization(n_steps=n_steps, small=small, output_dir=output_dir,
                               verbose=verbose, log_every=log_every,
-                              tau_mem_s=tau_mem_s, realize_every_k=realize_every_k)
+                              tau_mem_s=tau_mem_s, realize_every_k=realize_every_k,
+                              cut_multisite=cut_multisite)
     print(f"Steps: {res['n_steps_done']} (pose {res['n_pose']}, track {res['n_track']})")
     print(f"Final loss (last-20 mean): {res['final_loss']:.4f}")
     print(f"Acceptable: {res['acceptable']} | angle coverage: {res['angle_coverage']:.2f}")
@@ -303,5 +313,9 @@ if __name__ == "__main__":
     ap.add_argument("--realize-every-k", type=int, default=1,
                     help="sample + realize + record the network every k steps "
                          "(strategy still updates every dt)")
+    ap.add_argument("--cut-multisite", action="store_true",
+                    help="Option B: one CUT Poisson relay and STDP projection "
+                         "per plantar site (changes the PERSONA dimension)")
     args = ap.parse_args()
-    main(tau_mem_s=args.tau_mem_s, realize_every_k=args.realize_every_k)
+    main(tau_mem_s=args.tau_mem_s, realize_every_k=args.realize_every_k,
+         cut_multisite=args.cut_multisite)

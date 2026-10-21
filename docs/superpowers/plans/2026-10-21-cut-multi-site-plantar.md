@@ -1,6 +1,9 @@
 # CUT multi-site plantar plan (update)
 
-**Status:** accepted for implementation 2026-10-21. Option A is in scope now; Option B follows the PERSONA update. T0 has been run.
+**Status:** accepted for implementation 2026-10-21. Option A is committed
+(`50f3c59`). Option B is implemented **opt-in** (`cut_multisite=False` by
+default) so the current PERSONA dimension is unchanged until the user's update
+is in place. T0 and both 4 s probes have been run.
 **Supersedes:** the single-site CUT table in `docs/superpowers/specs/2026-10-20-persona-variantB-cpg-vcells-design.md` §3.4, and the stale `cut_heel_0_{side}` touch-sensor test in `docs/superpowers/plans/2026-10-14-persona-cpg-personalization.md` Task 8.
 **Authority:** the `TODO(cut-multi-site)` in `model/cut.py` (user-specified) + the user's bio-CUT specification (2026-10-21) + the existing `rct_*` sites in `dual_rat_hindlimb.xml` + the 120 s run log.
 
@@ -88,7 +91,7 @@ active_s = (A_s > 0) and (F_s > F_active)
 The CPG side has two stages:
 
 - **A (now):** the model computes the 8 per-site rates and the active buffer; the CPG still has one Poisson generator per leg, driven by the aggregate. This removes the 0/120 square wave without changing the PERSONA dimension.
-- **B (after the PERSONA update):** the CPG has one Poisson generator per site, each fed by its own rate and gated by the active buffer; each site has its own STDP projection to RG-E. This preserves the heel→toe spike sequence.
+- **B (opt-in, implemented):** the CPG has one Poisson generator per site, each fed by its own rate and gated by the active buffer; each site has its own STDP projection to RG-E. This preserves the heel→toe spike sequence. It is off by default so the existing PERSONA dimension is untouched until the user's update enables it.
 
 The user's T1 concern — "it won't work without environment feedback in the loop" — is satisfied by construction: T1 reads `data.contact` and `data.site_xpos` **after every `mj_step`** inside `Leg.step`. The site layout is fixed; the forces and the active set are live environment feedback.
 
@@ -137,15 +140,47 @@ This stays on the current 0–120 Hz scale, weights a loaded heel more than an e
 - Persona impact: **none** (same producers, same STDP keys, same parameter count).
 - Limitation: the CPG does not see the heel→toe **sequence** as separate spike trains; the per-site STDP cannot learn site-specific phases.
 
-**Option B (next, after the PERSONA update): per-site Poisson generators, per-site STDP.**
-- Replace the single relay with 8 per-site relays per leg, `n_aff_site = max(1, n_aff // 8)` = 12 at FINAL (so the total afferents per leg stay ~100 and the total CUT synapse count stays ~3500).
-- Each site’s Poisson group is fed by its own rate and is **in the active buffer only while that site is in contact**; inactive sites get rate 0 and are not allowed to drive STDP.
+**Option B (implemented, opt-in): per-site Poisson generators, per-site STDP.**
+- `cut_multisite=True` replaces the single relay with 8 per-site relays per leg, `n_aff_site = max(1, n_aff // 8)` = 12 at FINAL (so the total afferents per leg stay ~96 and the CUT→RGE synapse count stays ~3500).
+- Each site’s Poisson group is fed by its own rate and is **in the active buffer only while that site is in contact**; inactive sites get rate 0 and cannot drive STDP. Empty per-site tuples (the initial `CPGInput()` before the first MuJoCo step) mean all sites silent.
 - Each site → `rg_e` through its own STDP projection, key `cut_rge_{leg}_s{k}`; each site → `in_e` through a static projection (weight 6.0, p 0.30) so the total CUT→InE drive is preserved.
 - Per-site rates: `cut_afferent[site].get_cut_hz(local_force / A_s)`, gated by `active`.
-- Persona impact: **+16 STDP projections** (8 per leg) × 7 hyper-parameters = **+112 optimizable params**, and +16 STDP producer recorders. The registry/Fisher dimension grows; the user’s persona code must handle it. The Poisson groups can be created with `noise_name=None` so the CUT **noise** features stay `cut_L/R`; the STDP weight-recorder producers still grow.
-- Limitation: this is the full phase-sequence design, but it requires the persona update first.
+- The old single `cut_pg_{leg}` remains as a **one-neuron noise tap** with `noise_name=cut_L/R`; it is not connected to RG/InE. This keeps the existing CUT noise feature without a second 100-afferent population.
+- Persona impact: **56 CUT-specific optimizable params per leg / 112 both legs** = 8 sites × (6 STDP hyper-parameters + 1 static InE weight). This replaces A's 7 per leg, so the net is **+49/leg (+98 total)**, not +112 relative to A. The registry/Fisher dimension grows; the user’s persona code must handle it when the flag is enabled. The per-site Poisson groups use `noise_name=None`, so the CUT **noise** features stay `cut_L/R`; the 16 STDP weight-recorder producers still grow.
+- Limitation: B is the full phase-sequence design, but the current plant is plantarflexed, so only the toe contacts; the heel→toe sequence cannot be observed until the plant rolls. B does not by itself fix C1/the latch.
 
 **Decision:** implement **A** now; implement **B** as the next step after the user’s persona update. A is not a substitute for B: it fixes the square wave and gives the model-side per-site population code, while B is what lets the CPG see the heel→toe sequence as separate spike trains.
+
+### 2.4b Option B verification (2026-10-21)
+
+FINAL-size build-only check (one leg, `POPULATIONS_FINAL`, 0.2 ms):
+
+- 8 site relays × 12 afferents; aggregate noise tap is 1 generator + 1 parrot.
+- CUT→RGE synapses: `[416, 435, 423, 420, 404, 463, 426, 423]` = **3410** (target ~3500).
+- CUT→InE synapses: **1402**.
+- CUT-specific optimizable params: **56 per leg / 112 both legs**.
+
+4 s closed-loop probe (`test_results/cut_b_probe/probe.json`, 0.2 ms, fast CPG
+sizes, `n_aff=24` so every site gets synapses; 1 s pose + 3 s tracking):
+
+| leg | active sites (fraction) | site mean Hz | aggregate mean / zero / max | phase trans/s | stance |
+|---|---|---|---:|---:|---:|
+| L | toe 0.407 only | toe 44.3 | 44.3 / 0.59 / 0.97 | 1.67 | 0.42 |
+| R | heel_0 0.04, fore_0 0.01, toe 0.04 | 3.9 / 0.9 / 4.4 | 8.1 / 0.92 / 0.99 | 1.33 | 0.07 |
+
+The probe ran through MuJoCo feedback and the user's current PERSONA strategy
+without dimension errors. RG means: L E/F 0.018/0.393, R 0.105/0.234. Only the
+toe is loaded on L; R touches heel/fore/toe. The controlled foot is still
+plantarflexed, so a heel→toe sequence is not observable yet. B is the full
+per-site population code and STDP path, now verified; it does not by itself fix
+tracking or the latch.
+
+CLI smoke test: `run_validation.py --fast --cut-multisite --no-render` completed
+4 s and wrote all outputs; `run.h5` attrs read `cut_multisite=True`,
+`resolution_ms=0.2`, `n_aff=3`, `n_rg=6`. `--fast`'s `n_aff=3` yields
+`n_aff_site=1`, so some per-site projections can realize zero synapses (logged
+as apply-errors). That is a fast-size artifact; use `n_aff>=24` for B
+diagnostics and `--final` for the 120 s run.
 
 ### 2.5 Phase hysteresis (B2)
 
@@ -175,8 +210,8 @@ The first 4 s probe used 20 ms and still chattered at 5.0/7.3 transitions per se
 | T2 | Aggregate `cut_hz = area×density-weighted mean(active rates)`; keep `cut_L/R` scale | `model/leg.py` | aggregate bounds 0–120; no active → 0 |
 | T3 | `CPGInput.cut_sites_L/R` + `cut_active_L/R` + `Leg.step` return | `model/adapter.py`, `model/leg.py` | adapter field test |
 | T4a | **Option A:** feed the aggregate through the existing `cut_L/R` → `cut_pg`/`cut_in` path; **no `t2xcpg` change** | `model/leg.py`, `model/adapter.py` | CUT→RGE key unchanged; registry recorder test |
-| T4b | **Option B (after persona):** 8 per-site Poisson relays, active buffer, `cut_rge_{leg}_s{k}` STDP, per-site CUT→InE | `t2xcpg/leg.py`, `t2xcpg/cpg.py` | per-site keys exist; active sites only; synapse count ~3500/leg; registry test |
-| T5 | Phase Schmitt trigger + 20 ms debounce | `model/leg.py` | noisy contact sequence → transitions ≤ 1 per debounce |
+| T4b | **Option B (opt-in, implemented):** 8 per-site Poisson relays, active buffer, `cut_rge_{leg}_s{k}` STDP, per-site CUT→InE | `t2xcpg/leg.py`, `t2xcpg/cpg.py`, `personalize.py`, `run_validation.py`, `run_2min.py` | `tests/test_cut_multisite_cpg.py` (7); FINAL count 3410/leg; 4 s probe §2.4b |
+| T5 | Phase Schmitt trigger + 50 ms debounce (20 ms tested and rejected) | `model/leg.py` | noisy contact sequence → transitions ≤ 1 per debounce |
 | T6 | Per-site logging in `RunLog` (user-owned) | `persona/personalization.py` | **not in this plan**; user adds |
 | T7 | **4 s only** diagnostic at 0.2 ms with A; check per-site sequence, aggregate, phase, RG | `run_validation.py --fast` | n/a |
 | T8 | **120 s final validation after A/B and the persona fix; user runs it** | server | n/a |
@@ -188,8 +223,8 @@ The first 4 s probe used 20 ms and still chattered at 5.0/7.3 transitions per se
 - **No 0/120 square wave:** the aggregate CUT varies with local force/CoP within stance; the per-site rates show a heel→toe sequence (heel leads, toe lags).
 - **Phase:** ~2–4 transitions/s per leg, not 19/s; `both stance` no longer 58 % from chatter.
 - **CPG:** with the persona fix in place, RG E/F alternates (CI << 0.99) and the ankle RMSE falls; if the seed diagnostic already alternates, no half-centre seed change is made.
-- **Tests:** the existing 174 tests pass; `tests/test_cut_sites.py` covers contact→site, active list, aggregate, phase debounce, and (Option B) per-site keys.
-- **Cost:** Option B stays at ~100 CUT afferents and ~3500 CUT synapses per leg; the 4 s diagnostic measures wall time.
+- **Tests:** 191 pass (excluding the user's untracked `tests/test_bench_recursive_inverse.py`); `tests/test_cut_sites.py` covers contact→site, active list, aggregate, and phase debounce; `tests/test_cut_multisite_cpg.py` covers the Option B per-site keys, active gating, parameter count, and default-A invariance.
+- **Cost:** Option B stays at ~96 CUT afferents and 3410 CUT→RGE synapses per leg at FINAL; the 4 s diagnostic measures wall time.
 
 ---
 
@@ -204,6 +239,8 @@ The first 4 s probe used 20 ms and still chattered at 5.0/7.3 transitions per se
 7. **V-cell relay:** T0 shows the seed retains L/R alternation (anti-phase 0.92) and the persona means abolish it (0.00–0.07); no relay-gain calibration is in scope. The relay remains a separate CPG ticket if a future seed-only probe with physiological Ia/Ib shows it is too weak.
 8. **T1 concern:** T1 is live environment feedback — it reads MuJoCo contacts after every `mj_step`. The only fixed quantities are the XML site geometry and the area/density priors.
 9. **Run scope:** T7 is 4 s only. The 120 s FINAL run is the user's, after the PERSONA update; no `--fast` for the final run.
+10. **B gating:** B is opt-in (`cut_multisite=False` / `--cut-multisite`). This keeps the current PERSONA dimension and A behavior unchanged until the user's update is active. B's first `CPGInput()` is all-silent by design; a non-empty mismatched per-site tuple is an error.
+11. **B noise tap:** the aggregate `cut_pg` survives as a one-neuron, unconnected tap so `cut_L/R` producer features keep their old meaning without adding 100 extra CUT afferents.
 
 ---
 

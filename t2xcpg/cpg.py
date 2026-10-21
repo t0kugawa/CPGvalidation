@@ -127,7 +127,9 @@ class L2CPG(CPGAdapter):
                 ia_f_hz=cpg_in.ia_rate_F_L,
                 ib_e_hz=cpg_in.ib_rate_E_L,
                 ib_f_hz=cpg_in.ib_rate_F_L,
-                current_time_ms=self.current_time_ms
+                current_time_ms=self.current_time_ms,
+                cut_sites=cpg_in.cut_sites_L,
+                cut_active=cpg_in.cut_active_L,
             )
         if "R" in self.legs:
             self.legs["R"].update_sensory_feedback(
@@ -136,7 +138,9 @@ class L2CPG(CPGAdapter):
                 ia_f_hz=cpg_in.ia_rate_F_R,
                 ib_e_hz=cpg_in.ib_rate_E_R,
                 ib_f_hz=cpg_in.ib_rate_F_R,
-                current_time_ms=self.current_time_ms
+                current_time_ms=self.current_time_ms,
+                cut_sites=cpg_in.cut_sites_R,
+                cut_active=cpg_in.cut_active_R,
             )
 
     def step(self) -> CPGOutput:

@@ -104,7 +104,7 @@ def run(duration_s, view, width, height, fps, out_dir,
         n_rg, n_mn, n_int, n_aff, n_bs, render=True, budget_s=None,
         pose_max_s=1.0, belt_mode="dataset", snapshot_s=900.0,
         tau_mem_s=2.0, realize_every_k=1,
-        resolution_ms=DEFAULT_RESOLUTION_MS):
+        resolution_ms=DEFAULT_RESOLUTION_MS, cut_multisite=False):
     os.makedirs(out_dir, exist_ok=True)
     steps = int(round(duration_s / (DT_MS / 1000.0)))
     n_frames = int(round(duration_s * fps))
@@ -116,7 +116,7 @@ def run(duration_s, view, width, height, fps, out_dir,
         max_steps=steps, eps_pose=0.10, pose_hold_steps=3,
         loss_stop=1e-4, loss_window=20, w_scale=w_scale, ref_hz=ref_hz,
         belt_mode=belt_mode, loop=True, tau_mem_s=tau_mem_s,
-        resolution_ms=resolution_ms)
+        resolution_ms=resolution_ms, cut_multisite=cut_multisite)
     pers.belt_mps = float(belt_mps)
     pers.belt_start_step = int(round(belt_start_s / (DT_MS / 1000.0)))
     pers.belt_ramp_steps = max(1, int(round(belt_ramp_s / (DT_MS / 1000.0))))
@@ -128,6 +128,7 @@ def run(duration_s, view, width, height, fps, out_dir,
     def _meta(step, log):
         return {"duration_s": float(duration_s), "dt_ms": float(DT_MS),
                 "resolution_ms": float(resolution_ms),
+                "cut_multisite": bool(cut_multisite),
                 "belt_mode": str(belt_mode), "belt_z": float(rig.belt_z),
                 "n_steps": int(len(log.time_ms)), "snapshot_step": int(step)}
 
@@ -180,6 +181,7 @@ def run(duration_s, view, width, height, fps, out_dir,
                        # sizes (--final vs --debug-small) are invisible.
                        "ref_hz": float(ref_hz),
                        "resolution_ms": float(resolution_ms),
+                       "cut_multisite": bool(cut_multisite),
                        "w_scale": float(w_scale),
                        "n_rg": int(n_rg), "n_mn": int(n_mn),
                        "n_int": int(n_int), "n_aff": int(n_aff),
@@ -267,6 +269,9 @@ if __name__ == "__main__":
     ap.add_argument("--realize-every-k", type=int, default=1,
                     help="sample + realize + record the network every k steps "
                          "(strategy still updates every dt)")
+    ap.add_argument("--cut-multisite", action="store_true",
+                    help="Option B: one CUT Poisson relay and STDP projection "
+                         "per plantar site (changes the PERSONA dimension)")
     ap.add_argument("--fast", action="store_true",
                     help="quick low-res short run for iteration")
     args = ap.parse_args()
@@ -286,4 +291,5 @@ if __name__ == "__main__":
         budget_s=args.budget_s, pose_max_s=args.pose_max_s, belt_mode=args.belt,
         snapshot_s=args.snapshot_s, tau_mem_s=args.tau_mem_s,
         realize_every_k=args.realize_every_k,
-        resolution_ms=args.resolution_ms)
+        resolution_ms=args.resolution_ms,
+        cut_multisite=args.cut_multisite)

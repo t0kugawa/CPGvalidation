@@ -39,7 +39,9 @@ class Leg:
                  n_aff: int = 20,
                  p_scale: float = 1.0,
                  w_scale: float = 1.0,
-                 ref_hz: float = 100.0):
+                 ref_hz: float = 100.0,
+                 cut_multisite: bool = False,
+                 n_cut_sites: int = 8):
         self.leg = leg_name
         self.registry = registry
         self.n_rg = n_rg
@@ -49,6 +51,13 @@ class Leg:
         self.p_scale = float(p_scale)
         self.w_scale = float(w_scale)
         self.ref_hz = float(ref_hz)
+        self.cut_multisite = bool(cut_multisite)
+        self.n_cut_sites = int(n_cut_sites)
+        if self.cut_multisite and self.n_cut_sites < 1:
+            raise ValueError("n_cut_sites must be >= 1 for multi-site CUT")
+        self.n_aff_site = max(1, self.n_aff // self.n_cut_sites)
+        self.cut_site_pg: list[str] = []
+        self.cut_site_in: list[str] = []
         self.plastic_projections: list[str] = []
         self.plastic_counts: dict[str, int] = {}
 
@@ -211,9 +220,23 @@ class Leg:
         # 1. CUT (cutaneous)
         # Rest rate is 0, so its current value is not a usable scale: declare
         # 10 Hz explicitly — the same full-scale rate as the Ia groups (spec §5.3).
+        # With Option B the single relay is a one-neuron noise tap only: the
+        # afferent spike trains are the per-site relays below, and the tap keeps
+        # the `cut_L/R` producer feature (the aggregate rate) without doubling
+        # the CUT Poisson population.
+        cut_relay_n = 1 if self.cut_multisite else self.n_aff
         self.cut_pg, self.cut_in = self.registry.create_relay(
-            f"cut_pg_{self.leg}", f"cut_in_{self.leg}", self.n_aff,
+            f"cut_pg_{self.leg}", f"cut_in_{self.leg}", cut_relay_n,
             rate=0.0, noise_name=f"cut_{self.leg}", noise_scale=10.0)
+        if self.cut_multisite:
+            for k in range(self.n_cut_sites):
+                pg_key = f"cut_pg_{self.leg}_s{k}"
+                in_key = f"cut_in_{self.leg}_s{k}"
+                self.registry.create_relay(
+                    pg_key, in_key, self.n_aff_site,
+                    rate=0.0, noise_name=None)
+                self.cut_site_pg.append(pg_key)
+                self.cut_site_in.append(in_key)
 
         # 2. Ia Afferents (stretch length & velocity)
         self.ia_e_pg, self.ia_e_in = self.registry.create_relay(
@@ -352,9 +375,20 @@ class Leg:
         self._connect(f"ia_f_in_{leg}", f"in_ib_f_{leg}", weight=8.0, p=0.30)    # Ia -> InIb-F
 
         # --- Cutaneous (CUT) stance reinforcement ---
-        self._connect(f"cut_in_{leg}", f"rg_e_{leg}", weight=14.0, p=0.35,
-                      is_stdp=True, key=f"cut_rge_{leg}")   # W_CUT2RGE, P_CUT2RGE_STATIC
-        self._connect(f"cut_in_{leg}", f"in_e_{leg}", weight=6.0, p=0.30)   # W_CUT2INE, P_CUT2INE
+        if self.cut_multisite:
+            # Option B: each plantar site has its own Poisson relay and its own
+            # STDP projection. The per-site weights keep the same total CUT
+            # convergence as the single aggregate projection: n_aff_site * 8
+            # is ~n_aff, so p and the seed weights are unchanged.
+            for k in range(self.n_cut_sites):
+                src = f"cut_in_{leg}_s{k}"
+                self._connect(src, f"rg_e_{leg}", weight=14.0, p=0.35,
+                              is_stdp=True, key=f"cut_rge_{leg}_s{k}")
+                self._connect(src, f"in_e_{leg}", weight=6.0, p=0.30)
+        else:
+            self._connect(f"cut_in_{leg}", f"rg_e_{leg}", weight=14.0, p=0.35,
+                          is_stdp=True, key=f"cut_rge_{leg}")   # W_CUT2RGE, P_CUT2RGE_STATIC
+            self._connect(f"cut_in_{leg}", f"in_e_{leg}", weight=6.0, p=0.30)   # W_CUT2INE, P_CUT2INE
 
         # --- Commissural V-cell relay, ipsilateral half (NEURON memcpg/leg.py) ---
         # RG_F drives the three V-cell classes; V2a feeds V0v, whose
@@ -370,11 +404,18 @@ class Leg:
     def update_sensory_feedback(self, cut_hz: float,
                                 ia_e_hz: float, ia_f_hz: float,
                                 ib_e_hz: float, ib_f_hz: float,
-                                current_time_ms: float = 0.0):
+                                current_time_ms: float = 0.0,
+                                cut_sites=None, cut_active=None):
         """
         Updates Poisson generator rates based on live MuJoCo sensory inputs.
         Goes through the registry, which records each group's per-step rate
         delta into its producer recorder (read-and-clear upstream).
+
+        With `cut_multisite`, `cut_sites` and `cut_active` carry one value per
+        plantar site. Empty tuples (the initial `CPGInput()` before the first
+        MuJoCo step) mean all sites are silent. An inactive site's generator is
+        set to 0 Hz, so it cannot emit spikes or drive its STDP projection; the
+        aggregate `cut_hz` still feeds the `cut_L/R` noise tap.
         """
         side = self.leg
         self.registry.set_relay_rate(f"cut_pg_{side}", cut_hz)
@@ -382,6 +423,21 @@ class Leg:
         self.registry.set_relay_rate(f"ia_f_pg_{side}", ia_f_hz)
         self.registry.set_relay_rate(f"ib_e_pg_{side}", ib_e_hz)
         self.registry.set_relay_rate(f"ib_f_pg_{side}", ib_f_hz)
+
+        if self.cut_multisite:
+            n_sites = len(self.cut_site_pg)
+            cut_sites = () if cut_sites is None else cut_sites
+            cut_active = () if cut_active is None else cut_active
+            if len(cut_sites) == 0 and len(cut_active) == 0:
+                cut_sites = (0.0,) * n_sites
+                cut_active = (False,) * n_sites
+            elif len(cut_sites) != n_sites or len(cut_active) != n_sites:
+                raise ValueError(
+                    f"cut_multisite expects {n_sites} per-site rates and "
+                    f"gates, got {len(cut_sites)} and {len(cut_active)}")
+            for pg, rate, active in zip(self.cut_site_pg, cut_sites,
+                                        cut_active):
+                self.registry.set_relay_rate(pg, float(rate) if active else 0.0)
 
     def get_muscle_drives(self, dt_ms: float, current_time_ms: float = 0.0) -> Tuple[float, float]:
         """
