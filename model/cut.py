@@ -12,7 +12,15 @@ class CUTAfferent:
     with first-order low-pass dynamics.
 
     TODO(cut-multi-site): replace this single per-leg afferent + scalar Hz with
-    a multi-site plantar model (user-proposed, more physiological):
+    the user-specified multi-site plantar model.
+
+    Why (observed in the 2-min run): the single sigmoid saturates at 120 Hz as
+    soon as the foot carries ~0.4 N, so CUT is a 0/120 square wave that reports
+    contact/no-contact only. It cannot encode foot roll, centre of pressure, or
+    a site-specific phase for STDP. The aggregate 0/120 signal carries no
+    foot-roll/CoP information and does not change with the ankle posture.
+
+    Design (as specified):
       - N Poisson generators distributed across the sole (heel / metatarsal
         pads / toe) instead of one scalar generator.
       - A site's generator joins the ACTIVE list only while that site is in
@@ -26,6 +34,27 @@ class CUTAfferent:
         fixed per-site weighting), and per-site STDP synapses to RG-E.
       - The STDP postfix for these is already reserved: STDP_POSTFIX has an
         "ia_rg"/"cut_rge" family; add per-site keys when implementing.
+
+    Implementation:
+      - model/leg.py: assign each foot contact point to the nearest sole site in
+        the foot body frame, sum the normal force per site, and emit per-site
+        rates. The foot geom/contact mapping must be data-driven, not hardcoded
+        site indices (T8).
+      - model/adapter.py: extend CPGInput with per-site rates
+        (`cut_sites_L`, `cut_sites_R`), keeping `cut_L`/`cut_R` as the aggregate
+        for logging/back-compat.
+      - t2xcpg/leg.py: create the per-site generators/relays and the per-site
+        STDP connections; `update_sensory_feedback` takes the per-site rates.
+      - Logging: per-site rates in `run_log`/`run.h5`, plus a figure of the
+        heel->M1..M5->toe sequence against the ankle angle and the RG phase.
+
+    Acceptance:
+      - The aggregate CUT is not a square wave: it varies with local force/CoP
+        within stance.
+      - The heel site leads and the toe site lags within one stance, and the
+        per-site STDP weights stay bounded.
+      - tests/test_cut_sites.py covers contact->site assignment, the active
+        list, and the per-site rate mapping.
 
     TODO(magic-numbers): the constants below (beta, p_theta, tau_ms, r_peak_hz,
     and the `contact * 50` pressure gain / 100 cap in get_cut_hz) are hand-tuned.
