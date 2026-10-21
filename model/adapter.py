@@ -14,9 +14,18 @@ class CPGInput:
     - Phase state: stance vs. swing.
     - Joint angles for tracking.
     """
-    # Cutaneous touch (Hz)
+    # Cutaneous touch (Hz), aggregate for the existing CPG path
     cut_L: float = 0.0
     cut_R: float = 0.0
+    # Per-site plantar rates (Hz), active buffer, and the XML site names.
+    # The aggregate above is the area x density weighted mean of the active
+    # sites; these tuples carry the population code for Option B/logging.
+    cut_sites_L: tuple[float, ...] = ()
+    cut_sites_R: tuple[float, ...] = ()
+    cut_active_L: tuple[bool, ...] = ()
+    cut_active_R: tuple[bool, ...] = ()
+    cut_site_names_L: tuple[str, ...] = ()
+    cut_site_names_R: tuple[str, ...] = ()
 
     # Ia afferents Left limb (length in m, velocity in m/s, firing rate in Hz)
     ia_len_E_L: float = 0.0

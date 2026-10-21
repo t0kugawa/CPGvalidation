@@ -3,7 +3,7 @@ import numpy as np
 import mujoco
 
 from model.adapter import CPGOutput, CPGInput
-from model.cut import CUTAfferent, IaAfferent, IbAfferent
+from model.cut import ContactPhase, IaAfferent, IbAfferent, PlantarCut
 from model.model_cfg import CONTACT_Z_EPS, TREADMILL_PENETRATION_M
 
 SIDES = ("L", "R")
@@ -108,7 +108,30 @@ class Leg:
             for s in SIDES
         }
 
-        self.cut_afferent = {s: CUTAfferent(dt_ms=dt_ms, r_peak_hz=120.0) for s in SIDES}
+        # Plantar CUT population: the XML rct_* sites are the fixed geometry;
+        # contact forces and the active buffer are refreshed after every mj_step.
+        self.cut_site_ids = {s: self._cut_site_ids(s) for s in SIDES}
+        self.cut_site_names = {
+            s: tuple(mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_SITE, sid)
+                     for sid in self.cut_site_ids[s])
+            for s in SIDES
+        }
+        # v1 priors: equal tributary area and receptor density. `rho_s` is the
+        # hook for a fitted nonlinear rat CUT distribution; it is not claimed
+        # to be fitted yet.
+        self.cut_site_areas = {s: np.ones(len(self.cut_site_ids[s]))
+                               for s in SIDES}
+        self.cut_site_density = {s: np.ones(len(self.cut_site_ids[s]))
+                                 for s in SIDES}
+        self.cut_plantar = {
+            s: PlantarCut(self.cut_site_names[s], dt_ms=dt_ms,
+                          areas=self.cut_site_areas[s],
+                          density=self.cut_site_density[s])
+            for s in SIDES
+        }
+        self.cut_phase = {s: ContactPhase(initial="stance") for s in SIDES}
+        # Back-compatible name: per-site afferents are a list now.
+        self.cut_afferent = {s: self.cut_plantar[s].afferents for s in SIDES}
         # Reference lengths are placeholders: `calibrate_spindles` overwrites
         # them with the tendon length at a zero ankle angle, so the stretch term
         # stays alive whatever scale the limb bones are built at.
@@ -129,6 +152,20 @@ class Leg:
         if i < 0:
             raise ValueError(f"Joint '{name}' not found")
         return i
+
+    def _cut_site_ids(self, side: str) -> tuple[int, ...]:
+        """Discover the plantar RCT sites from the model, in XML order."""
+        bodies = set(self.foot_bodies[side])
+        ids = []
+        for sid in range(self.model.nsite):
+            if int(self.model.site_bodyid[sid]) not in bodies:
+                continue
+            name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_SITE, sid)
+            if name and name.startswith("rct_"):
+                ids.append(sid)
+        if not ids:
+            raise ValueError(f"No rct_* plantar sites found on side {side}")
+        return tuple(ids)
 
     def _aid(self, name: str) -> int:
         i = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, name)
@@ -165,17 +202,30 @@ class Leg:
             return float(self.data.act[adr])
         return 0.0
 
-    def _contact_force(self, side: str) -> float:
-        """Total normal contact force (N) on the MODEL foot/toe bodies of one leg."""
-        total = 0.0
+    def _contact_points(self, side: str) -> tuple[np.ndarray, np.ndarray]:
+        """
+        World-frame contact positions and normal forces (N) on the MODEL
+        foot/toe bodies of one leg. This is the live environment feedback that
+        feeds the plantar CUT population.
+        """
         bodies = set(self.foot_bodies[side])
+        positions = []
+        forces = []
         for i in range(self.data.ncon):
             c = self.data.contact[i]
             b1 = int(self.model.geom_bodyid[c.geom1])
             b2 = int(self.model.geom_bodyid[c.geom2])
             if b1 in bodies or b2 in bodies:
-                total += self._contact_force_i(i)
-        return total
+                positions.append(np.asarray(c.pos, dtype=float).copy())
+                forces.append(self._contact_force_i(i))
+        if not positions:
+            return np.empty((0, 3), dtype=float), np.empty(0, dtype=float)
+        return np.asarray(positions, dtype=float), np.asarray(forces, dtype=float)
+
+    def _contact_force(self, side: str) -> float:
+        """Total normal contact force (N) on the MODEL foot/toe bodies of one leg."""
+        _, forces = self._contact_points(side)
+        return float(np.sum(forces))
 
     def _contact_force_i(self, i: int) -> float:
         f = np.zeros(6, dtype=np.float64)
@@ -225,7 +275,8 @@ class Leg:
         if pose is None:
             pose = {s: {"hip": -0.2, "knee": 0.6, "ankle": 0.3} for s in SIDES}
         for s in SIDES:
-            self.cut_afferent[s].reset()
+            self.cut_plantar[s].reset()
+            self.cut_phase[s].reset()
             p = pose[s]
             for jid, val in (
                 (self.j_hip_m[s], p["hip"]),
@@ -461,9 +512,12 @@ class Leg:
 
         sensory = {}
         for s in SIDES:
-            total_contact_force = self._contact_force(s)
-            cut_hz = self.cut_afferent[s].get_cut_hz(total_contact_force)
-            phase = "stance" if total_contact_force > 0.005 else "swing"
+            contact_pos, contact_force = self._contact_points(s)
+            total_contact_force = float(np.sum(contact_force))
+            site_pos = self.data.site_xpos[list(self.cut_site_ids[s])]
+            cut = self.cut_plantar[s].update(contact_pos, contact_force, site_pos)
+            cut_hz = cut["aggregate_hz"]
+            phase = self.cut_phase[s].update(total_contact_force, self.dt_ms)
 
             foot_x_m, foot_z_m = self._foot_lowest(self.model_foot_geoms[s])
             foot_z_ref = self._foot_lowest_z(self.ref_foot_geoms[s])
@@ -495,7 +549,9 @@ class Leg:
             q_hip_ref = float(self.data.qpos[self.model.jnt_qposadr[self.j_hip_ref[s]]])
 
             sensory[s] = dict(
-                cut=cut_hz, phase=phase, phase_ref=phase_ref,
+                cut=cut_hz, cut_sites=cut["rates"],
+                cut_active=cut["active"],
+                phase=phase, phase_ref=phase_ref,
                 contact=total_contact_force, contact_ref=contact_ref,
                 foot_x_m=foot_x_m, foot_z_m=foot_z_m, foot_z_ref=foot_z_ref,
                 sol_len=sol_len, sol_vel=sol_vel, ta_len=ta_len, ta_vel=ta_vel,
@@ -511,6 +567,12 @@ class Leg:
         L, R = sensory["L"], sensory["R"]
         return CPGInput(
             cut_L=L["cut"], cut_R=R["cut"],
+            cut_sites_L=tuple(float(x) for x in L["cut_sites"]),
+            cut_sites_R=tuple(float(x) for x in R["cut_sites"]),
+            cut_active_L=tuple(bool(x) for x in L["cut_active"]),
+            cut_active_R=tuple(bool(x) for x in R["cut_active"]),
+            cut_site_names_L=self.cut_site_names["L"],
+            cut_site_names_R=self.cut_site_names["R"],
             ia_len_E_L=L["sol_len"], ia_vel_E_L=L["sol_vel"], ia_rate_E_L=L["ia_rate_e"],
             ia_len_F_L=L["ta_len"], ia_vel_F_L=L["ta_vel"], ia_rate_F_L=L["ia_rate_f"],
             ia_len_E_R=R["sol_len"], ia_vel_E_R=R["sol_vel"], ia_rate_E_R=R["ia_rate_e"],
