@@ -133,11 +133,11 @@
                     <geom name="shank_ref_geom_L" type="capsule" fromto="0 0 0 -0.02502 0 -0.02144" size="0.006" material="bone_mat_ref"/>
                     <body name="foot_ref_L" pos="-0.02502 0 -0.02144">
                         <joint name="ankle_ref_L" type="hinge" axis="0 1 0" range="-1.0 2.6" damping="0.001" frictionloss="0.0005"/>
-                        <geom name="foot_ref_geom_L" type="capsule" fromto="-0.0074 0 0.0037 0.0204 0 -0.0037" size="0.0045" material="bone_mat_ref"/>
+                        <geom name="foot_ref_geom_L" type="capsule" fromto="-0.0074 0 0.0037 0.0204 0 -0.0037" size="0.0045" material="bone_mat_ref" contype="2" conaffinity="1"/>
                         <site name="paw_contact_ref_L" pos="0.0074 0 -0.0042" size="0.003" rgba="0 0.8 1 0.6"/>
                         <body name="toe_ref_L" pos="0.0204 0 -0.0037">
                             <joint name="toe_ref_jnt_L" type="hinge" axis="0 1 0" range="-0.3 0.8" damping="0.001"/>
-                            <geom name="toe_ref_geom_L" type="capsule" fromto="0 0 0 0.012 0 -0.002" size="0.0035" material="bone_mat_ref"/>
+                            <geom name="toe_ref_geom_L" type="capsule" fromto="0 0 0 0.012 0 -0.002" size="0.0035" material="bone_mat_ref" contype="2" conaffinity="1"/>
                             <site name="toe_tip_ref_L" pos="0.012 0 -0.002" size="0.002" rgba="0 0.8 1 0.6"/>
                         </body>
                     </body>
@@ -160,11 +160,11 @@
                     <geom name="shank_ref_geom_R" type="capsule" fromto="0 0 0 -0.02783 0 -0.02385" size="0.006" material="bone_mat_ref"/>
                     <body name="foot_ref_R" pos="-0.02783 0 -0.02385">
                         <joint name="ankle_ref_R" type="hinge" axis="0 1 0" range="-1.0 2.6" damping="0.001" frictionloss="0.0005"/>
-                        <geom name="foot_ref_geom_R" type="capsule" fromto="-0.0078 0 0.0039 0.0215 0 -0.0039" size="0.0045" material="bone_mat_ref"/>
+                        <geom name="foot_ref_geom_R" type="capsule" fromto="-0.0078 0 0.0039 0.0215 0 -0.0039" size="0.0045" material="bone_mat_ref" contype="2" conaffinity="1"/>
                         <site name="paw_contact_ref_R" pos="0.0078 0 -0.0044" size="0.003" rgba="0 0.8 1 0.6"/>
                         <body name="toe_ref_R" pos="0.0215 0 -0.0039">
                             <joint name="toe_ref_jnt_R" type="hinge" axis="0 1 0" range="-0.3 0.8" damping="0.001"/>
-                            <geom name="toe_ref_geom_R" type="capsule" fromto="0 0 0 0.012 0 -0.002" size="0.0035" material="bone_mat_ref"/>
+                            <geom name="toe_ref_geom_R" type="capsule" fromto="0 0 0 0.012 0 -0.002" size="0.0035" material="bone_mat_ref" contype="2" conaffinity="1"/>
                             <site name="toe_tip_ref_R" pos="0.012 0 -0.002" size="0.002" rgba="0 0.8 1 0.6"/>
                         </body>
                     </body>
@@ -228,13 +228,13 @@
         <position name="hip_ref_ctrl_L" joint="hip_ref_L" kp="1.0" kv="0.02" ctrlrange="-1.8 1.4"/>
         <position name="knee_ref_ctrl_L" joint="knee_ref_L" kp="1.0" kv="0.02" ctrlrange="-1.6 1.8"/>
         <position name="ankle_ref_ctrl_L" joint="ankle_ref_L" kp="1.0" kv="0.05" ctrlrange="-1.0 2.6"/>
-        <position name="toe_ref_ctrl_L" joint="toe_ref_jnt_L" kp="0.1" kv="0.005" ctrlrange="-0.3 0.8"/>
+        <position name="toe_ref_ctrl_L" joint="toe_ref_jnt_L" kp="2.0" kv="0.005" ctrlrange="-0.3 0.8"/>
 
         <!-- Target leg R servos -->
         <position name="hip_ref_ctrl_R" joint="hip_ref_R" kp="1.0" kv="0.02" ctrlrange="-1.8 1.4"/>
         <position name="knee_ref_ctrl_R" joint="knee_ref_R" kp="1.0" kv="0.02" ctrlrange="-1.6 1.8"/>
         <position name="ankle_ref_ctrl_R" joint="ankle_ref_R" kp="1.0" kv="0.05" ctrlrange="-1.0 2.6"/>
-        <position name="toe_ref_ctrl_R" joint="toe_ref_jnt_R" kp="0.1" kv="0.005" ctrlrange="-0.3 0.8"/>
+        <position name="toe_ref_ctrl_R" joint="toe_ref_jnt_R" kp="2.0" kv="0.005" ctrlrange="-0.3 0.8"/>
     </actuator>
 
     <!--  Foot kinematics (touch is computed from contacts in the CUT model)   -->

@@ -50,16 +50,16 @@ def test_foot_contact_geoms_and_bodies():
 
 
 def test_treadmill_levels_on_the_controlled_foot():
-    """The controlled foot is the only one that can touch, so it must seat on
-    the belt; the target limb is a non-colliding kinematic mirror."""
+    """The controlled foot is the one whose CUT feeds the CPG, so it must seat
+    on the belt. The target limb is now a physical mirror and collides too."""
     from model.leg import Leg
 
     leg = Leg(mujoco_cfg=XML, dt_ms=10.0)
     for side in "LR":
         gid = mujoco.mj_name2id(leg.model, mujoco.mjtObj.mjOBJ_GEOM,
                                 f"foot_ref_geom_{side}")
-        assert leg.model.geom_contype[gid] == 0
-        assert leg.model.geom_conaffinity[gid] == 0
+        assert leg.model.geom_contype[gid] == 2
+        assert leg.model.geom_conaffinity[gid] == 1
     lo = min(leg._foot_lowest_z(leg.model_foot_geoms[s]) for s in "LR")
     assert lo <= leg.belt_z, "controlled foot must reach the belt"
 

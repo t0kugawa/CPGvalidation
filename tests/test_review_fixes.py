@@ -181,27 +181,38 @@ def _bid(model, name):
     return mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, name)
 
 
-def test_target_phase_ref_is_geometric():
+def test_target_phase_ref_uses_actual_contact():
+    """The target phase is the actual foot/treadmill contact, not a height epsilon."""
     leg = Leg(mujoco_cfg="dual_rat_hindlimb.xml", dt_ms=10.0)
+    leg.model.opt.gravity[:] = 0.0
     pose = {s: {"hip": -0.2, "knee": 0.6, "ankle": 0.3} for s in ("L", "R")}
+    targets = {
+        "target_ankle_L": 0.3, "target_ankle_R": 0.3,
+        "target_hip_L": -0.2, "target_knee_L": 0.6,
+        "target_hip_R": -0.2, "target_knee_R": 0.6,
+    }
     out = CPGOutput()
 
-    leg.set_treadmill_height(1.0)
     leg.reset(pose=pose)
-    ci = leg.step(out, target_ankle_L=0.3, target_ankle_R=0.3)
-    assert ci.phase_ref_L == "stance"
-    assert np.isclose(ci.contact_ref_L, 1.0)
+    low = leg._foot_lowest_z(leg.ref_foot_geoms["L"])
 
-    leg.set_treadmill_height(-1.0)
+    leg.set_treadmill_height(low - 0.0015)
     leg.reset(pose=pose)
-    ci = leg.step(out, target_ankle_L=0.3, target_ankle_R=0.3)
+    ci = leg.step(out, **targets)
     assert ci.phase_ref_L == "swing"
     assert np.isclose(ci.contact_ref_L, 0.0)
 
+    leg.set_treadmill_height(low + 0.0015)
+    leg.reset(pose=pose)
+    ci = leg.step(out, **targets)
+    assert ci.phase_ref_L == "stance"
+    assert np.isclose(ci.contact_ref_L, 1.0)
 
-def test_target_has_no_contact_force():
+
+def test_target_has_contact_force():
     leg = Leg(mujoco_cfg="dual_rat_hindlimb.xml", dt_ms=10.0)
-    assert not hasattr(leg, "_contact_force_ref")
+    assert hasattr(leg, "_contact_force_ref")
+    assert leg._contact_force_ref("L") >= 0.0
 
 
 def test_joint_ranges_cover_loader_clamp():

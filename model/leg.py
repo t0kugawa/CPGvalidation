@@ -4,7 +4,7 @@ import mujoco
 
 from model.adapter import CPGOutput, CPGInput
 from model.cut import ContactPhase, IaAfferent, IbAfferent, PlantarCut
-from model.model_cfg import CONTACT_Z_EPS, TREADMILL_PENETRATION_M
+from model.model_cfg import TREADMILL_PENETRATION_M
 
 SIDES = ("L", "R")
 
@@ -79,6 +79,11 @@ class Leg:
         self.treadmill_gid = self._gid("treadmill")
         self.ref_foot_geoms = {
             s: [self._gid(f"foot_ref_geom_{s}"), self._gid(f"toe_ref_geom_{s}")]
+            for s in SIDES
+        }
+        self.ref_foot_bodies = {
+            s: [mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, n)
+                for n in (f"foot_ref_{s}", f"toe_ref_{s}")]
             for s in SIDES
         }
 
@@ -202,13 +207,14 @@ class Leg:
             return float(self.data.act[adr])
         return 0.0
 
-    def _contact_points(self, side: str) -> tuple[np.ndarray, np.ndarray]:
+    def _contact_points(self, bodies) -> tuple[np.ndarray, np.ndarray]:
         """
-        World-frame contact positions and normal forces (N) on the MODEL
-        foot/toe bodies of one leg. This is the live environment feedback that
-        feeds the plantar CUT population.
+        World-frame contact positions and normal forces (N) on the given
+        foot/toe bodies. This is the live environment feedback that feeds the
+        plantar CUT population for the controlled limb and the stance indicator
+        for the target limb.
         """
-        bodies = set(self.foot_bodies[side])
+        bodies = set(bodies)
         positions = []
         forces = []
         for i in range(self.data.ncon):
@@ -224,7 +230,12 @@ class Leg:
 
     def _contact_force(self, side: str) -> float:
         """Total normal contact force (N) on the MODEL foot/toe bodies of one leg."""
-        _, forces = self._contact_points(side)
+        _, forces = self._contact_points(self.foot_bodies[side])
+        return float(np.sum(forces))
+
+    def _contact_force_ref(self, side: str) -> float:
+        """Total normal contact force (N) on the TARGET foot/toe bodies of one leg."""
+        _, forces = self._contact_points(self.ref_foot_bodies[side])
         return float(np.sum(forces))
 
     def _contact_force_i(self, i: int) -> float:
@@ -512,7 +523,7 @@ class Leg:
 
         sensory = {}
         for s in SIDES:
-            contact_pos, contact_force = self._contact_points(s)
+            contact_pos, contact_force = self._contact_points(self.foot_bodies[s])
             total_contact_force = float(np.sum(contact_force))
             site_pos = self.data.site_xpos[list(self.cut_site_ids[s])]
             cut = self.cut_plantar[s].update(contact_pos, contact_force, site_pos)
@@ -521,8 +532,8 @@ class Leg:
 
             foot_x_m, foot_z_m = self._foot_lowest(self.model_foot_geoms[s])
             foot_z_ref = self._foot_lowest_z(self.ref_foot_geoms[s])
-            ref_contact = (self.belt_z is not None
-                           and foot_z_ref <= self.belt_z + CONTACT_Z_EPS)
+            _, ref_forces = self._contact_points(self.ref_foot_bodies[s])
+            ref_contact = float(np.sum(ref_forces)) > 0.0
             phase_ref = "stance" if ref_contact else "swing"
             contact_ref = 1.0 if ref_contact else 0.0
 
