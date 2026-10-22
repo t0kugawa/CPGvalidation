@@ -251,15 +251,17 @@ ankle cannot bend that far, so the joint gets a physiological stop.
 - `build_personalizer` computes the run window's mocap ankle envelope (both
   sides, first `max_steps` frames) and calls `Leg.set_ankle_range(lo, hi)`,
   which narrows all four ankle joints and the reference ankle servo's
-  `ctrlrange` to `[envelope - ANKLE_RANGE_MARGIN_RAD, envelope + ...]`.
+  `ctrlrange` to the observed envelope (`ANKLE_RANGE_MARGIN_RAD = 0.0`). An
+  earlier 0.10 rad margin let the controlled sit at +1.82 rad while the target
+  max was +1.694, so the guard now equals the observed max.
 - The four ankle joints carry `solreflimit="0.004 1"` and
   `solimplimit="0.95 0.99 0.001"`, so the soft-limit overshoot is small.
 - This is a guard, not a tracking fix: it stops the visual flip and the
   constraint violation, but the controlled ankle still sits at the limit while
   the muscle drive is low.
 
-Measured on the 4 s `--fast` run: controlled ankle max **+1.82 rad** (guard
-`hi = +1.79`, overshoot 0.03) instead of +2.81/+2.96 before; the reference
+Measured on the 4 s `--fast` run: controlled ankle max **+1.72 rad** (guard
+`hi = +1.69`, overshoot 0.03) instead of +2.81/+2.96 before; the reference
 ankle stays inside the same guard.
 
 ## 6. Interfaces (delta)
@@ -391,8 +393,8 @@ ankle stays inside the same guard.
   selected approach and its spike evidence are in §5.8; the shared ~6.6 mm
   soft-contact penetration is accepted as contact compliance.
 - **V23** Ankle guard (2026-10-22): narrow all four ankle joints to the run
-  window's mocap ankle envelope plus `ANKLE_RANGE_MARGIN_RAD` (0.10 rad) and
-  stiffen the joint limit (`solreflimit="0.004 1"`,
+  window's mocap ankle envelope (`ANKLE_RANGE_MARGIN_RAD = 0.0`) and stiffen
+  the joint limit (`solreflimit="0.004 1"`,
   `solimplimit="0.95 0.99 0.001"`). This is a physiological stop against
   hyper-plantarflexion while the muscle drive is low (V19/V21), not a tracking
   fix. The guard and its 4 s `--fast` result are in §5.9.
