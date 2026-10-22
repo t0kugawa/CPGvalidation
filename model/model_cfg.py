@@ -14,7 +14,8 @@ TREADMILL_PENETRATION_M: float = 0.0005
 CONTACT_Z_EPS: float = 0.003
 
 # Ankle guard: the joint range is narrowed to the mocap ankle envelope of the
-# run window plus this margin (rad), so a low muscle drive or a contact torque
-# cannot hyper-plantarflex the paw past a physiological stop.
-ANKLE_RANGE_MARGIN_RAD: float = 0.10
+# run window plus this margin (rad). 0.0 pins the guard to the observed max;
+# a positive margin lets the ankle reach past it. The stiff joint limit then
+# stops a low muscle drive or a contact torque from hyper-plantarflexing the paw.
+ANKLE_RANGE_MARGIN_RAD: float = 0.0
 
