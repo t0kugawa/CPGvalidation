@@ -6,6 +6,7 @@ from persona.registry import Registry
 from persona.strategy import FisherMatrix, PhaseBaselines
 from persona.agent import Agent
 from persona.schedule import CosineLR, resolve_lr_schedule
+from persona.spring import SpringSpec
 
 __all__ = [
     "PersonaParam",
@@ -18,4 +19,5 @@ __all__ = [
     "Agent",
     "CosineLR",
     "resolve_lr_schedule",
+    "SpringSpec",
 ]

@@ -1,3 +1,4 @@
+import math
 import nest
 from fnmatch import fnmatchcase
 from typing import Any, Dict, List
@@ -7,6 +8,7 @@ from persona.parameter import PersonaParam
 from persona.population import Population
 from persona.connection import Connection
 from persona.noise_recorder import NoiseRecorder
+from persona.spring import SpringSpec
 
 
 def clamp_weight_sign(param: PersonaParam) -> PersonaParam:
@@ -70,6 +72,7 @@ class Registry:
         # caller pinned to them (PersonaParam exposes mean/sigma as learned).
         self._defaults: Dict[str, Dict[str, float]] = {}
         self._frozen: Dict[str, set[str]] = {}
+        self._springs: Dict[str, SpringSpec] = {}
         # Failures of the realization path (create_population's set,
         # apply_explored_parameters); cleared on every apply, never swallowed.
         self.last_apply_errors: List[tuple[str, str]] = []
@@ -200,6 +203,69 @@ class Registry:
 
     def defaults(self, site_key: str) -> Dict[str, float]:
         return dict(self._defaults[site_key])
+
+    # --- homeostatic springs ------------------------------------------------
+
+    def create_spring(self, name: str, keys, *, power: float | None = None,
+                      gain: float = 1.0,
+                      max_power: float = 0.5) -> SpringSpec:
+        """Create one spring over the matching sites' mean coordinates."""
+        if name in self._springs:
+            raise ValueError(f"spring {name!r} already exists")
+        max_power = float(max_power)
+        gain = float(gain)
+        if not (0.0 < max_power <= 1.0):
+            raise ValueError("max_power must be in (0, 1]")
+        if not math.isfinite(gain) or gain < 0.0:
+            raise ValueError("gain must be finite and non-negative")
+        if power is not None:
+            power = float(power)
+            if not math.isfinite(power) or not 0.0 <= power <= max_power:
+                raise ValueError(
+                    f"power must be finite and in [0, {max_power}]")
+        resolved = self._resolve_site_keys(keys)
+        missing = [key for key in resolved if key not in self._defaults]
+        if missing:
+            raise KeyError(
+                f"no creation default recorded for PERSONA sites {missing}")
+        for spec in self._springs.values():
+            overlap = set(resolved) & set(spec.keys)
+            if overlap:
+                raise ValueError(
+                    f"spring {name!r} overlaps existing spring {spec.name!r} "
+                    f"on {sorted(overlap)}")
+        spec = SpringSpec(name=name, keys=resolved, power=power,
+                          gain=gain, max_power=max_power)
+        self._springs[name] = spec
+        return spec
+
+    def remove_spring(self, name: str) -> None:
+        del self._springs[name]
+
+    def springs(self) -> Dict[str, SpringSpec]:
+        return dict(self._springs)
+
+    def spring_state(self, means: Dict[str, float], sigmas: Dict[str, float],
+                     lr_t: float) -> Dict[str, Dict[str, float]]:
+        """Per-site force and power for this step; frozen means are skipped."""
+        out: Dict[str, Dict[str, float]] = {}
+        for spec in self._springs.values():
+            for key in spec.keys:
+                if key not in means or key not in sigmas:
+                    continue
+                if self.is_frozen(key, "mean"):
+                    continue
+                anchor = self._defaults[key]["mean"]
+                sigma_ref = self._defaults[key]["sigma"]
+                power = spec.power_for(sigmas[key], sigma_ref, lr_t)
+                out[key] = {
+                    "force": power * (anchor - float(means[key])),
+                    "power": power,
+                    "anchor": anchor,
+                    "mean": float(means[key]),
+                    "lr_mu": float(lr_t),
+                }
+        return out
 
     @staticmethod
     def _now_ms() -> float:
