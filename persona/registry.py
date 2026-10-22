@@ -1,4 +1,5 @@
 import nest
+from fnmatch import fnmatchcase
 from typing import Any, Dict, List
 import numpy as np
 
@@ -65,6 +66,10 @@ class Registry:
         self._relay_noise: Dict[str, str] = {}
         self._relay_last: Dict[str, float] = {}
         self._syn_counts: Dict[str, int] = {}
+        # Creation-time values per canonical site key, and the attributes the
+        # caller pinned to them (PersonaParam exposes mean/sigma as learned).
+        self._defaults: Dict[str, Dict[str, float]] = {}
+        self._frozen: Dict[str, set[str]] = {}
         # Failures of the realization path (create_population's set,
         # apply_explored_parameters); cleared on every apply, never swallowed.
         self.last_apply_errors: List[tuple[str, str]] = []
@@ -106,6 +111,95 @@ class Registry:
         """All producer recorders (STDP projections and sensory Poisson groups)."""
         return {n: r for n, r in self.noise_recorders.items()
                 if n.startswith("producer:")}
+
+    # --- creation defaults and freeze ---------------------------------------
+
+    def _record_defaults(self, site_key: str, param: PersonaParam) -> None:
+        """Snapshot the creation values freeze anchors to."""
+        self._defaults[site_key] = {
+            "mean": float(param.mean),
+            "sigma": float(param.sigma),
+            "min": float(param.min),
+            "max": float(param.max),
+            "sigma_min": float(param.sigma_min),
+            "sigma_max": float(param.sigma_max),
+        }
+
+    @staticmethod
+    def _key_patterns(keys) -> List[str]:
+        if isinstance(keys, str):
+            return [keys]
+        return [str(k) for k in keys]
+
+    @staticmethod
+    def _attrs_tuple(attrs) -> tuple[str, ...]:
+        values = (attrs,) if isinstance(attrs, str) else tuple(attrs)
+        values = tuple(str(a) for a in values)
+        if not values:
+            raise ValueError("at least one attribute must be given")
+        bad = [a for a in values if a not in ("mean", "sigma")]
+        if bad:
+            raise ValueError(
+                f"freezable attributes are 'mean' and 'sigma', got {bad}")
+        return values
+
+    def _resolve_site_keys(self, keys) -> tuple[str, ...]:
+        """Resolve exact canonical keys or fnmatch globs to sorted site keys."""
+        params = self.get_all_optimizable_params()
+        resolved: List[str] = []
+        for pattern in self._key_patterns(keys):
+            matches = [k for k in params if fnmatchcase(k, pattern)]
+            if not matches:
+                raise KeyError(f"no PERSONA site matches {pattern!r}")
+            for key in matches:
+                if key not in resolved:
+                    resolved.append(key)
+        return tuple(sorted(resolved))
+
+    def recapture_defaults(self, keys=None) -> None:
+        """Re-snapshot creation defaults after a post-creation mutation."""
+        params = self.get_all_optimizable_params()
+        resolved = tuple(params) if keys is None else self._resolve_site_keys(keys)
+        for key in resolved:
+            self._record_defaults(key, params[key])
+
+    def freeze(self, keys, attrs=("mean",)) -> tuple[str, ...]:
+        """Pin the named learned attributes of the matching sites to creation."""
+        resolved = self._resolve_site_keys(keys)
+        attrs = self._attrs_tuple(attrs)
+        params = self.get_all_optimizable_params()
+        for key in resolved:
+            if key not in self._defaults:
+                raise KeyError(
+                    f"no creation default recorded for PERSONA site {key!r}")
+            for attr in attrs:
+                setattr(params[key], attr, self._defaults[key][attr])
+            self._frozen.setdefault(key, set()).update(attrs)
+        return resolved
+
+    def unfreeze(self, keys, attrs=None) -> tuple[str, ...]:
+        """Remove pins; values continue from where they are now."""
+        resolved = self._resolve_site_keys(keys)
+        attrs = None if attrs is None else self._attrs_tuple(attrs)
+        for key in resolved:
+            if attrs is None:
+                self._frozen.pop(key, None)
+                continue
+            current = self._frozen.get(key)
+            if current is not None:
+                current.difference_update(attrs)
+                if not current:
+                    self._frozen.pop(key, None)
+        return resolved
+
+    def frozen_attrs(self, site_key: str) -> frozenset[str]:
+        return frozenset(self._frozen.get(site_key, ()))
+
+    def is_frozen(self, site_key: str, attr: str) -> bool:
+        return attr in self._frozen.get(site_key, ())
+
+    def defaults(self, site_key: str) -> Dict[str, float]:
+        return dict(self._defaults[site_key])
 
     @staticmethod
     def _now_ms() -> float:
@@ -170,7 +264,9 @@ class Registry:
         # One site recorder per optimizable parameter; the seed value it is
         # about to realize is the first recorded (sample, sigma).
         for p_name, param_obj in cfg.params.items():
-            self.site_recorder(f"pop_{cfg.name}_{p_name}").record_sample(
+            key = f"pop_{cfg.name}_{p_name}"
+            self._record_defaults(key, param_obj)
+            self.site_recorder(key).record_sample(
                 self._now_ms(), param_obj.mean, param_obj.sigma)
 
         sampled = cfg.sample_matrix(explored_means=explored_means)
@@ -213,7 +309,9 @@ class Registry:
                 and "stdp" not in str(cfg.model).lower()):
             clamp_weight_sign(weight)
         for p_name, param_obj in cfg.parameters.items():
-            self.site_recorder(f"conn_{conn_key}_{p_name}").record_sample(
+            key = f"conn_{conn_key}_{p_name}"
+            self._record_defaults(key, param_obj)
+            self.site_recorder(key).record_sample(
                 self._now_ms(), param_obj.mean, param_obj.sigma)
         if cfg.weight_recorder is not None:
             # Noise scale: the projection's current weight ceiling at
@@ -257,6 +355,7 @@ class Registry:
                              params={"rate": rate_param}, name=name)
             pop.node_collection = pg
             self.population_cfgs[name] = pop
+            self._record_defaults(f"pop_{name}_rate", rate_param)
             self.site_recorder(f"pop_{name}_rate").record_sample(
                 self._now_ms(), rate_param.mean, rate_param.sigma)
             # realize the seed dispersion per device, exactly like
@@ -340,6 +439,10 @@ class Registry:
                 self._syn_counts[key] = 0
             if cfg.weight_recorder is not None:
                 self._plastic_n_syn[key] = self._syn_counts[key]
+        # Builders may mutate a PersonaParam after create_population (the
+        # flexor pool is silenced this way); the anchor is the effective value
+        # at the end of construction, not the provisional one at registration.
+        self.recapture_defaults()
 
     def read_plastic_events(self, clear: bool = True) -> Dict[str, Dict[str, np.ndarray]]:
         """
