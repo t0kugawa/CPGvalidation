@@ -1,0 +1,5 @@
+mode,mean_p90_improvement,min_p90_improvement,mean_loss_delta,max_loss_delta,q_growth_sum,q_growth_max,finite,band_ok,accept_20pct,accept_loss,accept_q,passes
+advantage,-0.029229911017691013,-0.13999692555016807,0.10787085527549078,0.10817124563948632,-2,4,True,True,False,False,False,False
+budget,-0.04749442338928028,-0.15654249864340497,0.06102313481322674,0.11330938918183042,8,7,True,True,False,True,False,False
+fisher,-0.018931893308926362,-0.08537547321400063,-0.008449164467682457,0.005597375605891353,0,2,True,True,False,True,False,False
+band,-0.03602677953765193,-0.1410311357166507,0.059653018311599804,0.12927279593488428,5,8,True,True,False,True,False,False

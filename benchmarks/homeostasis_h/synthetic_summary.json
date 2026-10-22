@@ -1,0 +1,28 @@
+{
+  "h_off": {
+    "arm": "h_off",
+    "share_rms": 0.39819095829463635,
+    "projected_rms": 0.39819095829463635,
+    "loss_proxy": 1.114119632436846,
+    "u_norm_mean": 0.0,
+    "steps": 1000,
+    "eval_steps": 500,
+    "mode": "budget",
+    "lambda_H": 0.0
+  },
+  "h_on": {
+    "arm": "h_on",
+    "share_rms": 0.27607245080515824,
+    "projected_rms": 0.2753991330414092,
+    "loss_proxy": 1.2819710181362776,
+    "u_norm_mean": 0.018258814499254393,
+    "steps": 1000,
+    "eval_steps": 500,
+    "mode": "budget",
+    "lambda_H": 1.0
+  },
+  "share_reduction": 0.3066832758144098,
+  "projected_reduction": 0.3083742176846941,
+  "passes_20pct": true,
+  "target_50pct": false
+}

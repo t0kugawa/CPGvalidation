@@ -1,0 +1,87 @@
+{
+  "layer": "acceptance",
+  "steps": 2000,
+  "eval_steps": 1000,
+  "seeds": [
+    0,
+    1
+  ],
+  "sizes": {
+    "n_rg": 10,
+    "n_mn": 8,
+    "n_int": 8,
+    "n_aff": 6,
+    "n_bs": 8
+  },
+  "modes": [
+    {
+      "mode": "advantage",
+      "mean_p90_improvement": -0.029229911017691013,
+      "min_p90_improvement": -0.13999692555016807,
+      "mean_loss_delta": 0.10787085527549078,
+      "max_loss_delta": 0.10817124563948632,
+      "q_growth_sum": -2,
+      "q_growth_max": 4,
+      "finite": true,
+      "band_ok": true,
+      "accept_20pct": false,
+      "accept_loss": false,
+      "accept_q": false,
+      "passes": false
+    },
+    {
+      "mode": "budget",
+      "mean_p90_improvement": -0.04749442338928028,
+      "min_p90_improvement": -0.15654249864340497,
+      "mean_loss_delta": 0.06102313481322674,
+      "max_loss_delta": 0.11330938918183042,
+      "q_growth_sum": 8,
+      "q_growth_max": 7,
+      "finite": true,
+      "band_ok": true,
+      "accept_20pct": false,
+      "accept_loss": true,
+      "accept_q": false,
+      "passes": false
+    },
+    {
+      "mode": "fisher",
+      "mean_p90_improvement": -0.018931893308926362,
+      "min_p90_improvement": -0.08537547321400063,
+      "mean_loss_delta": -0.008449164467682457,
+      "max_loss_delta": 0.005597375605891353,
+      "q_growth_sum": 0,
+      "q_growth_max": 2,
+      "finite": true,
+      "band_ok": true,
+      "accept_20pct": false,
+      "accept_loss": true,
+      "accept_q": false,
+      "passes": false
+    },
+    {
+      "mode": "band",
+      "mean_p90_improvement": -0.03602677953765193,
+      "min_p90_improvement": -0.1410311357166507,
+      "mean_loss_delta": 0.059653018311599804,
+      "max_loss_delta": 0.12927279593488428,
+      "q_growth_sum": 5,
+      "q_growth_max": 8,
+      "finite": true,
+      "band_ok": true,
+      "accept_20pct": false,
+      "accept_loss": true,
+      "accept_q": false,
+      "passes": false
+    }
+  ],
+  "baseline_exact": true,
+  "baseline_note": "H off is the no-regulator path; exact parity is covered by the H/strategy tests.",
+  "same_seed_per_pair": true,
+  "all_finite": true,
+  "all_zero_violations": true,
+  "band_in_band": true,
+  "modes_passing": [],
+  "chosen_mode": null,
+  "passes": false
+}

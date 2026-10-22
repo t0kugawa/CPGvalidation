@@ -11,6 +11,7 @@ import nest
 
 from persona.registry import Registry
 from persona.agent import Agent
+from persona.homeostasis import HomeostaticConfig
 from persona.personalization import Personalizer, MocapTargetDriver
 from persona.validation import ValidationReport
 from t2xcpg.bs import BrainStem, BaseDrive
@@ -66,7 +67,9 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
                        loop: bool = True,
                        tau_mem_s: float = 2.0,
                        resolution_ms: float = 0.2,
-                       cut_multisite: bool = False) -> tuple[Personalizer, MocapLoader]:
+                       cut_multisite: bool = False,
+                       homeostasis: HomeostaticConfig | None = None
+                       ) -> tuple[Personalizer, MocapLoader]:
     """
     Builds the full closed loop: bilateral CPG (via the PERSONA registry),
     bilateral MuJoCo rig, PERSONA agent, and the mocap-driven target limb.
@@ -171,7 +174,8 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
     )
 
     agent = Agent(registry=reg, lr_mu=0.03, lr_sigma=0.005,
-                  tau_mem_s=tau_mem_s, dt_ms=DT_MS)
+                  tau_mem_s=tau_mem_s, dt_ms=DT_MS,
+                  homeostasis=homeostasis)
 
     personalizer = Personalizer(
         registry=reg, cpg=cpg, rig=rig, agent=agent, target_driver=driver,

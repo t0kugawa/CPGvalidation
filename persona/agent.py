@@ -4,6 +4,11 @@ import numpy as np
 from persona.registry import Registry
 from persona.strategy import FisherMatrix
 from persona.parameter import PersonaParam
+from persona.homeostasis import (
+    HomeostaticConfig,
+    HomeostaticRegulator,
+    PhysicalMap,
+)
 
 
 class Agent:
@@ -24,7 +29,8 @@ class Agent:
                  tau_mem_s: float = 2.0,
                  dt_ms: float = 10.0,
                  warmup: int = 3,
-                 smooth_kernel_size: int = 5):
+                 smooth_kernel_size: int = 5,
+                 homeostasis: HomeostaticConfig | None = None):
         self.registry = registry
         self.lr_mu = float(lr_mu)
         self.lr_sigma = float(lr_sigma)
@@ -51,10 +57,25 @@ class Agent:
         }
 
         self.params: Dict[str, PersonaParam] = {}
+        self.homeostasis = None
         self.refresh_params()
+
+        if homeostasis is not None and homeostasis.enabled:
+            physical_map = PhysicalMap.from_registry(
+                registry, eps_H=homeostasis.eps_H)
+            self.homeostasis = HomeostaticRegulator(
+                physical_map, homeostasis, dt_s=self.dt_ms / 1000.0,
+                beta=self.beta, site_names=list(self.params.keys()))
+            self.history["homeostasis"] = []
 
         if strategy is not None:
             self.strategy = strategy
+            if self.homeostasis is not None:
+                self.strategy.homeostasis = self.homeostasis
+                self.strategy.dt_s = self.dt_ms / 1000.0
+                if hasattr(self.strategy, "ensure_names"):
+                    self.strategy.ensure_names(self.strategy.param_names,
+                                               self.strategy.noise_names)
         else:
             self.strategy = FisherMatrix(
                 param_names=list(self.params.keys()),
@@ -63,6 +84,8 @@ class Agent:
                 lr_sigma=self.lr_sigma,
                 beta=self.beta,
                 warmup=self.warmup,
+                homeostasis=self.homeostasis,
+                dt_s=self.dt_ms / 1000.0,
             )
 
     # --- host state ---------------------------------------------------------
@@ -88,6 +111,8 @@ class Agent:
             if rec.beta != self.beta:
                 rec.beta = self.beta
         self.params = params
+        if getattr(self, "homeostasis", None) is not None:
+            self.homeostasis.ensure_params(params.keys())
         return params
 
     # --- per-step API -------------------------------------------------------
@@ -211,6 +236,8 @@ class Agent:
 
         delta_means = self.strategy.step(
             sites, noise, advantage_vec, phase_shift=phase_shift)
+        if self.homeostasis is not None:
+            self.history["homeostasis"].append(self.homeostasis.diagnostics())
 
         # Apply to the host (from warmup+1): means first, then sigma — both from
         # the sampling-time snapshot, so neither depends on the other's change.

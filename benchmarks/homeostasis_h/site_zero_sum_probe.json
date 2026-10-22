@@ -1,0 +1,82 @@
+{
+  "probe": "normalized site-level zero-sum lift vs current player-level lift",
+  "mode": "fisher",
+  "steps": 2000,
+  "eval_steps": 1000,
+  "sizes": {
+    "n_rg": 10,
+    "n_mn": 8,
+    "n_int": 8,
+    "n_aff": 6,
+    "n_bs": 8
+  },
+  "normalized_site_zero_sum": [
+    {
+      "seed": 0,
+      "loss_eval": 1.172131473064955,
+      "r_median": 0.17754105965856923,
+      "r_p90": 0.5708237468403294,
+      "r_max": 1.0,
+      "r_gt_0_25": 104,
+      "q_gt_1": 81,
+      "at_bound": 24,
+      "share_rms": 0.5994630662463961,
+      "site_sum_mean": -1.6054423857591548e-17,
+      "site_sum_max_abs": 3.3306690738754696e-16,
+      "T_min": 0.8310677041626692,
+      "T_max": 0.8739232431805748
+    },
+    {
+      "seed": 1,
+      "loss_eval": 1.2736562780601735,
+      "r_median": 0.3150171652778044,
+      "r_p90": 0.6673984086733157,
+      "r_max": 1.0,
+      "r_gt_0_25": 145,
+      "q_gt_1": 122,
+      "at_bound": 103,
+      "share_rms": 0.5757569837120935,
+      "site_sum_mean": -6.782231564018814e-17,
+      "site_sum_max_abs": 1.9984014443252818e-15,
+      "T_min": 0.8669587738070217,
+      "T_max": 0.9384753254068261
+    }
+  ],
+  "reference_current_player_lift_from_acceptance": [
+    {
+      "seed": 0,
+      "loss_eval": 1.1498745881764625,
+      "r_median": 0.08862589884867857,
+      "r_p90": 0.5415712299339088,
+      "q_gt_1": 68,
+      "at_bound": 34
+    },
+    {
+      "seed": 1,
+      "loss_eval": 1.2519156737206576,
+      "r_median": 0.1081,
+      "r_p90": 0.6154,
+      "q_gt_1": 78,
+      "at_bound": 39
+    }
+  ],
+  "reference_h_off_from_acceptance": [
+    {
+      "seed": 0,
+      "loss_eval": 1.1434741339531056,
+      "r_median": 0.09336947557718939,
+      "r_p90": 0.49897131757567237,
+      "q_gt_1": 66,
+      "at_bound": 23
+    },
+    {
+      "seed": 1,
+      "loss_eval": 1.2807265190923098,
+      "r_median": 0.1037,
+      "r_p90": 0.6461,
+      "q_gt_1": 80,
+      "at_bound": 40
+    }
+  ],
+  "conclusion": "Normalized site-level zero-sum achieves the invariant (site sum ~0) but worsens p90, loss, median inflation, q-count, and seed-1 at-bound pressure versus the current player-level lift. Nonzero site sum alone is not the primary cause of the acceptance failure; this lift is rejected."
+}

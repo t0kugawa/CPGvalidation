@@ -3,6 +3,8 @@ from typing import Dict, List
 import numpy as np
 from scipy.linalg import cho_factor, cho_solve
 
+from persona.homeostasis import HomeostaticRegulator
+
 
 @dataclass
 class PhaseBaselines:
@@ -78,7 +80,9 @@ class FisherMatrix:
                  beta: float = 0.995,
                  warmup: int = 3,
                  baseline_alpha: float = 0.90,
-                 refresh_every: int | None = None):
+                 refresh_every: int | None = None,
+                 homeostasis: HomeostaticRegulator | None = None,
+                 dt_s: float = 0.01):
         self.param_names = list(param_names)
         self.noise_names = list(noise_names or [])
         self.noise_scales: Dict[str, float] = {}
@@ -87,6 +91,8 @@ class FisherMatrix:
         self.lambda_reg = float(lambda_reg)
         self.beta = float(beta)
         self.warmup = int(warmup)
+        self.dt_s = float(dt_s)
+        self.homeostasis = homeostasis
         self.steps = 0
 
         self.baselines = PhaseBaselines(alpha=baseline_alpha)
@@ -105,6 +111,8 @@ class FisherMatrix:
         self._steps_since_refresh = 0
         self._P_valid = True
         self.P = np.eye(n, dtype=np.float64) / self.lambda_reg
+        if self.homeostasis is not None:
+            self.homeostasis.ensure_params(self.param_names)
 
     @property
     def P(self):
@@ -215,6 +223,8 @@ class FisherMatrix:
         G[new_idx, :] = self.G[old_idx, :]
         self.F, self.Xbar, self.G = F, X, G
         self._refresh_inverse()
+        if self.homeostasis is not None:
+            self.homeostasis.ensure_params(self.param_names)
 
     # --- advantage / updates -------------------------------------------------
 
@@ -311,6 +321,14 @@ class FisherMatrix:
 
         g = self.G.sum(axis=1)
         g[2 * m:] = 0.0                      # noise rows never receive credit
+        if self.homeostasis is not None:
+            self.homeostasis.ensure_params(self.param_names)
+            sigmas = np.array([
+                max(float(sites[name][1]), 1e-12) for name in self.param_names
+            ], dtype=np.float64)
+            g[:m] = self.homeostasis.adjust_credit(
+                g[:m], sigmas, float(np.mean(A)), self.F, self.steps,
+                dt_s=self.dt_s)
         nat = self._solve_direct(g) if self.refresh_every == 1 else self.P @ g
         if not np.all(np.isfinite(nat)):
             self._refresh_inverse()

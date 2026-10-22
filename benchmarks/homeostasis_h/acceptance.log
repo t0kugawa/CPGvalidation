@@ -1,0 +1,65 @@
+
+             -- N E S T --
+
+ Copyright (C) 2004 The NEST Initiative
+
+ Version: 3.10.0
+ Built  : Jun 10 2026 07:01:20
+
+ This program is provided AS IS and comes with NO WARRANTY.
+ See the file LICENSE for details.
+
+ Problems or suggestions?
+   Visit https://www.nest-simulator.org
+
+ Type 'nest.help()' to find out more about NEST.
+
+[INFO] [2026-10-21 21:12:01] Default for delta_tau changed from 0.5 to 1 ms
+[INFO] [2026-10-21 21:12:01] Default for delta_tau changed from 0.5 to 1 ms
+[INFO] [2026-10-21 21:12:01] Default for delta_tau changed from 0.1 to 0.2 ms
+[INFO] [2026-10-21 21:12:01] Temporal resolution changed from 0.1 to 0.2 ms.
+[INFO] [2026-10-21 21:12:01] Default for delta_tau changed from 0.5 to 1 ms
+[INFO] [2026-10-21 21:12:01] Default for delta_tau changed from 0.5 to 1 ms
+[INFO] [2026-10-21 21:12:01] Default for delta_tau changed from 0.1 to 0.2 ms
+[INFO] [2026-10-21 21:12:01] Temporal resolution changed from 0.1 to 0.2 ms.
+[INFO] [2026-10-21 21:12:01] Default for delta_tau changed from 0.5 to 1 ms
+[INFO] [2026-10-21 21:12:01] Default for delta_tau changed from 0.5 to 1 ms
+[INFO] [2026-10-21 21:12:01] Default for delta_tau changed from 0.5 to 1 ms
+[INFO] [2026-10-21 21:12:01] Default for delta_tau changed from 0.5 to 1 ms
+[INFO] [2026-10-21 21:12:01] Default for delta_tau changed from 0.1 to 0.2 ms
+[INFO] [2026-10-21 21:12:01] Default for delta_tau changed from 0.5 to 1 ms
+[INFO] [2026-10-21 21:12:01] Default for delta_tau changed from 0.1 to 0.2 ms
+[INFO] [2026-10-21 21:12:01] Temporal resolution changed from 0.1 to 0.2 ms.
+[INFO] [2026-10-21 21:12:01] Temporal resolution changed from 0.1 to 0.2 ms.
+[INFO] [2026-10-21 21:12:01] Default for delta_tau changed from 0.5 to 1 ms
+[INFO] [2026-10-21 21:12:01] Default for delta_tau changed from 0.1 to 0.2 ms
+[INFO] [2026-10-21 21:12:01] Temporal resolution changed from 0.1 to 0.2 ms.
+[INFO] [2026-10-21 21:12:01] Default for delta_tau changed from 0.5 to 1 ms
+[INFO] [2026-10-21 21:12:01] Default for delta_tau changed from 0.5 to 1 ms
+[INFO] [2026-10-21 21:12:01] Default for delta_tau changed from 0.1 to 0.2 ms
+[INFO] [2026-10-21 21:12:01] Temporal resolution changed from 0.1 to 0.2 ms.
+[INFO] [2026-10-21 21:12:01] Default for delta_tau changed from 0.5 to 1 ms
+[INFO] [2026-10-21 21:12:01] Default for delta_tau changed from 0.5 to 1 ms
+[INFO] [2026-10-21 21:12:01] Default for delta_tau changed from 0.1 to 0.2 ms
+[INFO] [2026-10-21 21:12:01] Temporal resolution changed from 0.1 to 0.2 ms.
+[INFO] [2026-10-21 21:12:01] Default for delta_tau changed from 0.5 to 1 ms
+[INFO] [2026-10-21 21:12:01] Default for delta_tau changed from 0.5 to 1 ms
+[INFO] [2026-10-21 21:12:01] Default for delta_tau changed from 0.1 to 0.2 ms
+[INFO] [2026-10-21 21:12:01] Temporal resolution changed from 0.1 to 0.2 ms.
+[arm] seed=0 mode=budget loss_eval=1.273 p90=0.5771 wall=580.9s
+[arm] seed=0 mode=band loss_eval=1.2913 p90=0.5693 wall=588.7s
+[arm] seed=1 mode=advantage loss_eval=1.4193 p90=0.5934 wall=620.9s
+[arm] seed=0 mode=fisher loss_eval=1.1499 p90=0.5416 wall=623.3s
+[arm] seed=1 mode=off loss_eval=1.2807 p90=0.6461 wall=623.9s
+[arm] seed=0 mode=advantage loss_eval=1.2665 p90=0.5688 wall=628.2s
+[arm] seed=1 mode=budget loss_eval=1.2919 p90=0.6063 wall=634.1s
+[arm] seed=0 mode=off loss_eval=1.1435 p90=0.499 wall=640.1s
+[arm] seed=1 mode=band loss_eval=1.268 p90=0.6015 wall=925.7s
+[arm] seed=1 mode=fisher loss_eval=1.2519 p90=0.6154 wall=936.0s
+[acceptance] advantage: p90 improve=-2.9% loss delta=10.8% q growth=4 pass=False
+[acceptance] budget: p90 improve=-4.7% loss delta=6.1% q growth=7 pass=False
+[acceptance] fisher: p90 improve=-1.9% loss delta=-0.8% q growth=2 pass=False
+[acceptance] band: p90 improve=-3.6% loss delta=6.0% q growth=8 pass=False
+acceptance pass=False zero violations=True chosen=None
+[artifacts] wrote /mnt/d/CPGvalidation/benchmarks/homeostasis_h/homeostasis_h_results.xlsx
+[artifacts] wrote PNGs to /mnt/d/CPGvalidation/benchmarks/homeostasis_h

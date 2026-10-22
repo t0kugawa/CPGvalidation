@@ -1,0 +1,15 @@
+{
+  "layer": "fast_smoke",
+  "steps": 400,
+  "seed": 0,
+  "sizes": {
+    "n_rg": 6,
+    "n_mn": 5,
+    "n_int": 5,
+    "n_aff": 3,
+    "n_bs": 5
+  },
+  "all_finite": true,
+  "zero_violations": true,
+  "diagnostics": true
+}
