@@ -8,6 +8,23 @@ from persona.connection import Connection
 from persona.noise_recorder import NoiseRecorder
 
 
+def clamp_weight_sign(param: PersonaParam) -> PersonaParam:
+    """Enforce the sign identity of a static synaptic weight.
+
+    An excitatory weight can never cross below zero and an inhibitory weight
+    can never cross above zero, so the two cannot replace each other through
+    learning. Existing stricter bounds are preserved; a zero-mean weight is
+    ambiguous and left untouched. This is a type/sign constraint, not a
+    stability setpoint.
+    """
+    mean = float(param.mean)
+    if mean > 0.0:
+        param.min = max(float(param.min), 0.0)
+    elif mean < 0.0:
+        param.max = min(float(param.max), 0.0)
+    return param
+
+
 def plastic_delta_from_events(events: dict, last_w: dict, seed_weight: float,
                               n_syn: int) -> tuple[float, dict]:
     """
@@ -189,6 +206,12 @@ class Registry:
 
         conn_key = cfg.key if cfg.key is not None else f"{cfg.source}_{cfg.target}"
         self.connection_cfgs[conn_key] = cfg
+        # Type/sign identity: a static weight may not change from excitatory to
+        # inhibitory (or back). STDP weights are seeded, not optimizable sites.
+        weight = cfg.parameters.get("weight")
+        if (weight is not None and cfg.weight_recorder is None
+                and "stdp" not in str(cfg.model).lower()):
+            clamp_weight_sign(weight)
         for p_name, param_obj in cfg.parameters.items():
             self.site_recorder(f"conn_{conn_key}_{p_name}").record_sample(
                 self._now_ms(), param_obj.mean, param_obj.sigma)

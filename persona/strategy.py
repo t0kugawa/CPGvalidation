@@ -3,6 +3,7 @@ from typing import Dict, List
 import numpy as np
 from scipy.linalg import cho_factor, cho_solve
 
+from persona.game import StackGame
 from persona.homeostasis import HomeostaticRegulator
 
 
@@ -82,6 +83,7 @@ class FisherMatrix:
                  baseline_alpha: float = 0.90,
                  refresh_every: int | None = None,
                  homeostasis: HomeostaticRegulator | None = None,
+                 game: StackGame | None = None,
                  dt_s: float = 0.01):
         self.param_names = list(param_names)
         self.noise_names = list(noise_names or [])
@@ -93,6 +95,7 @@ class FisherMatrix:
         self.warmup = int(warmup)
         self.dt_s = float(dt_s)
         self.homeostasis = homeostasis
+        self.game = game
         self.steps = 0
 
         self.baselines = PhaseBaselines(alpha=baseline_alpha)
@@ -113,6 +116,8 @@ class FisherMatrix:
         self.P = np.eye(n, dtype=np.float64) / self.lambda_reg
         if self.homeostasis is not None:
             self.homeostasis.ensure_params(self.param_names)
+        if self.game is not None:
+            self.game.ensure_params(self.param_names)
 
     @property
     def P(self):
@@ -225,6 +230,8 @@ class FisherMatrix:
         self._refresh_inverse()
         if self.homeostasis is not None:
             self.homeostasis.ensure_params(self.param_names)
+        if self.game is not None:
+            self.game.ensure_params(self.param_names)
 
     # --- advantage / updates -------------------------------------------------
 
@@ -337,6 +344,17 @@ class FisherMatrix:
             nat = self._solve_direct(g)
         for i, name in enumerate(self.param_names):
             deltas[name] = float(self.lr_mu * nat[i])
+        if self.game is not None:
+            move = np.asarray(
+                [deltas[name] for name in self.param_names],
+                dtype=np.float64)
+            sig = np.asarray(
+                [max(float(sites[name][1]), 1e-12)
+                 for name in self.param_names], dtype=np.float64)
+            move = self.game.apply(g[:m], move, self.steps, F=self.F,
+                                   sigmas=sig)
+            for i, name in enumerate(self.param_names):
+                deltas[name] = float(move[i])
         return deltas
 
     # --- introspection -------------------------------------------------------

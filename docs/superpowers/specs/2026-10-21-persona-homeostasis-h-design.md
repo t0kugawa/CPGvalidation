@@ -5,6 +5,9 @@ production acceptance still fails; no mode is a production default. The
 committed experimental best is `HomeostaticConfig.current_best()` —
 `fisher` + centered site-zero-sum lift + H delayed to step 500.
 
+The follow-up experimental direction is the conserved-stack game:
+`docs/superpowers/specs/2026-10-22-persona-conserved-stack-game-design.md`.
+
 This document defines a homeostatic regulator `H` for PERSONA's natural-gradient
 strategy. It is derived from the same Fisher/SNN architecture, but it does not
 use absolute per-parameter setpoints. Stability is relational: players compete

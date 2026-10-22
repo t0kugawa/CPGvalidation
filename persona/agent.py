@@ -4,6 +4,7 @@ import numpy as np
 from persona.registry import Registry
 from persona.strategy import FisherMatrix
 from persona.parameter import PersonaParam
+from persona.game import GameConfig, StackGame
 from persona.homeostasis import (
     HomeostaticConfig,
     HomeostaticRegulator,
@@ -30,7 +31,8 @@ class Agent:
                  dt_ms: float = 10.0,
                  warmup: int = 3,
                  smooth_kernel_size: int = 5,
-                 homeostasis: HomeostaticConfig | None = None):
+                 homeostasis: HomeostaticConfig | None = None,
+                 game: GameConfig | None = None):
         self.registry = registry
         self.lr_mu = float(lr_mu)
         self.lr_sigma = float(lr_sigma)
@@ -68,10 +70,22 @@ class Agent:
                 beta=self.beta, site_names=list(self.params.keys()))
             self.history["homeostasis"] = []
 
+        self.game = None
+        if game is not None and game.enabled:
+            game_map = PhysicalMap.from_registry(registry)
+            self.game = StackGame(
+                game_map, game, dt_s=self.dt_ms / 1000.0,
+                beta=self.beta, site_names=list(self.params.keys()))
+            self.history["game"] = []
+
         if strategy is not None:
             self.strategy = strategy
             if self.homeostasis is not None:
                 self.strategy.homeostasis = self.homeostasis
+            if self.game is not None:
+                self.strategy.game = self.game
+            if (self.homeostasis is not None
+                    or self.game is not None):
                 self.strategy.dt_s = self.dt_ms / 1000.0
                 if hasattr(self.strategy, "ensure_names"):
                     self.strategy.ensure_names(self.strategy.param_names,
@@ -85,6 +99,7 @@ class Agent:
                 beta=self.beta,
                 warmup=self.warmup,
                 homeostasis=self.homeostasis,
+                game=self.game,
                 dt_s=self.dt_ms / 1000.0,
             )
 
@@ -113,6 +128,8 @@ class Agent:
         self.params = params
         if getattr(self, "homeostasis", None) is not None:
             self.homeostasis.ensure_params(params.keys())
+        if getattr(self, "game", None) is not None:
+            self.game.ensure_params(params.keys())
         return params
 
     # --- per-step API -------------------------------------------------------
@@ -238,6 +255,8 @@ class Agent:
             sites, noise, advantage_vec, phase_shift=phase_shift)
         if self.homeostasis is not None:
             self.history["homeostasis"].append(self.homeostasis.diagnostics())
+        if self.game is not None:
+            self.history["game"].append(self.game.diagnostics())
 
         # Apply to the host (from warmup+1): means first, then sigma — both from
         # the sampling-time snapshot, so neither depends on the other's change.

@@ -11,6 +11,7 @@ import nest
 
 from persona.registry import Registry
 from persona.agent import Agent
+from persona.game import GameConfig
 from persona.homeostasis import HomeostaticConfig
 from persona.personalization import Personalizer, MocapTargetDriver
 from persona.validation import ValidationReport
@@ -68,7 +69,8 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
                        tau_mem_s: float = 2.0,
                        resolution_ms: float = 0.2,
                        cut_multisite: bool = False,
-                       homeostasis: HomeostaticConfig | None = None
+                       homeostasis: HomeostaticConfig | None = None,
+                       game: GameConfig | None = None
                        ) -> tuple[Personalizer, MocapLoader]:
     """
     Builds the full closed loop: bilateral CPG (via the PERSONA registry),
@@ -87,7 +89,8 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
     # locks into a resolution-induced limit cycle (~500 Hz motor pools at zero
     # sensory input), which pins the flexor drive at 1.0 regardless of PERSONA.
     nest.SetKernelStatus({"resolution": float(resolution_ms),
-                          "print_time": False})
+                          "print_time": False,
+                          "rng_seed": 1 + int(seed) % (2**32 - 2)})
     try:
         nest.verbosity = nest.VerbosityLevel.ERROR
     except Exception:
@@ -181,7 +184,7 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
 
     agent = Agent(registry=reg, lr_mu=0.03, lr_sigma=0.005,
                   tau_mem_s=tau_mem_s, dt_ms=DT_MS,
-                  homeostasis=homeostasis)
+                  homeostasis=homeostasis, game=game)
 
     personalizer = Personalizer(
         registry=reg, cpg=cpg, rig=rig, agent=agent, target_driver=driver,
