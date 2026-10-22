@@ -5,8 +5,9 @@
 > scheme-confirmed Ia/Ib wiring). The PERSONA and render sections here remain
 > current.
 
-Date: 2026-10-15 (strategy revised 2026-10-16)
-Status: approved (chat, 2026-10-15; strategy revision agreed 2026-10-16)
+Date: 2026-10-15 (strategy revised 2026-10-16; ground contact revised 2026-10-22)
+Status: approved (chat, 2026-10-15; strategy revision agreed 2026-10-16;
+ground-contact revision approved for implementation 2026-10-22)
 Supersedes the PERSONA-strategy and CPG-initialisation sections of
 `2026-10-14-persona-cpg-mujoco-design.md`. Everything else there still holds.
 
@@ -179,6 +180,64 @@ connection `p`, and σ_param (see §5.5).
 Thin the SOL/TA tendon capsules, shrink the origin/insert site sizes, offset the
 muscle path off the bone axis so the tendons are visible when they shorten.
 
+### 5.8 Reference limb ground contact (revised 2026-10-22)
+
+**Problem.** The target limb was a purely kinematic mirror with collision
+disabled (V8). Its foot/toe geometry is identical to the controlled limb's
+(both are scaled to the same per-trial mean segment lengths, V10), but it was
+not stopped by the belt. Over `RatA_x1p50_Lfast_T1` its toe went up to 26 mm
+below the dataset ground and stayed below it for 72-77% of frames, while the
+controlled foot sat on the belt. The geometric `phase_ref`
+(`foot_z_ref <= belt_z + CONTACT_Z_EPS`) therefore reported stance for ~80% of
+the trial, and the target was not physically reachable.
+
+**Decision.** Give the reference limb the same ground constraint as the
+controlled limb, without bending joints or rescaling bones:
+
+- `foot_ref_geom_L/R` and `toe_ref_geom_L/R` get `contype="2" conaffinity="1"`
+  (the controlled foot uses the same pair; the treadmill is `contype=1
+  conaffinity=1`).
+- `toe_ref_ctrl_L/R` `kp` is raised from `0.1` to `2.0` to match
+  `toe_m_ctrl_L/R`.
+- `phase_ref` / `contact_ref_*` are derived from the actual reference/treadmill
+  contacts, as for the controlled limb, instead of the height threshold.
+- The belt stays at the dataset ground (V9); no bone is scaled (V10).
+
+The reference remains servo-driven by the mocap angle; contact may push its
+actual joint angles away from the command by the same amount as the controlled
+limb. The commanded trajectory is unchanged, so the target and the reward are
+unchanged.
+
+**Spike evidence** (`RatA_x1p50_Lfast_T1`, 16 s, both limbs driven by position
+servos to the same mocap trajectory, belt -3.34 mm; `m` = controlled,
+`ref` = target):
+
+| variant | ref below belt | contact ref / m | IoU | mean / p95 foot z difference |
+|---|---:|---:|---:|---:|
+| current (no ref contact) | -26.10 mm | 0% / 62% | 0.00 | 6.52 / 13.69 mm |
+| ref contact | -6.07 mm | 63.5% / 62% | 0.83 | 0.31 / 0.97 mm |
+| **ref contact + matched toe kp** | **-6.64 mm** | **64.0% / 62.0%** | **0.84** | **0.23 / 0.87 mm** |
+| lift reference base per frame | -0.34 mm | 0% / 62% | 0.00 | 2.10 / 11.43 mm (25 mm hip offset) |
+| lower belt to the model foot | -1.61 mm | 0% / 0.1% | 0.50 | 0.57 / 1.13 mm (no contact) |
+
+The matched-toe-contact variant preserves the commanded ankle range
+(`[-0.02, +1.75]` vs `[-0.02, +1.76]` rad) and makes the reference contact and
+foot level match the controlled limb. It is the selected approach.
+
+**Open issue: common soft-contact penetration.** Both limbs settle about 6.6 mm
+below the belt because the treadmill's `solref="0.02 1"` is soft relative to
+the servo/contact force. This is now shared equally by both limbs, so it does
+not break the range/contact equality, but the target is still geometrically
+below the plane. Candidate fixes, to be decided separately:
+
+1. Accept it as the model's contact compliance (both limbs are equal).
+2. Stiffen the treadmill contact (`solref` 0.004-0.01): the 0.004 probe reduced
+   the penetration to ~2 mm but lowered the contact fraction to ~51% and
+   increased the ankle deviation from the command.
+3. Raise the belt by the equilibrium penetration (this does not change the
+   relative penetration; it only moves the world).
+4. Tune the servo/actuator force or add a joint/contact compliance model.
+
 ## 6. Interfaces (delta)
 
 - `FisherMatrix.record_response(delta_theta, advantage)`; `compute_metric()` →
@@ -204,6 +263,10 @@ muscle path off the bone axis so the tendons are visible when they shorten.
 - CPG: `RGE→InE→RGF` exists, `RGE→M-E` direct, **no** direct `RGE→RGF`;
   population + initial-value checks against §5.4.
 - Render: muscle geoms do not overlap the bone geoms.
+- Reference-limb ground contact: the four `*_ref_geom` foot/toe geoms compile
+  with `contype=2 conaffinity=1`; `phase_ref` follows the actual contacts; a
+  short `run_validation.py --fast` gives contact IoU(ref, m) >= 0.8 and mean
+  `|foot_z_m - foot_z_ref| < 1 mm`.
 
 ## 9. Decisions (check these)
 
@@ -223,10 +286,13 @@ muscle path off the bone axis so the tendons are visible when they shorten.
   and `InE/InF→MN`. `CUT→RGE` is STDP, not static.
 - **V7** Reference names/values per §5.4; Ib/Renshaw keep project values; runs
   use the unscaled reference values (`w_scale = 1.0`).
-- **V8** Target limb is a **kinematic mirror** (no collision, `contype/conaffinity=0`):
-  its phase is geometric (`foot_z_ref <= belt_z + CONTACT_Z_EPS`), `contact_ref_*`
-  is a 0/1 stance indicator, and it is validation-only (the loop uses the model
-  `phase_L/R`).
+- **V8 (revised 2026-10-22)** Target limb is a **physical mirror**: it keeps the
+  dataset joint trajectory as its servo command, but its foot/toe geoms collide
+  with the treadmill (`contype=2 conaffinity=1`) and its toe servo gain matches
+  the controlled limb (`kp=2.0`). Its phase is taken from the actual
+  foot/treadmill contacts (like the controlled limb), not from a geometric
+  height threshold. It remains validation/reference-only: the loop still uses
+  the model `phase_L/R`, and the commanded mocap angles are unchanged.
 - **V9** **Belt = dataset ground**, one plane for both limbs:
   `min` over the run window of the foot-marker (MH) height (dataset frame, m) plus
   `TREADMILL_PENETRATION_M`. Not derived from the target limb's rig geometry.
@@ -268,6 +334,8 @@ muscle path off the bone axis so the tendons are visible when they shorten.
   (0.31/0.39 rad) because the ankle merely drifts passively. `dataset` is the default:
   it is the specified treadmill position and the only setting that exercises the
   contact→afferent loop. The remaining blocker is the ankle actuation, not the belt.
+  `--belt model` is **not** the reference-contact fix (it lowers the ground away
+  from the controlled foot); it remains non-default and is kept as a diagnostic.
 - **V20** `eps_pose` is the settling tolerance of stage 1 only: the pose stage ends after
   `pose_hold_steps` consecutive steps with `max(|ankle_model − ankle_target|) < eps_pose`
   (or when `pose_max_steps` is reached). It gates the stage transition, never the
@@ -284,3 +352,10 @@ muscle path off the bone axis so the tendons are visible when they shorten.
   `ia_*` weights stay ≈ 11.7–11.9, and the tracking-stage loss is flat at ≈ 1.2:
   personalization moves the STDP hyper-parameters but cannot move the loss, which the
   saturated ankle (C1) dominates.
+- **V22** Reference-limb ground contact (2026-10-22): enable collisions on the
+  reference foot/toe (`contype=2 conaffinity=1`), match `toe_ref_ctrl_*` kp to
+  `toe_m_ctrl_*` (2.0), and derive `phase_ref` from the actual
+  reference/treadmill contacts. Keep the dataset belt (V9) and do not scale bones
+  (V10). This supersedes the "no collision / geometric phase" part of V8. The
+  selected approach and its spike evidence are in §5.8; the open issue is the
+  shared ~6.6 mm soft-contact penetration.
