@@ -49,9 +49,12 @@ The first production caller is the CPG flexor freeze currently implemented as
 `min=max`/`sigma=0` in `t2xcpg/leg.py`: the six Renshaw weights on `mean` and
 the M-F Izhikevich `a/b/c/d` on `mean` and `sigma`. Migrate it to
 `registry.freeze(...)` after `finalize_connections`; `recapture_defaults` must
-anchor the post-creation M-F values. The CPG fallback stays until this lands.
-This is objective C2 of `2026-10-15-persona-variantB-cpg-mvp-design.md`; the
-frozen values are listed in its §5.10/V24.
+anchor the post-creation M-F values. **Migrated (2026-10-23):** `t2xcpg/leg.py`
+now calls `registry.freeze` for the six Renshaw means and the M-F
+`mean`+`sigma`; `finalize_connections` captures the post-creation `sigma=0`
+anchor, and the `min=max` fallback is gone. This is objective C2 of
+`2026-10-15-persona-variantB-cpg-mvp-design.md`; the frozen values are listed
+in its §5.10/V24.
 
 ## 3. Feature 1 — attribute freeze
 
