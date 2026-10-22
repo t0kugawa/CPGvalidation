@@ -5,9 +5,11 @@
 > scheme-confirmed Ia/Ib wiring). The PERSONA and render sections here remain
 > current.
 
-Date: 2026-10-15 (strategy revised 2026-10-16; ground contact revised 2026-10-22)
+Date: 2026-10-15 (strategy revised 2026-10-16; ground contact revised 2026-10-22;
+structural freezes 2026-10-22)
 Status: approved (chat, 2026-10-15; strategy revision agreed 2026-10-16;
-ground-contact revision approved for implementation 2026-10-22)
+ground-contact revision approved for implementation 2026-10-22;
+structural freezes approved 2026-10-22)
 Supersedes the PERSONA-strategy and CPG-initialisation sections of
 `2026-10-14-persona-cpg-mujoco-design.md`. Everything else there still holds.
 
@@ -264,6 +266,41 @@ Measured on the 4 s `--fast` run: controlled ankle max **+1.72 rad** (guard
 `hi = +1.69`, overshoot 0.03) instead of +2.81/+2.96 before; the reference
 ankle stays inside the same guard.
 
+### 5.10 Frozen CPG parameters (2026-10-22)
+
+PERSONA's homeostatic update moved the Renshaw recurrent inhibition and the
+M-F Izhikevich parameters away from their reference values. Over 20 s it drove
+`r_f -> m_f` from **-4** to **-19/-24** and M-F `a/b/d` from 0.02/0.2/8 to
+0.076/0.084/8.9; the L flexor went from `musF_L` **0.111** in the first 100
+steps to **0.008** (90% zero). The flexor must not be maximised away, so the
+following parameters are **frozen** (nothing is removed or disconnected):
+
+| parameter (both L and R) | frozen value |
+|---|---:|
+| `m_e -> r_e`, `m_f -> r_f` | +3.0 |
+| `r_e -> m_e`, `r_f -> m_f` | -4.0 |
+| `r_e -> ia_e`, `r_f -> ia_f` | -2.4 |
+| M-F Izhikevich `a` | 0.02 |
+| M-F Izhikevich `b` | 0.2 |
+| M-F Izhikevich `c` | -65.0 |
+| M-F Izhikevich `d` | 8.0 |
+
+`RENSHAW_RANGE=0.0`: the six Renshaw weights are exact; the M-F parameters use
+`min=max=value` and `sigma=0`. PERSONA still samples and updates these
+parameters, but the clamp makes the applied value constant, so it **no longer
+maximises them**. This is intentional: the homeostatic update was silencing the
+flexor. The rest of the CPG and PERSONA parameter set continues to optimise,
+and every Renshaw projection stays in the network.
+
+Measured on the exact-freeze 20 s run (`test_results/cpg_fixes/freeze_exact_20s`):
+loss **0.632**, `musF_L` **0.167** (6.2% zero), `musF_R` **0.002** (93.9% zero);
+L/R ankles 1.683/1.578 (errors +0.486/+0.510). The L flexor is restored; the R
+flexor still collapses, so the L/R asymmetry is the remaining actuation issue,
+not a drift of the frozen parameters. The earlier ±0.5-band probe gave loss
+0.651 and `musF` 0.025/0.024.
+`CPG_RENSHAW_CLAMP=0` and `CPG_MF_IZH_FREEZE=0` reproduce the unfrozen baseline
+for A/B runs.
+
 ## 6. Interfaces (delta)
 
 - `FisherMatrix.record_response(delta_theta, advantage)`; `compute_metric()` →
@@ -300,6 +337,10 @@ ankle stays inside the same guard.
   applies to both limbs and the reference servo; a 4 s `run_validation.py
   --fast` keeps the controlled ankle within ~0.1 rad of the guard instead of
   the old +2.8..+2.97 rad.
+- CPG structural freezes: the six Renshaw weights and the M-F Izhikevich
+  `a/b/c/d` have `min=max` at the §5.10 values; `update_mean` cannot move them;
+  the A/B env toggles restore the unfrozen ranges. A 20 s run keeps `musF`
+  active instead of collapsing to 0.008.
 
 ## 9. Decisions (check these)
 
@@ -398,3 +439,11 @@ ankle stays inside the same guard.
   `solimplimit="0.95 0.99 0.001"`). This is a physiological stop against
   hyper-plantarflexion while the muscle drive is low (V19/V21), not a tracking
   fix. The guard and its 4 s `--fast` result are in §5.9.
+- **V24** Structural CPG freezes (2026-10-22): freeze the six Renshaw weights
+  (`m_e->r_e` +3.0, `r_e->m_e` -4.0, `r_e->ia_e` -2.4, `m_f->r_f` +3.0,
+  `r_f->m_f` -4.0, `r_f->ia_f` -2.4, both sides) and the M-F Izhikevich
+  `a/b/c/d` (0.02/0.2/-65/8.0). Nothing is removed; `min=max` makes the applied
+  values constant. PERSONA **no longer maximises these parameters**: its
+  homeostatic update drove `r_f->m_f` to -19/-24 and the M-F `a/b/d` away from
+  reference, silencing the flexor. The remaining parameter set still optimises.
+  See §5.10; `CPG_RENSHAW_CLAMP=0`/`CPG_MF_IZH_FREEZE=0` are the A/B toggles.
