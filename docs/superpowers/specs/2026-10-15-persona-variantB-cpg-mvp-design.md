@@ -6,10 +6,10 @@
 > current.
 
 Date: 2026-10-15 (strategy revised 2026-10-16; ground contact revised 2026-10-22;
-structural freezes 2026-10-22)
+structural freezes 2026-10-22; current objectives/future development 2026-10-22)
 Status: approved (chat, 2026-10-15; strategy revision agreed 2026-10-16;
 ground-contact revision approved for implementation 2026-10-22;
-structural freezes approved 2026-10-22)
+structural freezes approved 2026-10-22; current objectives recorded 2026-10-22)
 Supersedes the PERSONA-strategy and CPG-initialisation sections of
 `2026-10-14-persona-cpg-mujoco-design.md`. Everything else there still holds.
 
@@ -51,6 +51,43 @@ Close the final gap to a ready MVP. Three coupled problems:
 ### Anti-goals
 - A strategy that produces finite-but-meaningless updates again.
 - Reference values copied blindly where they fight the sensory-driven design.
+
+## 2.1 Current objectives (2026-10-22)
+
+**C1 — Fix the L/R asymmetry.** The exact Renshaw/M-F freeze restored the L
+flexor (`musF_L` 0.167, 6.2% zero; 20 s loss 0.632) but the R flexor still
+collapses (`musF_R` 0.002, 93.9% zero; R ankle error +0.510). The next actuation
+task is the R M-F pool and its Renshaw/Ia/Ib/commissural inputs, plus the
+leading-leg/commissural asymmetry. Acceptance: both flexors active
+(`musF` > 0.02, < 50% zero) and the R ankle error reduced without regressing L.
+
+**C2 — Migrate the freeze hacks to the native PERSONA registry.** The current
+`t2xcpg/leg.py` freeze uses `min=max`/`sigma=0` on `PersonaParam` (a fallback).
+Replace it with `Registry.freeze` / `recapture_defaults` from
+`2026-10-22-persona-registry-usability-design.md`: freeze the six Renshaw
+weights on `mean` and the M-F Izhikevich `a/b/c/d` on `mean` and `sigma`, after
+`finalize_connections` (the `recapture_defaults` path covers the post-creation
+M-F mutation). Keep every projection; no deletion. Tests must cover the native
+API, the freeze anchor after the CPG mutation, and the A/B toggles.
+
+## 2.2 Future development (2026-10-22)
+
+- **Homeostasis on different parameter groups.** With the homeostatic penalty
+  for maximisation available by default, run an A/B matrix: H off vs H on
+  (default) vs H on + freeze; parameter groups: CPG static weights, Izhikevich
+  `a/b/c/d`, rates, STDP hyperparameters, Renshaw/Ia/Ib, and the SOL/TA muscle
+  actuators. Measure `musF`/`musE` symmetry, ankle tracking/contact, loss, and
+  whether the H penalty alone can replace the structural freeze.
+- **Freeze vs spring vs H.** Compare the native freeze, the registry
+  homeostatic spring (registry-usability spec §5), and H credit adjustment on
+  the same sites; decide which sites should be frozen, which sprung, and which
+  left free.
+- **L/R asymmetry mechanisms.** After C1, test whether the R M-F collapse is
+  driven by the R Renshaw loop, the R Ia/Ib inputs, the commissural V-cells, or
+  the leading-leg gain; add a symmetry acceptance metric.
+- **Long-run stability.** 120 s with the native freeze + H, checking the
+  `musF`/`musE` ratio and ankle error; the current 20 s freeze is a
+  short-horizon result.
 
 ## 3. Current state (verified)
 
@@ -286,11 +323,18 @@ following parameters are **frozen** (nothing is removed or disconnected):
 | M-F Izhikevich `d` | 8.0 |
 
 `RENSHAW_RANGE=0.0`: the six Renshaw weights are exact; the M-F parameters use
-`min=max=value` and `sigma=0`. PERSONA still samples and updates these
-parameters, but the clamp makes the applied value constant, so it **no longer
-maximises them**. This is intentional: the homeostatic update was silencing the
-flexor. The rest of the CPG and PERSONA parameter set continues to optimise,
-and every Renshaw projection stays in the network.
+`min=max=value` and `sigma=0`. PERSONA still samples these parameters; the
+current fallback clamps the applied value, and the native freeze (C2) will skip
+the mean/sigma update instead. Either way it **no longer maximises them**. This
+is intentional: the homeostatic update was silencing the flexor. The rest of the
+CPG and PERSONA parameter set continues to optimise, and every Renshaw
+projection stays in the network.
+
+**Migration status.** The `min=max`/`sigma=0` clamp is a temporary fallback.
+Current objective C2 moves it to the native `Registry.freeze` /
+`recapture_defaults` interface from
+`2026-10-22-persona-registry-usability-design.md`, with the same frozen sites
+and values.
 
 Measured on the exact-freeze 20 s run (`test_results/cpg_fixes/freeze_exact_20s`):
 loss **0.632**, `musF_L` **0.167** (6.2% zero), `musF_R` **0.002** (93.9% zero);
@@ -442,8 +486,9 @@ for A/B runs.
 - **V24** Structural CPG freezes (2026-10-22): freeze the six Renshaw weights
   (`m_e->r_e` +3.0, `r_e->m_e` -4.0, `r_e->ia_e` -2.4, `m_f->r_f` +3.0,
   `r_f->m_f` -4.0, `r_f->ia_f` -2.4, both sides) and the M-F Izhikevich
-  `a/b/c/d` (0.02/0.2/-65/8.0). Nothing is removed; `min=max` makes the applied
-  values constant. PERSONA **no longer maximises these parameters**: its
+  `a/b/c/d` (0.02/0.2/-65/8.0). Nothing is removed; the current `min=max`
+  fallback makes the applied values constant, and C2 migrates this to the native
+  `Registry.freeze` API. PERSONA **no longer maximises these parameters**: its
   homeostatic update drove `r_f->m_f` to -19/-24 and the M-F `a/b/d` away from
   reference, silencing the flexor. The remaining parameter set still optimises.
   See §5.10; `CPG_RENSHAW_CLAMP=0`/`CPG_MF_IZH_FREEZE=0` are the A/B toggles.
