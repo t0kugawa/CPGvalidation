@@ -224,19 +224,22 @@ The matched-toe-contact variant preserves the commanded ankle range
 (`[-0.02, +1.75]` vs `[-0.02, +1.76]` rad) and makes the reference contact and
 foot level match the controlled limb. It is the selected approach.
 
-**Open issue: common soft-contact penetration.** Both limbs settle about 6.6 mm
-below the belt because the treadmill's `solref="0.02 1"` is soft relative to
-the servo/contact force. This is now shared equally by both limbs, so it does
-not break the range/contact equality, but the target is still geometrically
-below the plane. Candidate fixes, to be decided separately:
+**Resolved (2026-10-22): keep the soft contact.** The shared ~6.6 mm
+penetration is accepted as the model's contact compliance. Stiffening the
+treadmill (`solref=0.012`) reduced it to ~4.7 mm, but moved the right-leg
+contact fraction from 68% to 64% (the RatA x1d50 Lfast duty-factor band is
+62.5-82.8%) and `0.010` fell below the band at 60%; the ankle torque limit
+reduced the penetration but pushed the reference ~0.16 rad off the mocap. The
+belt stays at `solref="0.02 1"`. Revisit only if a later model revision adds a
+compliant foot pad or a different contact model.
 
-1. Accept it as the model's contact compliance (both limbs are equal).
-2. Stiffen the treadmill contact (`solref` 0.004-0.01): the 0.004 probe reduced
-   the penetration to ~2 mm but lowered the contact fraction to ~51% and
-   increased the ankle deviation from the command.
-3. Raise the belt by the equilibrium penetration (this does not change the
-   relative penetration; it only moves the world).
-4. Tune the servo/actuator force or add a joint/contact compliance model.
+**Closed-loop check (2026-10-22).** `run_validation.py --fast` (4 s, RatA T1,
+`--belt dataset`) now reports the target foot at **-4.95 mm (L) / -6.98 mm (R)**
+relative to the belt instead of -13 / -19 mm, and `phase_ref` matches the actual
+contact on every frame. The controlled foot is at 42% / 37% contact because the
+muscle-driven ankle still does not track the target (the existing actuation
+blocker, V19/V21); the plant-level equality is verified by the servo probe and
+by `tests/test_reference_contact.py`, not by the un-converged CPG run.
 
 ## 6. Interfaces (delta)
 
@@ -264,9 +267,12 @@ below the plane. Candidate fixes, to be decided separately:
   population + initial-value checks against §5.4.
 - Render: muscle geoms do not overlap the bone geoms.
 - Reference-limb ground contact: the four `*_ref_geom` foot/toe geoms compile
-  with `contype=2 conaffinity=1`; `phase_ref` follows the actual contacts; a
-  short `run_validation.py --fast` gives contact IoU(ref, m) >= 0.8 and mean
-  `|foot_z_m - foot_z_ref| < 1 mm`.
+  with `contype=2 conaffinity=1`; `phase_ref` follows the actual contacts; the
+  servo-driven plant probe gives contact IoU(ref, m) >= 0.8 and mean
+  `|foot_z_m - foot_z_ref| < 1 mm`. A `run_validation.py --fast` (the CPG run)
+  confirms `phase_ref` matches actual contact and the target penetration is at
+  the shared contact level; the controlled contact fraction there is a tracking
+  target, not a geometry gate.
 
 ## 9. Decisions (check these)
 
@@ -357,5 +363,5 @@ below the plane. Candidate fixes, to be decided separately:
   `toe_m_ctrl_*` (2.0), and derive `phase_ref` from the actual
   reference/treadmill contacts. Keep the dataset belt (V9) and do not scale bones
   (V10). This supersedes the "no collision / geometric phase" part of V8. The
-  selected approach and its spike evidence are in §5.8; the open issue is the
-  shared ~6.6 mm soft-contact penetration.
+  selected approach and its spike evidence are in §5.8; the shared ~6.6 mm
+  soft-contact penetration is accepted as contact compliance.
