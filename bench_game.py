@@ -51,6 +51,7 @@ from bench_homeostasis import (
     type_sign_violations,
 )
 from persona.game import GameConfig
+from persona.homeostasis import HomeostaticConfig
 
 
 ARMS = ("off", "prop_none",
@@ -59,6 +60,36 @@ ARMS = ("off", "prop_none",
 STEPS = 2000
 EVAL_STEPS = 1000
 POT_FEE = 0.05
+
+
+_H_MODES = ("advantage", "budget", "fisher", "band")
+
+
+def _kind(arm: str) -> str:
+    return "homeostasis" if arm.startswith("h_") else "game"
+
+
+def _h_config(arm: str) -> HomeostaticConfig | None:
+    if arm == "h_best":
+        cfg = HomeostaticConfig.current_best()
+        cfg.h_delay_steps = 0          # activate within a fast run
+        cfg.h_burnin_steps = 100
+        return cfg
+    if arm == "h_best_delay":
+        cfg = HomeostaticConfig.current_best()
+        cfg.h_burnin_steps = 100
+        return cfg
+    if arm.startswith("h_"):
+        mode = arm[2:]
+        if mode not in _H_MODES:
+            raise ValueError(f"unknown H arm {arm!r}")
+        return HomeostaticConfig(
+            enabled=True,
+            global_variance_mode=mode,
+            h_burnin_steps=100,
+            lambda_H=1.0,
+        )
+    raise ValueError(f"unknown H arm {arm!r}")
 
 
 def _game_config(arm: str) -> GameConfig | None:
@@ -95,16 +126,18 @@ def _game_config(arm: str) -> GameConfig | None:
 
 
 def run_arm(arm: str, seed: int, *, steps: int = STEPS,
-            eval_steps: int = EVAL_STEPS, sizes=None) -> dict:
+            eval_steps: int = EVAL_STEPS, sizes=None,
+            kind: str = "game") -> dict:
     """One production-path run. Imports NEST/MuJoCo lazily."""
     from personalize import build_personalizer
 
     sizes = dict(PROD_SIZES if sizes is None else sizes)
-    cfg = _game_config(arm)
+    game_cfg = _game_config(arm) if kind == "game" else None
+    h_cfg = _h_config(arm) if kind == "homeostasis" else None
     pers, _ = build_personalizer(
         max_steps=int(steps), eps_pose=0.10, pose_hold_steps=3,
         loss_stop=-1.0, loss_window=20, ref_hz=700.0, resolution_ms=0.2,
-        seed=int(seed), game=cfg, **sizes)
+        seed=int(seed), game=game_cfg, homeostasis=h_cfg, **sizes)
     agent = pers.agent
     pers.verbose = False
     pers.log_every = 0
@@ -117,8 +150,10 @@ def run_arm(arm: str, seed: int, *, steps: int = STEPS,
     bounds = {name: (float(p.min), float(p.max))
               for name, p in agent.params.items()}
     ptypes = {}
-    if agent.game is not None:
-        for spec in agent.game.physical_map.specs:
+    regulator = (agent.game if agent.game is not None
+                 else agent.homeostasis)
+    if regulator is not None:
+        for spec in regulator.physical_map.specs:
             for site in spec.param_names:
                 ptypes[site] = spec.ptype
 
@@ -153,15 +188,31 @@ def run_arm(arm: str, seed: int, *, steps: int = STEPS,
         throttle_min = throttle_max = pot_mean = transfer_abs = None
         active_players = None
 
+    hs = agent.history.get("homeostasis", [])
+    hw = hs[eval_start:]
+    if hw:
+        share_traj = [float(np.linalg.norm(
+            np.asarray(d.get("e", []), dtype=float))) for d in hw]
+        share_rms = (float(np.sqrt(np.mean(np.square(share_traj))))
+                     if share_traj else None)
+        ts = [float(d.get("T", np.nan)) for d in hw]
+        T_min = float(np.nanmin(ts)) if ts else None
+        T_max = float(np.nanmax(ts)) if ts else None
+    else:
+        share_rms = T_min = T_max = None
+
     return {
         "mode": arm,
-        "throttle": None if cfg is None else cfg.throttle_mode,
-        "movement_fee": None if cfg is None else cfg.movement_fee,
+        "throttle": None if game_cfg is None else game_cfg.throttle_mode,
+        "movement_fee": (None if game_cfg is None
+                         else game_cfg.movement_fee),
+        "h_delay_steps": None if h_cfg is None else h_cfg.h_delay_steps,
+        "lift_mode": None if h_cfg is None else h_cfg.lift_mode,
         "seed": int(seed),
         "steps": n_steps,
         "eval_steps": n_steps - eval_start,
-        "n_players": (None if agent.game is None
-                      else int(agent.game.n_players)),
+        "n_players": (None if regulator is None
+                      else int(regulator.physical_map.n_players)),
         "loss_eval": float(np.mean(log.loss[eval_start:])),
         "loss_full": float(np.mean(log.loss[agent.warmup:])),
         "wall_s": float(wall_s),
@@ -179,6 +230,9 @@ def run_arm(arm: str, seed: int, *, steps: int = STEPS,
         "pot_mean": pot_mean,
         "transfer_abs_mean": transfer_abs,
         "active_players": active_players,
+        "share_rms": share_rms,
+        "T_min": T_min,
+        "T_max": T_max,
         "stack_final": ("" if not stacks else
                         ";".join(f"{v:.6g}" for v in stacks[-1])),
         **metrics,
@@ -336,7 +390,7 @@ def run_compare(out_dir: Path, *, seeds=(0, 1), steps=STEPS,
     arms = tuple(ARMS if arms is None else arms)
     sizes = dict(PROD_SIZES if sizes is None else sizes)
     tasks = [dict(arm=arm, seed=seed, steps=steps, eval_steps=eval_steps,
-                  sizes=sizes)
+                  sizes=sizes, kind=_kind(arm))
              for seed in seeds for arm in arms]
     rows = _run_tasks(tasks, jobs)
     by_seed = {seed: next(r["phases"] for r in rows
@@ -379,6 +433,7 @@ def main(argv=None):
     parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument("--seeds", type=int, nargs="+", default=[0, 1])
     parser.add_argument("--steps", type=int, default=STEPS)
+    parser.add_argument("--eval-steps", type=int, default=EVAL_STEPS)
     parser.add_argument("--arms", nargs="+", default=None)
     parser.add_argument("--prefix", default="real_compare_20s")
     parser.add_argument("--out", type=Path,
@@ -398,8 +453,9 @@ def main(argv=None):
                          indent=2))
         return result
     result = run_compare(args.out, seeds=tuple(args.seeds),
-                         steps=args.steps, jobs=args.jobs,
-                         arms=args.arms, prefix=args.prefix)
+                         steps=args.steps, eval_steps=args.eval_steps,
+                         jobs=args.jobs, arms=args.arms,
+                         prefix=args.prefix)
     return result
 
 

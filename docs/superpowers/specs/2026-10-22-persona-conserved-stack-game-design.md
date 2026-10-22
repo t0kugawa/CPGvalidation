@@ -434,3 +434,34 @@ movement_fee=0.0, burnin_steps=100
 It is still opt-in and not a production default. `prop_none` is retained only
 as the collapsed control. The tuning code and artifacts are committed with this
 selection.
+
+## 17. Fast comparison against the old H (2026-10-23)
+
+800 steps, `FAST_SIZES`, seeds 0/1, 400-step evaluation window, fresh process
+per arm, NEST seed pinned. `h_fisher` is the generic Fisher H with the player
+lift; `h_best` is `HomeostaticConfig.current_best()` with
+`h_delay_steps = 0` so H is active inside the fast run (the production preset
+delays to step 500). Artifacts: `benchmarks/game/fast_h/fast_h_800.*`.
+
+| arm | mean p90 | min p90 | mean loss | worst loss | q max | at_bound s0/s1 |
+|---|---:|---:|---:|---:|---:|---:|
+| `off` | — | — | — | — | — | 42 / 61 |
+| **`a25`** | **+11.0%** | **+1.5%** | **-7.3%** | **+0.5%** | **-13** | **18 / 24** |
+| `h_fisher` | -0.2% | -0.5% | +0.4% | +1.5% | +1 | 42 / 40 |
+| `h_best` | -0.1% | -0.2% | -12.3% | -1.0% | +5 | 64 / 88 |
+
+**Reading.** `a25` is the only arm that improves p90 on both seeds, and it
+roughly halves `at_bound` on both (42→18, 61→24) while cutting `q > 1`
+(66→53, 83→50). `h_fisher` is neutral on p90 and leaves saturation
+essentially unchanged. `h_best` does improve loss, especially on seed 1
+(-23.5%), but it does so while pushing `at_bound` from 61 to 88 and making
+`q > 1` worse (83→88); it is trading loss for saturation, not producing the
+game's stability.
+
+This is a fast, two-seed comparison, not the 20 s production run, and p90 is
+coarse at this horizon. The H delay reset is deliberately generous to H: it
+gets the whole post-burn-in window. Even so, the old H's best configuration
+does not match the conserved-stack candidate on the stability diagnostics.
+
+The harness now accepts H arms through `--arms h_fisher h_best`, using the same
+fresh-process isolation and pinned seed as the game arms.
