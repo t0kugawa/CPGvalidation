@@ -227,6 +227,10 @@ class Agent:
         adv_scalar = float(np.mean(advantage_vec))
 
         apply_updates = (self.strategy.steps + 1) > self.strategy.warmup
+        frozen_attrs = getattr(self.registry, "frozen_attrs", None)
+        frozen = {name: (frozen_attrs(name) if frozen_attrs is not None
+                         else frozenset())
+                  for name in self.params}
 
         # Sampling-time snapshot channels (spec §4): score units for the trace.
         sites: Dict[str, tuple] = {}
@@ -235,7 +239,7 @@ class Agent:
                 name, (float(param.mean), float(param.sigma),
                        float(self.current_actions.get(name, param.mean))))
             d_log_sigma = 0.0
-            if apply_updates:
+            if apply_updates and "sigma" not in frozen[name]:
                 d_log_sigma = param.sigma_step_applied(
                     sample=xhat, mu_at_sample=mu_at, sigma_at_sample=sig_at,
                     advantage=adv_scalar, lr_sigma=self.lr_sigma)
@@ -264,12 +268,18 @@ class Agent:
             mu_at, sig_at, xhat = self._snap.get(
                 name, (float(param.mean), float(param.sigma),
                        float(self.current_actions.get(name, param.mean))))
-            if apply_updates and name in delta_means:
+            if (apply_updates and name in delta_means
+                    and "mean" not in frozen[name]):
                 param.update_mean(delta_means[name])
-            if apply_updates:
+            if apply_updates and "sigma" not in frozen[name]:
                 param.update_sigma(sample=xhat, mu_at_sample=mu_at,
                                    sigma_at_sample=sig_at, advantage=adv_scalar,
                                    lr_sigma=self.lr_sigma)
+
+        # A frozen mean applies no displacement this step.
+        for name in delta_means:
+            if "mean" in frozen.get(name, ()):
+                delta_means[name] = 0.0
 
         # Logging
         self.history["error_vector"].append(np.asarray(error_vec, dtype=np.float64))
