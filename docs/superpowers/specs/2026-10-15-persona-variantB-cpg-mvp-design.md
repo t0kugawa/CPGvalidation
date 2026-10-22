@@ -241,6 +241,27 @@ muscle-driven ankle still does not track the target (the existing actuation
 blocker, V19/V21); the plant-level equality is verified by the servo probe and
 by `tests/test_reference_contact.py`, not by the un-converged CPG run.
 
+### 5.9 Ankle guard (2026-10-22)
+
+With the still-weak muscle drive (V19/V21) the controlled ankle collapsed onto
+the old wide range (`[-1.0, 2.6]` rad), and the soft limit let it reach
+**+2.97 rad**: the paw visually trailed behind the knee. Without a fracture the
+ankle cannot bend that far, so the joint gets a physiological stop.
+
+- `build_personalizer` computes the run window's mocap ankle envelope (both
+  sides, first `max_steps` frames) and calls `Leg.set_ankle_range(lo, hi)`,
+  which narrows all four ankle joints and the reference ankle servo's
+  `ctrlrange` to `[envelope - ANKLE_RANGE_MARGIN_RAD, envelope + ...]`.
+- The four ankle joints carry `solreflimit="0.004 1"` and
+  `solimplimit="0.95 0.99 0.001"`, so the soft-limit overshoot is small.
+- This is a guard, not a tracking fix: it stops the visual flip and the
+  constraint violation, but the controlled ankle still sits at the limit while
+  the muscle drive is low.
+
+Measured on the 4 s `--fast` run: controlled ankle max **+1.82 rad** (guard
+`hi = +1.79`, overshoot 0.03) instead of +2.81/+2.96 before; the reference
+ankle stays inside the same guard.
+
 ## 6. Interfaces (delta)
 
 - `FisherMatrix.record_response(delta_theta, advantage)`; `compute_metric()` →
@@ -273,6 +294,10 @@ by `tests/test_reference_contact.py`, not by the un-converged CPG run.
   confirms `phase_ref` matches actual contact and the target penetration is at
   the shared contact level; the controlled contact fraction there is a tracking
   target, not a geometry gate.
+- Ankle guard: the four ankle joints use the stiff limit; `set_ankle_range`
+  applies to both limbs and the reference servo; a 4 s `run_validation.py
+  --fast` keeps the controlled ankle within ~0.1 rad of the guard instead of
+  the old +2.8..+2.97 rad.
 
 ## 9. Decisions (check these)
 
@@ -365,3 +390,9 @@ by `tests/test_reference_contact.py`, not by the un-converged CPG run.
   (V10). This supersedes the "no collision / geometric phase" part of V8. The
   selected approach and its spike evidence are in §5.8; the shared ~6.6 mm
   soft-contact penetration is accepted as contact compliance.
+- **V23** Ankle guard (2026-10-22): narrow all four ankle joints to the run
+  window's mocap ankle envelope plus `ANKLE_RANGE_MARGIN_RAD` (0.10 rad) and
+  stiffen the joint limit (`solreflimit="0.004 1"`,
+  `solimplimit="0.95 0.99 0.001"`). This is a physiological stop against
+  hyper-plantarflexion while the muscle drive is low (V19/V21), not a tracking
+  fix. The guard and its 4 s `--fast` result are in §5.9.
