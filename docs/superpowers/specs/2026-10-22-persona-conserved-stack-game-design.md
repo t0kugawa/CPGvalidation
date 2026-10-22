@@ -380,3 +380,57 @@ collapsed arm's, because the game no longer buys p90 by switching players off.
 seat, `ε = 0.05`, proportional ranking, no pot. The uniform seat is the control.
 The next open questions are the transfer rate, whether the throttle should also
 apply to sigma, and the per-player clock.
+
+## 16. Tuning and head-to-head (2026-10-22)
+
+The contestable throttle gained a curvature exponent,
+`τ_contest = (s_i / max_j s_j)^α`. `α = 1` is the linear curve above; larger α
+sharpens selection while the physical base seat keeps the bottom alive. The
+tuning grid varied `α ∈ {1, 1.5, 2, 2.5}`, `ε ∈ {0.03, 0.05, 0.08}`, and
+`η ∈ {0.05, 0.10}`, seeds 0/1, 20 s. Artifacts:
+`benchmarks/game/tune/tuning_20s.*`.
+
+| arm | mean p90 | min p90 | worst loss | q max | active | entropy |
+|---|---:|---:|---:|---:|---:|---:|
+| `prop_unc_05` (α=1) | +6.3% | +0.5% | +1.7% | -27 | 117.5 | 0.476 |
+| `prop_unc_05_a15` | +6.4% | +0.5% | +1.7% | -31 | 119 | 0.440 |
+| `prop_unc_05_a20` | +6.2% | +0.5% | +1.5% | -32 | 114.5 | 0.467 |
+| **`prop_unc_05_a25`** | **+7.3%** | **+2.0%** | **+1.6%** | **-32** | **110** | **0.445** |
+| `prop_unc_03_a20` | +8.5% | -1.0% | +2.2% | -29 | 116.5 | 0.390 |
+| `prop_unc_08_a20` | +4.1% | -4.4% | +2.1% | -31 | 121 | 0.470 |
+| `prop_unc_05_a20_h10` | +7.7% | +0.5% | +1.4% | -32 | 109 | 0.421 |
+
+`prop_unc_05_a25` is the selected tuning point: the best worst-seed p90
+(+2.0%) with 110 of 137 players still active, and it improves at-bound
+(25/29 → 17/13) and `q > 1` (57/51 → 22/19).
+
+### 16.1 Head-to-head
+
+Fresh processes, seeds 0/1, 20 s. Artifacts:
+`benchmarks/game/head_to_head/head_to_head_20s.*`.
+
+| arm | mean p90 | min p90 | worst loss | q max | active | at_bound s0/s1 | loss s0/s1 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| `off` | — | — | — | — | — | 25 / 29 | 0.66727 / 1.0444 |
+| `prop_none` | +12.5% | -0.8% | +1.8% | -29 | **7** | **9 / 9** | 0.67897 / 0.68106 |
+| `prop_unc_05_a25` | +7.3% | **+2.0%** | **+1.6%** | **-32** | **110** | 17 / 13 | 0.67766 / 0.6838 |
+
+**Reading.** `prop_none` wins the mean p90 and at-bound columns, but it does so
+with 7 active players: it is the shutdown-as-balance failure the design
+rejects. `prop_unc_05_a25` gives up about five points of mean p90 in exchange
+for 110 active players, a positive worst-seed p90, a slightly better worst-seed
+loss, and a larger `q` reduction. On seed 0 it actually beats `prop_none` on
+both loss and p90; on seed 1 it trades 0.4% loss for 5.9 points of p90.
+
+**Decision:** `prop_unc_05_a25` is the selected experimental configuration,
+available as `GameConfig.current_best()`:
+
+```text
+enabled=True, throttle_mode="proportional", base_seat="uncertainty",
+liveness_fraction=0.05, throttle_exponent=2.5, transfer_rate=0.05,
+movement_fee=0.0, burnin_steps=100
+```
+
+It is still opt-in and not a production default. `prop_none` is retained only
+as the collapsed control. The tuning code and artifacts are committed with this
+selection.

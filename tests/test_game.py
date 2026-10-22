@@ -6,20 +6,32 @@ from persona.homeostasis import PhysicalMap, PlayerSpec
 
 
 def _game(mode="inverse", fee=0.0, burnin=0, n=2, base_seat="none",
-          liveness=0.0, transfer_rate=0.05):
+          liveness=0.0, transfer_rate=0.05, throttle_exponent=1.0):
     specs = [PlayerSpec(f"p{i}", "population", (f"s{i}",), ptype="exc")
              for i in range(n)]
     pm = PhysicalMap.from_specs(specs)
     cfg = GameConfig(enabled=True, throttle_mode=mode, movement_fee=fee,
                      burnin_steps=burnin, base_seat=base_seat,
                      liveness_fraction=liveness,
-                     transfer_rate=transfer_rate)
+                     transfer_rate=transfer_rate,
+                     throttle_exponent=throttle_exponent)
     return StackGame(pm, cfg, site_names=[f"s{i}" for i in range(n)],
                      dt_s=1.0)
 
 
 def test_config_default_is_off():
     assert GameConfig().enabled is False
+
+
+def test_current_best_preset_is_the_selected_a25_configuration():
+    cfg = GameConfig.current_best()
+    assert cfg.enabled is True
+    assert cfg.throttle_mode == "proportional"
+    assert cfg.base_seat == "uncertainty"
+    assert cfg.liveness_fraction == 0.05
+    assert cfg.throttle_exponent == 2.5
+    assert cfg.transfer_rate == 0.05
+    assert cfg.movement_fee == 0.0
 
 
 def test_config_rejects_unknown_throttle_mode():
@@ -122,6 +134,25 @@ def test_apply_rejects_wrong_length():
 def test_config_rejects_unknown_base_seat():
     with pytest.raises(ValueError):
         GameConfig(base_seat="mass")
+
+
+def test_config_rejects_nonpositive_throttle_exponent():
+    with pytest.raises(ValueError):
+        GameConfig(throttle_exponent=0.0)
+
+
+def test_throttle_exponent_sharpens_the_contestable_part():
+    g = _game("proportional", throttle_exponent=2.0)
+    g.stacks = np.array([0.2, 0.8])
+    np.testing.assert_allclose(g.throttle(), [0.0625, 1.0])
+
+
+def test_throttle_exponent_one_matches_the_linear_curve():
+    linear = _game("proportional")
+    powered = _game("proportional", throttle_exponent=1.0)
+    linear.stacks = np.array([0.2, 0.8])
+    powered.stacks = np.array([0.2, 0.8])
+    np.testing.assert_allclose(linear.throttle(), powered.throttle())
 
 
 def test_config_rejects_liveness_outside_unit_interval():

@@ -32,6 +32,7 @@ class GameConfig:
     pot_mode: str = "contribution"
     base_seat: str = "none"
     liveness_fraction: float = 0.0
+    throttle_exponent: float = 1.0
     burnin_steps: int = 100
     share_floor: float = 1e-12
     eps: float = 1e-12
@@ -57,6 +58,10 @@ class GameConfig:
                 or self.liveness_fraction < 0.0
                 or self.liveness_fraction > 1.0):
             raise ValueError("liveness_fraction must be in [0, 1]")
+        self.throttle_exponent = float(self.throttle_exponent)
+        if (not np.isfinite(self.throttle_exponent)
+                or self.throttle_exponent <= 0.0):
+            raise ValueError("throttle_exponent must be finite and positive")
         for name in ("transfer_rate", "movement_fee", "share_floor", "eps"):
             value = float(getattr(self, name))
             if not np.isfinite(value):
@@ -86,6 +91,25 @@ class GameConfig:
         """Movement pays a Fisher-priced fee that is redistributed."""
         return cls(enabled=True, throttle_mode=throttle_mode,
                    movement_fee=float(movement_fee), **kwargs)
+
+    @classmethod
+    def current_best(cls) -> "GameConfig":
+        """Selected experimental configuration (2026-10-22).
+
+        Uncertainty base seat, proportional ranking, liveness 0.05, curvature
+        2.5, transfer 0.05, no pot. This is the a25 arm from the tuning grid;
+        it is opt-in and not a production default.
+        """
+        return cls(
+            enabled=True,
+            throttle_mode="proportional",
+            base_seat="uncertainty",
+            liveness_fraction=0.05,
+            throttle_exponent=2.5,
+            transfer_rate=0.05,
+            movement_fee=0.0,
+            burnin_steps=100,
+        )
 
 
 class StackGame:
@@ -188,6 +212,7 @@ class StackGame:
             contest = np.ones(n, dtype=np.float64)
         else:
             contest = np.clip(raw / denom, 0.0, 1.0)
+        contest = contest ** float(self.config.throttle_exponent)
         eps = float(self.config.liveness_fraction)
         if eps <= 0.0 or self.config.base_seat == "none":
             return contest

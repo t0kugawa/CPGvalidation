@@ -64,6 +64,8 @@ POT_FEE = 0.05
 def _game_config(arm: str) -> GameConfig | None:
     if arm == "off":
         return None
+    if arm in ("selected", "a25"):
+        return GameConfig.current_best()
     parts = arm.split("_")
     mode = "proportional" if parts[0] == "prop" else "inverse"
     if len(parts) == 2 and parts[1] == "none":
@@ -74,12 +76,21 @@ def _game_config(arm: str) -> GameConfig | None:
     seat = {"uni": "uniform", "unc": "uncertainty"}.get(parts[1])
     if seat is None:
         raise ValueError(f"unknown arm {arm!r}")
+    kwargs = {}
+    for token in parts[3:]:
+        if token.startswith("a") and token[1:].isdigit():
+            kwargs["throttle_exponent"] = int(token[1:]) / 10.0
+        elif token.startswith("h") and token[1:].isdigit():
+            kwargs["transfer_rate"] = int(token[1:]) / 100.0
+        else:
+            raise ValueError(f"unknown arm token {token!r} in {arm!r}")
     return GameConfig(
         enabled=True,
         throttle_mode=mode,
         base_seat=seat,
         liveness_fraction=int(parts[2]) / 100.0,
         burnin_steps=100,
+        **kwargs,
     )
 
 
@@ -277,7 +288,8 @@ def _write_csv(path, rows):
         writer.writerows(flat)
 
 
-def _write_markdown(path, summary, rows):
+def _write_markdown(path, summary, rows, order=None):
+    order = tuple(ARMS if order is None else order)
     lines = [
         "# Conserved-stack game, 20 s comparison",
         "",
@@ -305,7 +317,7 @@ def _write_markdown(path, summary, rows):
         "| seed | arm | steps | loss_eval | p90 | at_bound | q>1 | viol |",
         "|---:|---|---:|---:|---:|---:|---:|---:|",
     ]
-    for r in sorted(rows, key=lambda x: (x["seed"], ARMS.index(x["mode"]))):
+    for r in sorted(rows, key=lambda x: (x["seed"], order.index(x["mode"]))):
         lines.append(
             f"| {r['seed']} | {r['mode']} | {r['steps']} | "
             f"{r['loss_eval']:.5g} | {r['r_p90']:.4g} | {r['at_bound']} | "
@@ -319,11 +331,13 @@ def _fmt(value, digits=3):
 
 
 def run_compare(out_dir: Path, *, seeds=(0, 1), steps=STEPS,
-                eval_steps=EVAL_STEPS, sizes=None, jobs=1):
+                eval_steps=EVAL_STEPS, sizes=None, jobs=1, arms=None,
+                prefix="real_compare_20s"):
+    arms = tuple(ARMS if arms is None else arms)
     sizes = dict(PROD_SIZES if sizes is None else sizes)
     tasks = [dict(arm=arm, seed=seed, steps=steps, eval_steps=eval_steps,
                   sizes=sizes)
-             for seed in seeds for arm in ARMS]
+             for seed in seeds for arm in arms]
     rows = _run_tasks(tasks, jobs)
     by_seed = {seed: next(r["phases"] for r in rows
                           if r["seed"] == seed and r["mode"] == "off")
@@ -332,11 +346,11 @@ def run_compare(out_dir: Path, *, seeds=(0, 1), steps=STEPS,
         r["phase_agreement"] = (
             _phase_agreement(r["phases"], by_seed[r["seed"]])
             if r["mode"] != "off" else 1.0)
-    summary = _summary(rows, seeds, ARMS)
+    summary = _summary(rows, seeds, arms)
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    _write_csv(out_dir / "real_compare_20s.csv", rows)
-    (out_dir / "real_compare_20s.json").write_text(
+    _write_csv(out_dir / f"{prefix}.csv", rows)
+    (out_dir / f"{prefix}.json").write_text(
         json.dumps({"steps": int(steps), "eval_steps": int(eval_steps),
                     "seeds": list(seeds), "sizes": sizes,
                     "summary": summary,
@@ -344,7 +358,7 @@ def run_compare(out_dir: Path, *, seeds=(0, 1), steps=STEPS,
                               if k not in ("phases", "sizes")}
                              for r in rows]}, indent=2),
         encoding="utf-8")
-    _write_markdown(out_dir / "real_compare_20s.md", summary, rows)
+    _write_markdown(out_dir / f"{prefix}.md", summary, rows, order=arms)
 
     for m in summary:
         print(f"[compare] {m['arm']}: "
@@ -365,6 +379,8 @@ def main(argv=None):
     parser.add_argument("--jobs", type=int, default=1)
     parser.add_argument("--seeds", type=int, nargs="+", default=[0, 1])
     parser.add_argument("--steps", type=int, default=STEPS)
+    parser.add_argument("--arms", nargs="+", default=None)
+    parser.add_argument("--prefix", default="real_compare_20s")
     parser.add_argument("--out", type=Path,
                         default=Path("benchmarks/game"))
     args = parser.parse_args(argv)
@@ -372,7 +388,8 @@ def main(argv=None):
     if args.smoke:
         result = run_compare(args.out / "smoke", seeds=(0,), steps=400,
                              eval_steps=200, sizes=FAST_SIZES,
-                             jobs=args.jobs)
+                             jobs=args.jobs, arms=args.arms,
+                             prefix="smoke")
         print(json.dumps({"smoke": True,
                           "all_finite": all(m["finite"]
                                             for m in result["summary"]),
@@ -381,7 +398,8 @@ def main(argv=None):
                          indent=2))
         return result
     result = run_compare(args.out, seeds=tuple(args.seeds),
-                         steps=args.steps, jobs=args.jobs)
+                         steps=args.steps, jobs=args.jobs,
+                         arms=args.arms, prefix=args.prefix)
     return result
 
 
