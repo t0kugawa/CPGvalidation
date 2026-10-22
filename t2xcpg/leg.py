@@ -39,6 +39,16 @@ RENSHAW_PROJECTIONS = (
 # silenced the flexor pool (L musF 0.111 -> 0.008 over 20 s).
 M_F_IZH_REF = {"a": 0.02, "b": 0.2, "c": -65.0, "d": 8.0}
 
+# C1: the flexor motor pool's excitatory drive is seeded 4x the port's
+# reference weights (W_RG2MN=2.75 and the homonymous Ia_F->MN weight 12.0).
+# At reduced population sizes the RG-F rate is a fraction of FINAL and the
+# 2.75/12 seed underdrives M-F; PERSONA then suppresses the R side further
+# (rg_f->m_f 2.75 -> 1.09, Ia_F->m_f 12 -> 1.29) and musF_R collapses to 0.
+# The healthy L side learned rg_f->m_f to ~43, so 4x is inside the range the
+# plant asks for. The seed stays optimizable (no freeze): FINAL can adapt it
+# down. Measured 20 s: musF_L 0.102 (14.6% zero), musF_R 0.050 (22.4% zero).
+M_F_DRIVE_SEED = {"rg_f": 11.0, "ia_f_in": 48.0}
+
 
 class Leg:
     """
@@ -371,13 +381,15 @@ class Leg:
 
         # --- Motor output: RG -> MN direct; MN -> muscle ---
         self._connect(f"rg_e_{leg}", f"m_e_{leg}", weight=2.75, p=0.50)    # W_RG2MN
-        self._connect(f"rg_f_{leg}", f"m_f_{leg}", weight=2.75, p=0.50)
+        self._connect(f"rg_f_{leg}", f"m_f_{leg}",
+                      weight=M_F_DRIVE_SEED["rg_f"], p=0.50)  # C1 4x seed
         self._connect(f"m_e_{leg}", f"mus_e_{leg}", weight=1.0, p=0.80)    # W_M2MUS, P_M2MUS
         self._connect(f"m_f_{leg}", f"mus_f_{leg}", weight=1.0, p=0.80)
 
         # --- Ia (spindle): monosynaptic to homonymous MN/RG + Ia inhibitory IN ---
         self._connect(f"ia_e_in_{leg}", f"m_e_{leg}", weight=12.0, p=0.40)  # Ia(top) -> M-E (exc)
-        self._connect(f"ia_f_in_{leg}", f"m_f_{leg}", weight=12.0, p=0.40)  # Ia(bottom) -> M-F (exc)
+        self._connect(f"ia_f_in_{leg}", f"m_f_{leg}",
+                      weight=M_F_DRIVE_SEED["ia_f_in"], p=0.40)  # Ia(bottom) -> M-F (exc), C1 4x seed
         # MOD_IA_RG_STDP: homonymous Ia->RG is plastic (spec D12) — Ia-E potentiates
         # onto RG-E, Ia-F onto RG-F; muscle afferents become a learning drive.
         self._connect(f"ia_e_in_{leg}", f"rg_e_{leg}", weight=12.0, p=0.40,

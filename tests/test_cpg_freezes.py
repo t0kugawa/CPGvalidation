@@ -24,9 +24,9 @@ RENSHAW = {
 }
 
 
-def _leg():
+def _leg(side="L"):
     reset_rng_stream(0)
-    return Leg("L", Registry(), n_rg=8, n_mn=8, n_int=6, n_aff=6)
+    return Leg(side, Registry(), n_rg=8, n_mn=8, n_int=6, n_aff=6)
 
 
 def _renshaw_key(src, tgt):
@@ -60,6 +60,30 @@ def test_mf_izh_is_frozen_on_mean_and_sigma(nest_kernel):
         assert leg.registry.defaults(key)["mean"] == pytest.approx(value)
         assert leg.registry.defaults(key)["sigma"] == pytest.approx(0.0)
         assert p.min < p.max
+
+
+def _mf_drive_keys(side="L"):
+    return [f"conn_rg_f_{side}_m_f_{side}_weight",
+            f"conn_ia_f_in_{side}_m_f_{side}_weight"]
+
+
+@pytest.mark.parametrize("side", ("L", "R"))
+def test_mf_excitatory_drive_is_seeded_above_reference(nest_kernel, side):
+    """C1: seed the flexor pool's excitatory inputs at 4x the port reference.
+
+    At the reduced population sizes the RG-F rate is a fraction of FINAL; with
+    the 2.75/12 seed PERSONA suppressed the R inputs further and musF_R fell to
+    exactly 0. The seed stays optimizable, so FINAL can adapt it down.
+    """
+    leg = _leg(side)
+    for key, value in zip(_mf_drive_keys(side), (11.0, 48.0)):
+        p = leg.registry.get_all_optimizable_params()[key]
+        assert not leg.registry.is_frozen(key, "mean"), key
+        assert p.mean == pytest.approx(value)
+        assert p.min < p.max
+    # Explicit 4x override of the cpg_2legs_fast/port reference values.
+    assert 11.0 == pytest.approx(4.0 * 2.75)
+    assert 48.0 == pytest.approx(4.0 * 12.0)
 
 
 def test_agent_step_cannot_move_the_frozen_sites(nest_kernel):
