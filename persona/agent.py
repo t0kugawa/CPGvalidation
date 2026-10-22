@@ -10,6 +10,7 @@ from persona.homeostasis import (
     HomeostaticRegulator,
     PhysicalMap,
 )
+from persona.schedule import CosineLR
 
 
 class Agent:
@@ -32,10 +33,12 @@ class Agent:
                  warmup: int = 3,
                  smooth_kernel_size: int = 5,
                  homeostasis: HomeostaticConfig | None = None,
-                 game: GameConfig | None = None):
+                 game: GameConfig | None = None,
+                 lr_schedule: CosineLR | None = None):
         self.registry = registry
         self.lr_mu = float(lr_mu)
         self.lr_sigma = float(lr_sigma)
+        self.lr_schedule = lr_schedule
         self.dt_ms = float(dt_ms)
         self.warmup = int(warmup)
         self.smooth_kernel_size = int(smooth_kernel_size)
@@ -57,6 +60,8 @@ class Agent:
             "means": {},
             "sigmas": {},
         }
+        if self.lr_schedule is not None:
+            self.history["lr_mu"] = []
 
         self.params: Dict[str, PersonaParam] = {}
         self.homeostasis = None
@@ -104,6 +109,13 @@ class Agent:
             )
 
     # --- host state ---------------------------------------------------------
+
+    @property
+    def current_lr_mu(self) -> float:
+        """Learning rate for the current 1-based step (scheduled or fixed)."""
+        if self.lr_schedule is None:
+            return self.lr_mu
+        return self.lr_schedule.at(self.current_step)
 
     def refresh_params(self) -> Dict[str, PersonaParam]:
         """
@@ -205,6 +217,7 @@ class Agent:
         is baselined per limb; unify the per-leg weighting with the score term.
         """
         self.current_step += 1
+        lr_t = self.current_lr_mu
         self.refresh_params()
         smoothed_out = self.preprocess_signal(output, zero_shift=zero_shift)
         smoothed_tgt = self.preprocess_target(target)
@@ -255,8 +268,11 @@ class Agent:
             noise[rec_name] = (0.0 if delta is None else float(delta),
                                0.0 if rec.scale is None else float(rec.scale))
 
+        self.strategy.lr_mu = lr_t
         delta_means = self.strategy.step(
             sites, noise, advantage_vec, phase_shift=phase_shift)
+        if self.lr_schedule is not None:
+            self.history["lr_mu"].append(lr_t)
         if self.homeostasis is not None:
             self.history["homeostasis"].append(self.homeostasis.diagnostics())
         if self.game is not None:
