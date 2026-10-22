@@ -45,6 +45,18 @@ def test_spring_does_not_apply_during_warmup(nest_kernel):
     assert agent.params[key].mean == pytest.approx(1.5)
 
 
+def test_frozen_sigma_still_allows_the_spring(nest_kernel):
+    agent, reg = _agent()
+    key = "pop_pop_a"
+    reg.freeze(key, attrs=("sigma",))
+    reg.create_spring("s", key, power=0.5)
+    agent.params[key].mean = 2.0
+    agent.sample_actions(t_ms=0.0)
+    agent.step(np.zeros(2), np.ones(2), phase="stance", t_ms=10.0)
+    assert agent.params[key].mean == pytest.approx(1.5)
+    assert agent.params[key].sigma == 0.3
+
+
 def test_spring_skips_frozen_mean(nest_kernel):
     agent, reg = _agent()
     key = "pop_pop_a"

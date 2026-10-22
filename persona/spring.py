@@ -16,7 +16,8 @@ class SpringSpec:
     gain: float
     max_power: float
 
-    def power_for(self, sigma: float, sigma_ref: float, lr_t: float) -> float:
+    def power_for(self, sigma: float, sigma_ref: float, lr_t: float,
+                  sigma_min: float = 0.0) -> float:
         if self.power is not None:
             return self.power
         lr = float(lr_t)
@@ -27,5 +28,7 @@ class SpringSpec:
             return 0.0
         sig = float(sigma)
         den = sig * sig if math.isfinite(sig) else 0.0
-        ratio = ref * ref / max(den, 1e-12)
+        floor = float(sigma_min)
+        floor = floor * floor if math.isfinite(floor) else 0.0
+        ratio = ref * ref / max(den, floor, 1e-12)
         return float(min(max(self.gain * lr * ratio, 0.0), self.max_power))

@@ -257,7 +257,8 @@ class Registry:
                     continue
                 anchor = self._defaults[key]["mean"]
                 sigma_ref = self._defaults[key]["sigma"]
-                power = spec.power_for(sigmas[key], sigma_ref, lr_t)
+                sigma_min = self._defaults[key]["sigma_min"]
+                power = spec.power_for(sigmas[key], sigma_ref, lr_t, sigma_min)
                 out[key] = {
                     "force": power * (anchor - float(means[key])),
                     "power": power,

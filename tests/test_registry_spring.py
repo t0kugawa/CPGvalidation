@@ -36,6 +36,25 @@ def test_dynamic_power_uses_lr_and_variance(nest_kernel):
     assert tighter <= 0.5
 
 
+def test_dynamic_power_uses_sigma_min_floor(nest_kernel):
+    reg = Registry()
+    reg.create_population(Population("izhikevich", 2, {
+        "d": PersonaParam(mean=1.0, sigma=0.01, min=0.0, max=3.0,
+                          sigma_min=0.01),
+    }, "pop"))
+    reg.create_spring("s", "pop_pop_d", power=None, gain=0.001, max_power=0.5)
+    state = reg.spring_state({"pop_pop_d": 2.0}, {"pop_pop_d": 0.001}, 1.0)
+    assert state["pop_pop_d"]["power"] == pytest.approx(0.001)
+
+
+def test_dynamic_power_falls_with_lr(nest_kernel):
+    reg = _reg()
+    reg.create_spring("s", "pop_pop_a", power=None, gain=1.0, max_power=0.5)
+    high = reg.spring_state({"pop_pop_a": 2.0}, {"pop_pop_a": 0.3}, 0.1)["pop_pop_a"]["power"]
+    low = reg.spring_state({"pop_pop_a": 2.0}, {"pop_pop_a": 0.3}, 0.05)["pop_pop_a"]["power"]
+    assert low < high
+
+
 def test_dynamic_power_zero_sigma_is_finite(nest_kernel):
     reg = _reg()
     reg.create_spring("s", "pop_pop_a", power=None, gain=1.0, max_power=0.5)
@@ -53,12 +72,22 @@ def test_spring_skips_frozen_mean(nest_kernel):
     assert reg.spring_state({"pop_pop_a": 2.0}, {"pop_pop_a": 0.3}, 0.1) == {}
 
 
+def test_frozen_sigma_still_springs_mean(nest_kernel):
+    reg = _reg()
+    reg.freeze("pop_pop_a", attrs=("sigma",))
+    reg.create_spring("s", "pop_pop_a", power=None, gain=1.0, max_power=0.5)
+    state = reg.spring_state({"pop_pop_a": 2.0}, {"pop_pop_a": 0.3}, 0.1)
+    assert state["pop_pop_a"]["power"] == pytest.approx(0.1)
+    assert state["pop_pop_a"]["force"] == pytest.approx(-0.1)
+
+
 def test_spring_overlap_and_validation(nest_kernel):
     reg = _reg()
     reg.create_spring("s1", "pop_*")
     with pytest.raises(ValueError):
         reg.create_spring("s2", "pop_pop_a")
     reg.remove_spring("s1")
+    assert reg.spring_state({"pop_pop_a": 2.0}, {"pop_pop_a": 0.3}, 0.1) == {}
     with pytest.raises(ValueError):
         reg.create_spring("s3", "pop_pop_b", power=0.9, max_power=0.5)
     assert reg.springs() == {}

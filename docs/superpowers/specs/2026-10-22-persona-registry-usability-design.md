@@ -343,9 +343,10 @@ computation or RNG call occurs.
 - `persona/schedule.py` — new `CosineLR`.
 - `persona/spring.py` — new `SpringSpec` (or keep the small dataclass in
   `registry.py`; either way the public creation method is on the registry).
-- `persona/personalization.py` — set the schedule horizon from the run
-  horizon; no other loop change.
-- `personalize.py` — `--lr-mode`, `--lr-start`, `--lr-end`, `--lr-steps`.
+- `persona/personalization.py` — unchanged; its loop already consumes the
+  Agent's per-step `lr_mu`.
+- `personalize.py` — `build_personalizer` sets the schedule horizon from
+  `max_steps`; CLI flags `--steps`, `--lr-mode`, `--lr-start`, `--lr-end`.
 - `tests/` — new focused suites plus the existing suite unchanged.
 
 ## 8. Tests
