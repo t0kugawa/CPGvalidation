@@ -5,6 +5,7 @@ from persona.noise_recorder import NoiseRecorder
 from persona.registry import Registry
 from persona.strategy import FisherMatrix, PhaseBaselines
 from persona.agent import Agent
+from persona.schedule import CosineLR, resolve_lr_schedule
 
 __all__ = [
     "PersonaParam",
@@ -15,4 +16,6 @@ __all__ = [
     "FisherMatrix",
     "PhaseBaselines",
     "Agent",
+    "CosineLR",
+    "resolve_lr_schedule",
 ]
