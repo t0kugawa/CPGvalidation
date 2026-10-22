@@ -1014,6 +1014,33 @@ count, and `q_p > 1` against the H-off baseline.
 
 The oracle is a feasibility probe, not a proposed production controller.
 
+### 9.3 Oracle result (2026-10-22)
+
+The trust-region probe completed at R = 0.40/0.35/0.30, seeds 0/1. Baseline
+H off was `.4990`/`1.1435`/q66/bound23 (seed 0) and
+`.6461`/`1.2807`/q80/bound40 (seed 1).
+
+| R | p90 seed 0/1 | mean p90 improvement | loss seed 0/1 | mean loss delta | q seed 0/1 | bound seed 0/1 |
+|---:|---|---:|---|---:|---|---|
+| .40 | .3951/.3954 | 29.8% | 1.2910/1.4269 | +12.2% | 60/51 | 38/56 |
+| .35 | .3491/.3455 | 38.3% | 1.4453/1.4732 | +20.7% | 56/56 | 34/45 |
+| .30 | .3000/.2948 | 47.1% | 1.3820/1.2648 | +9.8% | 62/56 | 32/13 |
+
+Only 2.7–5.6% of mean updates actually hit the radius. R=.30 is the only arm
+inside the 10% mean loss budget, and it is inside by only 0.2 percentage points;
+seed 0 loss is still +20.9%. All radii have zero range-fallback parameters.
+
+The result changes the interpretation of the failed H run: the p90 target is
+**controllable** by a direct parameter-space constraint, so the current H
+mechanism/objective is the problem, not the feasibility of the metric. It does
+not show that an online, causal controller can match R=.30 at acceptable
+per-seed loss. The next mechanism should act on parameter displacement or a
+tail trust region, possibly per player, rather than only redistributing credit
+shares. A robust acceptance still needs seed-0 loss below +10%, not merely a
+mean inside the budget.
+
+Details: `benchmarks/homeostasis_h/oracle_trust_region_20s.md`.
+
 ## 10. Implementation order (TDD)
 
 1. `PhysicalMap` tests, then implementation.
