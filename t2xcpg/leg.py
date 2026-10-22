@@ -1,4 +1,6 @@
+import os
 from typing import Any, Tuple
+
 import numpy as np
 
 from persona.parameter import PersonaParam
@@ -16,6 +18,18 @@ from t2xcpg.utils import (
 # RG exc". The earlier -18.0 came from W_IN2RG, a cpg_2legs_fast constant that
 # is defined but never connected; the sign was the error, the magnitude is kept.
 W_IB2RG = 18.0
+
+# Renshaw recurrent inhibition is a structural stabiliser (scheme only, no
+# reference). PERSONA otherwise drove r_f -> m_f from -4 to about -20 and
+# silenced the flexor motor pool, so freeze each Renshaw weight at its project
+# value (RENSHAW_RANGE=0.0). The env toggle is for A/B runs:
+# CPG_RENSHAW_CLAMP=0 reproduces the unconstrained baseline.
+RENSHAW_RANGE = 0.0
+
+# The M-F Izhikevich parameters are frozen at the reference excitability. The
+# PERSONA homeostatic update otherwise drove a/b/d away from reference and
+# silenced the flexor pool (L musF 0.111 -> 0.008 over 20 s).
+M_F_IZH_REF = {"a": 0.02, "b": 0.2, "c": -65.0, "d": 8.0}
 
 
 class Leg:
@@ -156,6 +170,14 @@ class Leg:
         self.m_f = self.registry.create_population(
             Population(model="izhikevich", n=self.n_mn, params=exc(), name=f"m_f_{self.leg}")
         )
+        if os.environ.get("CPG_MF_IZH_FREEZE", "1") != "0":
+            mf_cfg = self.registry.population_cfgs[f"m_f_{self.leg}"]
+            for name, value in M_F_IZH_REF.items():
+                p = mf_cfg.params[name]
+                p.mean = float(value)
+                p.min = float(value)
+                p.max = float(value)
+                p.sigma = 0.0
 
         # Renshaw Cells (R-E, R-F)
         self.r_e = self.registry.create_population(
@@ -350,13 +372,23 @@ class Leg:
         # R also inhibits the Ia interneuron which inhibits the motor pool, so R
         # disinhibits M. At full gain it held the motor pools at the 0.2 ms step
         # cap (2418 Hz while RG-F ran at 79 Hz); at 0.2x the motor pools track RG
-        # (`test_results/renshaw_fix.py`).
-        self._connect(f"m_e_{leg}", f"r_e_{leg}", weight=3.0, p=0.50)      # M-E -> R-E
-        self._connect(f"r_e_{leg}", f"m_e_{leg}", weight=-4.0, p=0.50)     # R-E -| M-E
-        self._connect(f"r_e_{leg}", f"ia_e_{leg}", weight=-2.4, p=0.40)    # R-E -| Ia-E
-        self._connect(f"m_f_{leg}", f"r_f_{leg}", weight=3.0, p=0.50)      # M-F -> R-F
-        self._connect(f"r_f_{leg}", f"m_f_{leg}", weight=-4.0, p=0.50)     # R-F -| M-F
-        self._connect(f"r_f_{leg}", f"ia_f_{leg}", weight=-2.4, p=0.40)    # R-F -| Ia-F
+        # (`test_results/renshaw_fix.py`). PERSONA must not drive the recurrent
+        # limb to -20: that silences M-F, so each weight stays near its project
+        # value (RENSHAW_RANGE). CPG_RENSHAW_CLAMP=0 is the A/B baseline.
+        renshaw = (
+            (f"m_e_{leg}", f"r_e_{leg}", 3.0, 0.50),    # M-E -> R-E
+            (f"r_e_{leg}", f"m_e_{leg}", -4.0, 0.50),   # R-E -| M-E
+            (f"r_e_{leg}", f"ia_e_{leg}", -2.4, 0.40),  # R-E -| Ia-E
+            (f"m_f_{leg}", f"r_f_{leg}", 3.0, 0.50),    # M-F -> R-F
+            (f"r_f_{leg}", f"m_f_{leg}", -4.0, 0.50),   # R-F -| M-F
+            (f"r_f_{leg}", f"ia_f_{leg}", -2.4, 0.40),  # R-F -| Ia-F
+        )
+        for src, tgt, weight, p in renshaw:
+            self._connect(src, tgt, weight=weight, p=p)
+            if os.environ.get("CPG_RENSHAW_CLAMP", "1") != "0":
+                param = self.registry.connection_cfgs[f"{src}_{tgt}"].parameters["weight"]
+                param.min = weight - RENSHAW_RANGE
+                param.max = weight + RENSHAW_RANGE
 
         # --- Ib Golgi tendon organ, disynaptic via Ib interneurons (project values) ---
         # Extensor Ib: GTO -> InIb-E -> {M-E inh, M-F exc, RGF inh}
