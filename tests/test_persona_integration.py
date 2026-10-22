@@ -73,14 +73,19 @@ def test_stack_smoke(nest_kernel):
     assert np.all(np.isfinite(agent.strategy.Xbar))
     assert np.any(agent.strategy.G != 0.0)
 
-    # every site was sampled/applied; sigma is finite and within its bounds
+    # every site was sampled/applied; sigma is finite and within its bounds.
+    # A frozen sigma is pinned to its captured default (the M-F anchor is 0,
+    # below sigma_min), so it is exempt from the learning bounds.
     params = reg.get_all_optimizable_params()
     assert params
     for name, p in params.items():
         sample, sigma = reg.site_recorder(name).latest_sample()
         assert np.isfinite(sample), name
         assert np.isfinite(sigma), name
-        assert p.sigma_min <= p.sigma <= p.sigma_max, name
+        if reg.is_frozen(name, "sigma"):
+            assert p.sigma == reg.defaults(name)["sigma"], name
+        else:
+            assert p.sigma_min <= p.sigma <= p.sigma_max, name
 
     # every producer saw the run (6 STDP projections + 10 sensory relays)
     producers = reg.producer_recorders()

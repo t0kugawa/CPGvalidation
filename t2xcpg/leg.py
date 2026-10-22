@@ -21,10 +21,18 @@ W_IB2RG = 18.0
 
 # Renshaw recurrent inhibition is a structural stabiliser (scheme only, no
 # reference). PERSONA otherwise drove r_f -> m_f from -4 to about -20 and
-# silenced the flexor motor pool, so freeze each Renshaw weight at its project
-# value (RENSHAW_RANGE=0.0). The env toggle is for A/B runs:
-# CPG_RENSHAW_CLAMP=0 reproduces the unconstrained baseline.
-RENSHAW_RANGE = 0.0
+# silenced the flexor motor pool, so the native registry freeze pins each
+# Renshaw weight's learned mean at its project value. Bounds and exploration
+# are unchanged. The env toggle is for A/B runs: CPG_RENSHAW_CLAMP=0 reproduces
+# the unconstrained baseline.
+RENSHAW_PROJECTIONS = (
+    ("m_e", "r_e", 3.0, 0.50),    # M-E -> R-E
+    ("r_e", "m_e", -4.0, 0.50),   # R-E -| M-E
+    ("r_e", "ia_e", -2.4, 0.40),  # R-E -| Ia-E
+    ("m_f", "r_f", 3.0, 0.50),    # M-F -> R-F
+    ("r_f", "m_f", -4.0, 0.50),   # R-F -| M-F
+    ("r_f", "ia_f", -2.4, 0.40),  # R-F -| Ia-F
+)
 
 # The M-F Izhikevich parameters are frozen at the reference excitability. The
 # PERSONA homeostatic update otherwise drove a/b/d away from reference and
@@ -97,6 +105,22 @@ class Leg:
         self.rec_rgf = self.registry.create_spike_recorder(self.rg_f)
 
         self.registry.finalize_connections()
+
+        # C2: the structural freezes go through the native PERSONA registry
+        # (mean/sigma pins), not the old min=max/sigma=0 clamp. Freezing here,
+        # after finalize_connections, anchors to the effective values captured
+        # at the end of construction (including the M-F mutation below).
+        self._freeze_structural_params()
+
+    def _freeze_structural_params(self):
+        """Pin the structural CPG sites through the native registry freeze."""
+        if os.environ.get("CPG_RENSHAW_CLAMP", "1") != "0":
+            keys = [f"conn_{src}_{self.leg}_{tgt}_{self.leg}_weight"
+                    for src, tgt, _, _ in RENSHAW_PROJECTIONS]
+            self.registry.freeze(keys, attrs=("mean",))
+        if os.environ.get("CPG_MF_IZH_FREEZE", "1") != "0":
+            keys = [f"pop_m_f_{self.leg}_{name}" for name in M_F_IZH_REF]
+            self.registry.freeze(keys, attrs=("mean", "sigma"))
 
     def _param(self, name: str, mean: float, sigma: float = 0.1,
                min_val: float = -100.0, max_val: float = 100.0) -> PersonaParam:
@@ -171,12 +195,13 @@ class Leg:
             Population(model="izhikevich", n=self.n_mn, params=exc(), name=f"m_f_{self.leg}")
         )
         if os.environ.get("CPG_MF_IZH_FREEZE", "1") != "0":
+            # Post-creation M-F mutation: seeded at the reference excitability
+            # with no dispersion. `finalize_connections` recaptures these as
+            # the freeze anchor; the native freeze then holds mean and sigma.
             mf_cfg = self.registry.population_cfgs[f"m_f_{self.leg}"]
             for name, value in M_F_IZH_REF.items():
                 p = mf_cfg.params[name]
                 p.mean = float(value)
-                p.min = float(value)
-                p.max = float(value)
                 p.sigma = 0.0
 
         # Renshaw Cells (R-E, R-F)
@@ -373,22 +398,10 @@ class Leg:
         # disinhibits M. At full gain it held the motor pools at the 0.2 ms step
         # cap (2418 Hz while RG-F ran at 79 Hz); at 0.2x the motor pools track RG
         # (`test_results/renshaw_fix.py`). PERSONA must not drive the recurrent
-        # limb to -20: that silences M-F, so each weight stays near its project
-        # value (RENSHAW_RANGE). CPG_RENSHAW_CLAMP=0 is the A/B baseline.
-        renshaw = (
-            (f"m_e_{leg}", f"r_e_{leg}", 3.0, 0.50),    # M-E -> R-E
-            (f"r_e_{leg}", f"m_e_{leg}", -4.0, 0.50),   # R-E -| M-E
-            (f"r_e_{leg}", f"ia_e_{leg}", -2.4, 0.40),  # R-E -| Ia-E
-            (f"m_f_{leg}", f"r_f_{leg}", 3.0, 0.50),    # M-F -> R-F
-            (f"r_f_{leg}", f"m_f_{leg}", -4.0, 0.50),   # R-F -| M-F
-            (f"r_f_{leg}", f"ia_f_{leg}", -2.4, 0.40),  # R-F -| Ia-F
-        )
-        for src, tgt, weight, p in renshaw:
-            self._connect(src, tgt, weight=weight, p=p)
-            if os.environ.get("CPG_RENSHAW_CLAMP", "1") != "0":
-                param = self.registry.connection_cfgs[f"{src}_{tgt}"].parameters["weight"]
-                param.min = weight - RENSHAW_RANGE
-                param.max = weight + RENSHAW_RANGE
+        # limb to -20: that silences M-F, so the native freeze pins the learned
+        # mean at the project value. CPG_RENSHAW_CLAMP=0 is the A/B baseline.
+        for src, tgt, weight, p in RENSHAW_PROJECTIONS:
+            self._connect(f"{src}_{leg}", f"{tgt}_{leg}", weight=weight, p=p)
 
         # --- Ib Golgi tendon organ, disynaptic via Ib interneurons (project values) ---
         # Extensor Ib: GTO -> InIb-E -> {M-E inh, M-F exc, RGF inh}
