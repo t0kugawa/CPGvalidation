@@ -333,6 +333,19 @@ class Leg:
         self._belt_override = float(z_m)
         self._apply_belt(self._belt_override)
 
+    def set_ankle_range(self, lo: float, hi: float):
+        """
+        Narrows both limbs' ankle joints to a physiological range (rad).
+        `build_personalizer` passes the run window's mocap ankle envelope plus
+        `ANKLE_RANGE_MARGIN_RAD`; the stiff joint limit then stops a low-drive
+        or contact-driven ankle from hyper-plantarflexing past the stop.
+        """
+        lo, hi = float(lo), float(hi)
+        for s in SIDES:
+            for jid in (self.j_ankle_m[s], self.j_ankle_ref[s]):
+                self.model.jnt_range[jid] = (lo, hi)
+            self.model.actuator_ctrlrange[self.act_ankle_ref[s]] = (lo, hi)
+
     def _apply_belt(self, z_m: float):
         self.belt_z = float(z_m)
         self.model.geom_pos[self.treadmill_gid, 2] = self.belt_z

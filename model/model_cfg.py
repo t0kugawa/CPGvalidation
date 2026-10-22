@@ -8,8 +8,13 @@ SIM_MS: float = 60000.0
 # leaves the limb in permanent "swing" (no CUT/stance signal).
 TREADMILL_PENETRATION_M: float = 0.0005
 
-# A target-limb foot is considered to be in stance when its lowest surface is
-# within this distance (m) of the belt plane. The target limb is a kinematic
-# mirror: its phase is derived geometrically from the dataset foot height rather
-# than from any contact (the target has no contacts of its own).
+# A target-limb foot used to be considered in stance when its lowest surface
+# was within this distance (m) of the belt. Retired: the target limb now
+# collides with the belt and its phase comes from the actual contacts.
 CONTACT_Z_EPS: float = 0.003
+
+# Ankle guard: the joint range is narrowed to the mocap ankle envelope of the
+# run window plus this margin (rad), so a low muscle drive or a contact torque
+# cannot hyper-plantarflex the paw past a physiological stop.
+ANKLE_RANGE_MARGIN_RAD: float = 0.10
+
