@@ -245,6 +245,22 @@ class Agent:
                          else frozenset())
                   for name in self.params}
 
+        springs_fn = getattr(self.registry, "springs", None)
+        has_springs = springs_fn is not None and bool(springs_fn())
+        spring = {}
+        if has_springs and apply_updates:
+            means = {
+                name: float(self._snap.get(
+                    name, (param.mean, param.sigma, param.mean))[0])
+                for name, param in self.params.items()
+            }
+            sigmas = {
+                name: float(self._snap.get(
+                    name, (param.mean, param.sigma, param.mean))[1])
+                for name, param in self.params.items()
+            }
+            spring = self.registry.spring_state(means, sigmas, lr_t)
+
         # Sampling-time snapshot channels (spec §4): score units for the trace.
         sites: Dict[str, tuple] = {}
         for name, param in self.params.items():
@@ -286,7 +302,10 @@ class Agent:
                        float(self.current_actions.get(name, param.mean))))
             if (apply_updates and name in delta_means
                     and "mean" not in frozen[name]):
-                param.update_mean(delta_means[name])
+                applied = (delta_means[name]
+                           + spring.get(name, {}).get("force", 0.0))
+                param.update_mean(applied)
+                delta_means[name] = applied
             if apply_updates and "sigma" not in frozen[name]:
                 param.update_sigma(sample=xhat, mu_at_sample=mu_at,
                                    sigma_at_sample=sig_at, advantage=adv_scalar,
@@ -296,6 +315,9 @@ class Agent:
         for name in delta_means:
             if "mean" in frozen.get(name, ()):
                 delta_means[name] = 0.0
+
+        if has_springs:
+            self.history.setdefault("spring", []).append(spring)
 
         # Logging
         self.history["error_vector"].append(np.asarray(error_vec, dtype=np.float64))
