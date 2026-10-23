@@ -7,6 +7,7 @@ from persona.parameter import PersonaParam
 from persona.population import Population
 from persona.connection import Connection
 from persona.registry import Registry
+from t2xcpg.cfg import POPULATIONS_FINAL
 from t2xcpg.utils import (
     get_jitter_delay, create_stdp_synapse, STDP_POSTFIX, stdp_param_spec,
 )
@@ -39,15 +40,18 @@ RENSHAW_PROJECTIONS = (
 # silenced the flexor pool (L musF 0.111 -> 0.008 over 20 s).
 M_F_IZH_REF = {"a": 0.02, "b": 0.2, "c": -65.0, "d": 8.0}
 
-# C1: the flexor motor pool's excitatory drive is seeded 4x the port's
-# reference weights (W_RG2MN=2.75 and the homonymous Ia_F->MN weight 12.0).
-# At reduced population sizes the RG-F rate is a fraction of FINAL and the
-# 2.75/12 seed underdrives M-F; PERSONA then suppresses the R side further
-# (rg_f->m_f 2.75 -> 1.09, Ia_F->m_f 12 -> 1.29) and musF_R collapses to 0.
-# The healthy L side learned rg_f->m_f to ~43, so 4x is inside the range the
-# plant asks for. The seed stays optimizable (no freeze): FINAL can adapt it
-# down. Measured 20 s: musF_L 0.102 (14.6% zero), musF_R 0.050 (22.4% zero).
-M_F_DRIVE_SEED = {"rg_f": 11.0, "ia_f_in": 48.0}
+# C1: the flexor motor pool's excitatory drive is seeded to compensate the
+# reduced source populations. The port reference is W_RG2MN=2.75 and the
+# homonymous Ia_F->MN weight 12.0. When n_rg/n_aff are below FINAL, the same
+# per-synapse seed delivers proportionally less drive: the RG-F rate is a
+# fraction of FINAL, PERSONA suppresses the R side further (rg_f->m_f
+# 2.75 -> 1.09, Ia_F->m_f 12 -> 1.29), and musF_R collapses to 0. The seed is
+# scaled by min(4, n_rg_FINAL/n_rg, n_aff_FINAL/n_aff), capped at 4x, and left
+# optimizable. At FINAL the scale is 1.0 (the reference values). Measured 20 s
+# at n_rg=10/n_aff=6 (4x): musF_L 0.093 (11.3% zero), musF_R 0.053 (19.1%
+# zero); the pre-fix run was 0.166 / 0.002 (93.9% zero).
+M_F_DRIVE_REF = {"rg_f": 2.75, "ia_f_in": 12.0}
+M_F_DRIVE_MAX_SCALE = 4.0
 
 
 class Leg:
@@ -80,6 +84,18 @@ class Leg:
         self.n_mn = n_mn
         self.n_int = n_int
         self.n_aff = n_aff
+        # C1 size compensation: keep the flexor M-F seed at the reference
+        # values at FINAL, and raise it (max 4x) when the RG-F/Ia_F source
+        # populations are reduced. The two source sizes enter symmetrically.
+        self.mf_drive_scale = min(
+            M_F_DRIVE_MAX_SCALE,
+            POPULATIONS_FINAL["n_rg"] / max(1, self.n_rg),
+            POPULATIONS_FINAL["n_aff"] / max(1, self.n_aff),
+        )
+        self.mf_drive_seed = {
+            key: value * self.mf_drive_scale
+            for key, value in M_F_DRIVE_REF.items()
+        }
         self.p_scale = float(p_scale)
         self.w_scale = float(w_scale)
         self.ref_hz = float(ref_hz)
@@ -119,7 +135,7 @@ class Leg:
         # C2: the structural freezes go through the native PERSONA registry
         # (mean/sigma pins), not the old min=max/sigma=0 clamp. Freezing here,
         # after finalize_connections, anchors to the effective values captured
-        # at the end of construction (including the M-F mutation below).
+        # at the end of construction (including the M-F mutation above).
         self._freeze_structural_params()
 
     def _freeze_structural_params(self):
@@ -382,14 +398,14 @@ class Leg:
         # --- Motor output: RG -> MN direct; MN -> muscle ---
         self._connect(f"rg_e_{leg}", f"m_e_{leg}", weight=2.75, p=0.50)    # W_RG2MN
         self._connect(f"rg_f_{leg}", f"m_f_{leg}",
-                      weight=M_F_DRIVE_SEED["rg_f"], p=0.50)  # C1 4x seed
+                      weight=self.mf_drive_seed["rg_f"], p=0.50)  # C1 seed
         self._connect(f"m_e_{leg}", f"mus_e_{leg}", weight=1.0, p=0.80)    # W_M2MUS, P_M2MUS
         self._connect(f"m_f_{leg}", f"mus_f_{leg}", weight=1.0, p=0.80)
 
         # --- Ia (spindle): monosynaptic to homonymous MN/RG + Ia inhibitory IN ---
         self._connect(f"ia_e_in_{leg}", f"m_e_{leg}", weight=12.0, p=0.40)  # Ia(top) -> M-E (exc)
         self._connect(f"ia_f_in_{leg}", f"m_f_{leg}",
-                      weight=M_F_DRIVE_SEED["ia_f_in"], p=0.40)  # Ia(bottom) -> M-F (exc), C1 4x seed
+                      weight=self.mf_drive_seed["ia_f_in"], p=0.40)  # Ia(bottom) -> M-F (exc), C1 seed
         # MOD_IA_RG_STDP: homonymous Ia->RG is plastic (spec D12) — Ia-E potentiates
         # onto RG-E, Ia-F onto RG-F; muscle afferents become a learning drive.
         self._connect(f"ia_e_in_{leg}", f"rg_e_{leg}", weight=12.0, p=0.40,

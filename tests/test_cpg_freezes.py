@@ -62,6 +62,19 @@ def test_mf_izh_is_frozen_on_mean_and_sigma(nest_kernel):
         assert p.min < p.max
 
 
+def test_native_freezes_cover_both_legs(nest_kernel):
+    reg = Registry()
+    Leg("L", reg, n_rg=8, n_mn=8, n_int=6, n_aff=6)
+    Leg("R", reg, n_rg=8, n_mn=8, n_int=6, n_aff=6)
+    for side in "LR":
+        for src, tgt in RENSHAW:
+            assert reg.is_frozen(
+                f"conn_{src}_{side}_{tgt}_{side}_weight", "mean")
+        for name in M_F_IZH_REF:
+            assert reg.is_frozen(f"pop_m_f_{side}_{name}", "mean")
+            assert reg.is_frozen(f"pop_m_f_{side}_{name}", "sigma")
+
+
 def _mf_drive_keys(side="L"):
     return [f"conn_rg_f_{side}_m_f_{side}_weight",
             f"conn_ia_f_in_{side}_m_f_{side}_weight"]
@@ -76,14 +89,25 @@ def test_mf_excitatory_drive_is_seeded_above_reference(nest_kernel, side):
     exactly 0. The seed stays optimizable, so FINAL can adapt it down.
     """
     leg = _leg(side)
+    # n_rg=8/n_aff=6 -> min(4, 100/8, 100/6) = 4x the 2.75/12 reference.
+    assert leg.mf_drive_scale == pytest.approx(4.0)
     for key, value in zip(_mf_drive_keys(side), (11.0, 48.0)):
         p = leg.registry.get_all_optimizable_params()[key]
         assert not leg.registry.is_frozen(key, "mean"), key
         assert p.mean == pytest.approx(value)
         assert p.min < p.max
-    # Explicit 4x override of the cpg_2legs_fast/port reference values.
-    assert 11.0 == pytest.approx(4.0 * 2.75)
-    assert 48.0 == pytest.approx(4.0 * 12.0)
+    # Only the flexor side is boosted; the extensor Ia input is unchanged.
+    extensor = leg.registry.get_all_optimizable_params()[
+        f"conn_ia_e_in_{side}_m_e_{side}_weight"]
+    assert extensor.mean == pytest.approx(12.0)
+
+
+def test_mf_seed_is_the_reference_at_final_sizes(nest_kernel):
+    leg = Leg("L", Registry(), n_rg=100, n_mn=8, n_int=8, n_aff=100)
+    assert leg.mf_drive_scale == pytest.approx(1.0)
+    for key, value in zip(_mf_drive_keys("L"), (2.75, 12.0)):
+        assert leg.registry.get_all_optimizable_params()[key].mean == \
+            pytest.approx(value)
 
 
 def test_agent_step_cannot_move_the_frozen_sites(nest_kernel):
@@ -96,6 +120,8 @@ def test_agent_step_cannot_move_the_frozen_sites(nest_kernel):
         key: (agent.params[key].mean, agent.params[key].sigma)
         for key in renshaw_keys + mf_keys
     }
+    free_key = "conn_rg_e_L_rg_e_L_weight"
+    free_before = agent.params[free_key].mean
     for t in range(20):
         agent.sample_actions(t_ms=t * 10.0)
         agent.step(np.zeros(2), np.ones(2) * t,
@@ -106,6 +132,9 @@ def test_agent_step_cannot_move_the_frozen_sites(nest_kernel):
     for key in mf_keys:
         assert (agent.params[key].mean, agent.params[key].sigma) == (
             pytest.approx(before[key][0]), pytest.approx(before[key][1]))
+    # Positive control: an unfrozen site does move, so the assertions above
+    # are not passing because the strategy is inert.
+    assert agent.params[free_key].mean != pytest.approx(free_before)
 
 
 def test_freezes_can_be_disabled_for_ab(nest_kernel, monkeypatch):

@@ -77,7 +77,7 @@ _defaults[site_key] = {
 The snapshot is taken at registration, after the connection sign clamp (the
 clamp changes `min`/`max`, not `mean`/`sigma`). Some builders mutate a
 `PersonaParam` after creation (for example `t2xcpg/leg.py` silences the flexor
-motor pool by setting `mean=min=max` and `sigma=0`). To make the anchor the
+motor pool by setting its post-creation `sigma=0`). To make the anchor the
 effective creation configuration, `finalize_connections` refreshes the
 snapshot for every registered site, and the registry exposes
 `recapture_defaults(keys=None)` for a caller that mutates a site later.

@@ -73,20 +73,24 @@ the means) did **not** fix the activity winner-take-all: with identical
 parameters the sensory/plant loop still latched one RG (L 0.011 / R 0.015
 `musF`, or the mirror image). Size-compensating the tonic drive restored
 FINAL-like RG rates but `musF_R` stayed ~0.01 because the output seed is too
-weak. Seeding the flexor M-F drive at 4x (`rg_f→m_f` 11.0, `Ia_F→m_f` 48.0,
+weak. Seeding the flexor M-F drive at 4x (`rg_f→m_f` 11.0, `Ia_F→m_f` 48.0 at the
+measured `n_rg=10`/`n_aff=6` size; the seed scales to the reference at FINAL,
 left optimizable) keeps both flexors active over 20 s: `musF_L` **0.093**
-(11.3 % zero), `musF_R` **0.053** (19.1 % zero). The R ankle error is
-unchanged (0.752 vs 0.752; L 0.531 vs 0.515), so the **tracking** error
-remains the actuation blocker (V19/V21); the silent-R-flexor defect is fixed.
+(11.3 % zero), `musF_R` **0.053** (19.1 % zero). **The second acceptance
+clause is not met:** the R absolute ankle error is unchanged (0.752 vs
+0.752) and L regresses slightly (0.531 vs 0.515); on the signed §5.10 metric
+R goes +0.510 → +0.587 and L +0.486 → +0.513. The **tracking** error remains
+the actuation blocker (V19/V21); the **silent-R-flexor defect is fixed**,
+which was the C1 blocker.
 
-**C2 — Migrate the freeze hacks to the native PERSONA registry.** The current
-`t2xcpg/leg.py` freeze uses `min=max`/`sigma=0` on `PersonaParam` (a fallback).
-Replace it with `Registry.freeze` / `recapture_defaults` from
-`2026-10-22-persona-registry-usability-design.md`: freeze the six Renshaw
-weights on `mean` and the M-F Izhikevich `a/b/c/d` on `mean` and `sigma`, after
+**C2 — Migrate the freeze hacks to the native PERSONA registry.** The old
+`t2xcpg/leg.py` freeze used `min=max`/`sigma=0` on `PersonaParam` (a fallback);
+it is now migrated to `Registry.freeze` / `recapture_defaults` from
+`2026-10-22-persona-registry-usability-design.md`: the six Renshaw weights are
+frozen on `mean` and the M-F Izhikevich `a/b/c/d` on `mean` and `sigma`, after
 `finalize_connections` (the `recapture_defaults` path covers the post-creation
-M-F mutation). Keep every projection; no deletion. Tests must cover the native
-API, the freeze anchor after the CPG mutation, and the A/B toggles.
+M-F mutation). Every projection is kept; nothing is deleted. Tests cover the
+native API, the freeze anchor after the CPG mutation, and the A/B toggles.
 
 ## 2.2 Future development (2026-10-22)
 
@@ -194,8 +198,10 @@ Commissural per `cpg_2legs_fast` (`P_COMM_F=0.22,W_COMM_F_INH=−20`;
 - densities `P_RG_RECIP_E=0.15`, `P_RG_RECIP_F=0.30`
 - `rg_e→rg_e` = `W_RG_REC_E` = 4.0 (`P_RG_REC=0.12`)
 - `rg_f→rg_f` = `W_RG_REC_F` = 5.5
-- `rg_e→m_e` = `W_RG2MN` = 2.75; `rg_f→m_f` = **11.0** (C1 4x override, §2.1)
-- `ia_in→homonymous M` = **48.0** (C1 4x override of the port's 12.0, §2.1)
+- `rg_e→m_e` = `W_RG2MN` = 2.75; `rg_f→m_f` = **11.0** at the reduced
+  sizes (C1 size-compensated seed, §2.1; 2.75 at FINAL)
+- `Ia_F→M-F` (flexor) = **48.0** at the reduced sizes (C1 seed; 12.0 at
+  FINAL); `Ia_E→M-E` (extensor) stays 12.0
 - `m→mus` = `W_M2MUS` = 1.0 (`P_M2MUS=0.8`)
 - `ia_in→homonymous RG` = `IA2RG_W` = 12.0 (`IA2RG_P=0.4`)
 - `ia_in→Ia-IN` = `W_IA_IN2INT` = 6.0
@@ -353,12 +359,18 @@ PERSONA still samples these parameters and they stay in `F/Xbar/G`; it simply
 silencing the flexor. The rest of the CPG and PERSONA parameter set continues
 to optimise, and every Renshaw projection stays in the network.
 
-Measured on the exact-freeze 20 s run (`test_results/cpg_fixes/freeze_exact_20s`):
-loss **0.632**, `musF_L` **0.167** (6.2% zero), `musF_R` **0.002** (93.9% zero);
+Measured on the exact-freeze 20 s run (`test_results/cpg_fixes/freeze_exact_20s`;
+pre-C2 `min=max` clamp, kept as the historical baseline): loss **0.632**,
+`musF_L` **0.167** (6.2% zero), `musF_R` **0.002** (93.9% zero);
 L/R ankles 1.683/1.578 (errors +0.486/+0.510). The L flexor is restored; the R
 flexor still collapses, so the L/R asymmetry is the remaining actuation issue,
 not a drift of the frozen parameters. The earlier ±0.5-band probe gave loss
 0.651 and `musF` 0.025/0.024.
+The C1 run above is post-C2. A post-C2 intermediate with the flexor M-F drive
+frozen at 1x measured `musF_R` 0.0076, so the native freeze alone did not
+restore R; the size-compensated seed did. The pre-C2 baseline is kept as the
+historical reference, and the Renshaw exploration introduced by C2 means its
+applied weights are no longer exactly constant.
 `CPG_RENSHAW_CLAMP=0` and `CPG_MF_IZH_FREEZE=0` reproduce the unfrozen baseline
 for A/B runs.
 
@@ -404,9 +416,11 @@ for A/B runs.
   bounds stay normal; the A/B env toggles restore the unfrozen ranges.
   `tests/test_cpg_freezes.py` covers the anchor after the M-F mutation and the
   toggles.
-- C1 flexor seed: `rg_f→m_f` and `Ia_F→m_f` are 4x the port reference and are
-  **not** frozen; a 20 s run keeps both flexors active (`musF` > 0.02,
-  < 50 % zero). The tracking error is reported separately (V19/V21).
+- C1 flexor seed: `rg_f→m_f` and `Ia_F→m_f` are scaled to 4x the port
+  reference at reduced sizes and to the reference at FINAL; they are **not**
+  frozen. A 20 s run keeps both flexors active (`musF` > 0.02, < 50 % zero);
+  the tracking error is reported separately (V19/V21). The test covers the 4x
+  reduced size and the 1x FINAL size.
 
 ## 9. Decisions (check these)
 
@@ -515,10 +529,11 @@ for A/B runs.
   `r_f->m_f` to -19/-24 and the M-F `a/b/d` away from reference, silencing the
   flexor. The remaining parameter set still optimises. See §5.10;
   `CPG_RENSHAW_CLAMP=0`/`CPG_MF_IZH_FREEZE=0` are the A/B toggles.
-- **V25** Flexor M-F drive seed (2026-10-23): `rg_f→m_f = 11.0` and the
-  homonymous `Ia_F→m_f = 48.0` (4x the port's 2.75/12), both **optimizable**.
-  The reference seed underdrives the reduced-size plant and lets PERSONA
-  suppress the R side to zero; the 4x seed keeps both flexors active over 20 s
-  (`musF_L` 0.093, `musF_R` 0.053) while the ankle errors stay at their
-  previous level (R 0.752, L 0.531). FINAL can adapt the seed down. This
-  overrides the §5.4 values and is marked in `t2xcpg/leg.py`.
+- **V25** Flexor M-F drive seed (2026-10-23): the seed is scaled by
+  `min(4, n_rg_FINAL/n_rg, n_aff_FINAL/n_aff)`, i.e. 11.0/48.0 (4x the port's
+  2.75/12) at the measured reduced sizes and exactly 2.75/12 at FINAL. Both
+  are **optimizable**. The reference seed underdrives the reduced-size plant
+  and lets PERSONA suppress the R side to zero; the 4x seed keeps both flexors
+  active over 20 s (`musF_L` 0.093, `musF_R` 0.053) while the R ankle error is
+  unchanged and L regresses by 0.016 (the tracking blocker remains V19/V21).
+  This overrides the §5.4 values and is marked in `t2xcpg/leg.py`.

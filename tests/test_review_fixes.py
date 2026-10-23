@@ -58,7 +58,8 @@ def test_synaptic_parameters_reach_the_right_projection(nest_kernel):
             assert abs(w.mean() - want) < 5.0 * sigma / np.sqrt(w.size) + 1e-9, \
                 f"{key}: explored weight not realized around the sample"
             if cfg.parameters["weight"].min < cfg.parameters["weight"].max:
-                # Frozen structural weights have min=max and are intentionally constant.
+                # Frozen means keep their bounds and still receive per-synapse
+                # dispersion; only the learned mean is held by Agent.step.
                 assert w.std() > 0.0, f"{key}: no per-synapse dispersion"
             # recorded = applied: the recorder holds exactly the applied sample
             assert reg.site_recorder(f"conn_{key}_weight").latest_sample()[0] == want
