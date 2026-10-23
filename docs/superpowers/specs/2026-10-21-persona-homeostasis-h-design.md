@@ -1044,6 +1044,18 @@ mean inside the budget.
 
 Details: `benchmarks/homeostasis_h/oracle_trust_region_20s.md`.
 
+### 9.4 Future experiments: parameter groups (2026-10-22)
+
+Run the H/penalty A/B matrix on separate parameter groups: CPG static weights,
+Izhikevich `a/b/c/d`, rates, STDP hyperparameters, Renshaw/Ia/Ib, and SOL/TA
+muscle actuators. Compare H off / H on (default) / H on + structural freeze, and
+test whether the homeostatic penalty alone prevents the flexor collapse, or
+whether the Renshaw/M-F freeze remains necessary. Measure `musF`/`musE`
+symmetry, ankle tracking/contact, and loss. Also compare the registry
+homeostatic spring (`2026-10-22-persona-registry-usability-design.md` §5) with
+the credit-side H on the same sites. This is future development, not part of
+the current MVP.
+
 ## 10. Implementation order (TDD)
 
 1. `PhysicalMap` tests, then implementation.
