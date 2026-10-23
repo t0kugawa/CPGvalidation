@@ -1,5 +1,5 @@
 import numpy as np
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Any
 from persona.parameter import PersonaParam
 
@@ -12,6 +12,9 @@ class Population:
     name: str
     corr: np.ndarray | None = None
     node_collection: Any = None
+    # Creation-only NEURON topology/options (ignored by the NEST adapter).
+    # Values may be scalars or per-cell sequences of length ``n``.
+    neuron: Dict[str, Any] = field(default_factory=dict)
 
     def sample_matrix(self, explored_means: Dict[str, float] | None = None) -> Dict[str, list]:
         """

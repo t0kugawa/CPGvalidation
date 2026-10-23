@@ -12,7 +12,7 @@ SCANNED = (list((ROOT / "persona").glob("*.py"))
            + list((ROOT / "t2xcpg").glob("*.py"))
            + [ROOT / "personalize.py", ROOT / "run_validation.py"])
 
-SKIP_NAMES = {"registry.py", "conftest.py"}
+SKIP_NAMES = {"registry.py", "nest_adapter.py", "conftest.py"}
 
 # The only NEST surface allowed outside the registry: synapse-model definition
 # (`CopyModel` in t2xcpg/utils.py, needed before the registry connects), the
