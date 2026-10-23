@@ -79,7 +79,8 @@ def create_stdp_synapse(registry, syn_type: str, postfix: str) -> tuple[str, Any
     recorder goes through the registry (single NEST route); this module keeps
     only the `nest.CopyModel` call that must run before the registry connects.
     """
-    name = f"stdp_{syn_type}_{postfix}"
+    namespace = getattr(registry, "namespace", "")
+    name = f"stdp_{syn_type}_{namespace}{postfix}"
     wr = registry.create_weight_recorder()
     copy_syn_model(name, stdp_param_spec(syn_type), wr)
     return name, wr

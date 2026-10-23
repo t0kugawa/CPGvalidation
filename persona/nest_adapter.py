@@ -28,7 +28,11 @@ class NestAdapter(Adapter):
     Provides uniform interfaces for building NEST networks, sampling exploratory actions,
     and dynamically applying parameter changes.
     """
-    def __init__(self):
+    def __init__(self, namespace: str = ""):
+        # NEST is one kernel per process; replicas coexist as independent
+        # registries. The namespace only disambiguates global CopyModel names
+        # (e.g. STDP synapse models); registry keys stay unprefixed.
+        self.namespace = str(namespace)
         self.population_cfgs: Dict[str, Population] = {}
         self.connection_cfgs: Dict[str, Connection] = {}
         self.population_nodes: Dict[str, nest.NodeCollection] = {}
@@ -297,10 +301,12 @@ class NestAdapter(Adapter):
         Raises with both messages when neither path works, so the caller can
         surface the failure instead of silently keeping the old value.
         """
+        arr_error = None
         try:
             nodes.set(update_dict)
             return
         except Exception as arr_exc:
+            arr_error = arr_exc
             arr_msg = str(arr_exc)
         try:
             for i, node in enumerate(nodes):
@@ -312,7 +318,7 @@ class NestAdapter(Adapter):
         except Exception as loop_exc:
             raise RuntimeError(
                 f"array set failed ({arr_msg}); "
-                f"per-node realization failed ({loop_exc})") from arr_exc
+                f"per-node realization failed ({loop_exc})") from arr_error
 
     def create_population(self, cfg: Population, explored_means: Dict[str, float] | None = None) -> nest.NodeCollection:
         """

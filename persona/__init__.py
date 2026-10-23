@@ -19,6 +19,7 @@ __all__ = [
     "Connection",
     "CosineLR",
     "FisherMatrix",
+    "MultiAgent",
     "NestAdapter",
     "NeuronAdapter",
     "NeuronRegistry",
@@ -37,6 +38,7 @@ _LAZY = {
     "FisherMatrix": ("persona.strategy", "FisherMatrix"),
     "PhaseBaselines": ("persona.strategy", "PhaseBaselines"),
     "Agent": ("persona.agent", "Agent"),
+    "MultiAgent": ("persona.multi_agent", "MultiAgent"),
     "NeuronAdapter": ("persona.neuron_adapter", "NeuronAdapter"),
     "NeuronRegistry": ("persona.neuron_adapter", "NeuronRegistry"),
 }

@@ -16,9 +16,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="sample + realize + record the network every k steps "
                          "(strategy still updates every dt)")
     ap.add_argument("--threads", type=validate_threads, default=1,
-                    help="NEST local threads and PERSONA sampling threads. "
-                         "PERSONA samples are identical for every count; NEST "
-                         "results are reproducible only for a fixed count.")
+                    help="NEST local threads and the number of independent "
+                         "PERSONA/CPG replicas. Each replica samples different "
+                         "parameters; strategies merge at reference phase "
+                         "changes. Results are reproducible for a fixed count.")
     ap.add_argument("--cut-multisite", action="store_true",
                     help="Option B: one CUT Poisson relay and STDP projection "
                          "per plantar site (changes the PERSONA dimension)")

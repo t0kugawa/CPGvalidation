@@ -7,13 +7,16 @@ combinatorial graph operator used by H.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import warnings
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from persona.connection import Connection
-from persona.registry import Registry
+
+if TYPE_CHECKING:
+    from persona.registry import Registry
 
 
 _INHIBITORY_PREFIXES = ("in_", "in1", "r_", "ia_", "v0d_")

@@ -1,113 +1,160 @@
-"""NEST-thread integration: accuracy, reproducibility, and bounded speed.
+"""NEST integration for N independent CPG replicas in one kernel.
 
-These tests need the real NEST simulator and are skipped when it is absent.
-The cross-thread contract for NEST is weaker than for PERSONA: a fixed thread
-count is reproducible, but different thread counts may realize the network
-with different RNG streams. PERSONA samples, by contrast, are identical for
-every thread count (see test_parallel_sampling.py).
+Skipped when NEST is not installed. The cross-replica contract is now:
+samples and SNN outputs are intentionally different; a fixed
+(seed, thread count) is reproducible.
 """
 import os
 import time
 
+import numpy as np
 import pytest
 
 nest = pytest.importorskip("nest")
 
-from persona.agent import Agent
+from model.adapter import CPGInput
+from persona.multi_agent import MultiAgent
 from persona.parameter import reset_rng_stream
 from persona.registry import Registry
 from persona.runtime import configure_kernel
 from t2xcpg.bs import BaseDrive, BrainStem
-from t2xcpg.cpg import L2CPG
+from t2xcpg.cpg import L2CPG, MultiCPG
 from t2xcpg.leg import Leg as CPG_Leg
 
 DT_MS = 10.0
 
 
-def _build(threads: int, *, seed: int = 0,
+def _build(n: int = 2, seed: int = 0,
            n_rg: int = 6, n_mn: int = 6, n_int: int = 6, n_aff: int = 6):
-    configure_kernel(nest, resolution_ms=0.2, seed=seed, threads=threads)
+    configure_kernel(nest, resolution_ms=0.2, seed=seed, threads=n)
     reset_rng_stream(seed)
-    reg = Registry()
-    bs = BrainStem(registry=reg, n_bs=4, bs_e_hz=30.0, bs_f_hz=30.0)
-    base = BaseDrive(registry=reg, n_bs=4, base_hz=2.0)
-    leg_l = CPG_Leg("L", reg, n_rg=n_rg, n_mn=n_mn, n_int=n_int, n_aff=n_aff)
-    leg_r = CPG_Leg("R", reg, n_rg=n_rg, n_mn=n_mn, n_int=n_int, n_aff=n_aff)
-    cpg = L2CPG(registry=reg, bs=bs, legs={"L": leg_l, "R": leg_r},
-                dt_ms=DT_MS, base=base)
-    return reg, cpg
+    registries, cpgs, brainstems = [], [], []
+    for i in range(n):
+        reg = Registry(namespace=f"r{i}_")
+        bs = BrainStem(registry=reg, n_bs=4, bs_e_hz=30.0, bs_f_hz=30.0)
+        base = BaseDrive(registry=reg, n_bs=4, base_hz=2.0)
+        leg_l = CPG_Leg("L", reg, n_rg=n_rg, n_mn=n_mn, n_int=n_int,
+                        n_aff=n_aff)
+        leg_r = CPG_Leg("R", reg, n_rg=n_rg, n_mn=n_mn, n_int=n_int,
+                        n_aff=n_aff)
+        cpgs.append(L2CPG(registry=reg, bs=bs,
+                          legs={"L": leg_l, "R": leg_r},
+                          dt_ms=DT_MS, base=base))
+        registries.append(reg)
+        brainstems.append(bs)
+    return registries, cpgs, brainstems, MultiCPG(cpgs)
 
 
 def test_kernel_reports_requested_threads():
-    _build(4, n_rg=2, n_mn=2, n_int=2, n_aff=2)
-    assert int(nest.GetKernelStatus("local_num_threads")) == 4
+    _build(3, n_rg=2, n_mn=2, n_int=2, n_aff=2)
+    assert int(nest.GetKernelStatus("local_num_threads")) == 3
 
 
-def test_thread_count_keeps_site_and_node_counts():
-    reg_one, _ = _build(1, n_rg=4, n_mn=4, n_int=4, n_aff=4)
-    sites_one = sorted(reg_one.get_all_optimizable_params())
-    nodes_one = len(reg_one.population_nodes)
+def test_replicas_scale_nodes_and_sites():
+    regs_one, _, _, _ = _build(1, n_rg=4, n_mn=4, n_int=4, n_aff=4)
+    nodes_one = len(regs_one[0].population_nodes)
+    sites_one = sorted(regs_one[0].get_all_optimizable_params())
 
-    reg_two, _ = _build(2, n_rg=4, n_mn=4, n_int=4, n_aff=4)
-    assert sorted(reg_two.get_all_optimizable_params()) == sites_one
-    assert len(reg_two.population_nodes) == nodes_one
-
-
-def test_persona_sampling_is_identical_on_real_registry():
-    reg_one, _ = _build(1, n_rg=4, n_mn=4, n_int=4, n_aff=4)
-    agent_one = Agent(registry=reg_one, sampling_threads=1)
-
-    reg_four, _ = _build(4, n_rg=4, n_mn=4, n_int=4, n_aff=4)
-    agent_four = Agent(registry=reg_four, sampling_threads=4)
-
-    try:
-        sequential = [agent_one.sample_actions(t_ms=t * DT_MS)
-                      for t in range(8)]
-        parallel = [agent_four.sample_actions(t_ms=t * DT_MS)
-                    for t in range(8)]
-    finally:
-        agent_one.close()
-        agent_four.close()
-
-    assert sequential == parallel
-    assert agent_one._snap == agent_four._snap
+    regs_two, _, _, _ = _build(2, n_rg=4, n_mn=4, n_int=4, n_aff=4)
+    assert len(regs_two) == 2
+    for reg in regs_two:
+        assert len(reg.population_nodes) == nodes_one
+        assert sorted(reg.get_all_optimizable_params()) == sites_one
 
 
-def _run_steps(threads: int, steps: int = 5):
-    _, cpg = _build(threads, n_rg=4, n_mn=4, n_int=4, n_aff=4)
-    return [cpg.step() for _ in range(steps)]
+def test_one_simulate_advances_every_replica():
+    _, cpgs, _, multi = _build(2, n_rg=4, n_mn=4, n_int=4, n_aff=4)
+    multi.update([CPGInput(), CPGInput()])
+    outputs = multi.step()
+
+    assert len(outputs) == 2
+    assert multi.current_time_ms == DT_MS
+    assert all(cpg.current_time_ms == DT_MS for cpg in cpgs)
+    assert float(nest.GetKernelStatus("biological_time")) == DT_MS
 
 
-def _signature(outputs):
-    return [(round(o.mus_E_L, 12), round(o.mus_F_L, 12),
+def test_different_drive_produces_different_outputs():
+    _, _, drivers, multi = _build(
+        2, n_rg=8, n_mn=8, n_int=6, n_aff=6)
+    drivers[0].set_rates(10.0, 10.0)
+    drivers[1].set_rates(50.0, 50.0)
+
+    totals = [0.0, 0.0]
+    for _ in range(20):
+        multi.update([CPGInput(), CPGInput()])
+        outputs = multi.step()
+        totals[0] += outputs[0].mus_E_L + outputs[0].mus_F_L
+        totals[1] += outputs[1].mus_E_L + outputs[1].mus_F_L
+
+    assert totals[0] != totals[1]
+
+
+def test_persona_samples_differ_and_merge_on_phase_change():
+    regs, _, _, multi = _build(2, n_rg=4, n_mn=4, n_int=4, n_aff=4)
+    agent = MultiAgent(regs, lr_mu=0.1, lr_sigma=0.01, warmup=0)
+    actions = agent.sample_actions()
+    assert actions[0] != actions[1]
+
+    agent.apply_actions(actions)
+    multi.update([CPGInput(), CPGInput()])
+    outputs = multi.step()
+
+    first = agent.step(
+        outputs=[np.array([o.mus_E_L, o.mus_F_L]) for o in outputs],
+        targets=[np.zeros(2) for _ in outputs],
+        ref_phases=[("stance", "stance") for _ in outputs],
+    )
+    assert first["merged"] is False
+
+    actions = agent.sample_actions()
+    agent.apply_actions(actions)
+    multi.update([CPGInput(), CPGInput()])
+    outputs = multi.step()
+    second = agent.step(
+        outputs=[np.array([o.mus_E_L, o.mus_F_L]) for o in outputs],
+        targets=[np.zeros(2) for _ in outputs],
+        ref_phases=[("swing", "swing") for _ in outputs],
+    )
+    assert second["merged"] is True
+    assert np.allclose(agent.replica_strategies[0].F, agent.strategy.F)
+
+
+def _signature(n: int = 2, steps: int = 5):
+    _, cpgs, _, multi = _build(
+        n, n_rg=4, n_mn=4, n_int=4, n_aff=4)
+    out = []
+    for _ in range(steps):
+        multi.update([CPGInput() for _ in cpgs])
+        outputs = multi.step()
+        out.extend(
+            (round(o.mus_E_L, 12), round(o.mus_F_L, 12),
              round(o.mus_E_R, 12), round(o.mus_F_R, 12))
-            for o in outputs]
+            for o in outputs
+        )
+    return out
 
 
 def test_fixed_thread_count_is_reproducible():
-    assert _signature(_run_steps(2)) == _signature(_run_steps(2))
+    assert _signature(2) == _signature(2)
 
 
 @pytest.mark.skipif((os.cpu_count() or 1) < 2, reason="needs >= 2 cores")
-def test_threaded_nest_speed_is_bounded(capsys):
-    """Two NEST threads must not make a run pathologically slower."""
-    steps = 10
-    sizes = {"n_rg": 10, "n_mn": 10, "n_int": 8, "n_aff": 8}
+def test_multi_replica_speed_is_bounded(capsys):
+    def timed(n: int, steps: int = 10) -> float:
+        _, cpgs, _, multi = _build(
+            n, n_rg=10, n_mn=10, n_int=8, n_aff=8)
+        start = time.perf_counter()
+        for _ in range(steps):
+            multi.update([CPGInput() for _ in cpgs])
+            multi.step()
+        return time.perf_counter() - start
 
-    _, cpg_one = _build(1, **sizes)
-    start = time.perf_counter()
-    for _ in range(steps):
-        cpg_one.step()
-    single = time.perf_counter() - start
-
-    _, cpg_two = _build(2, **sizes)
-    start = time.perf_counter()
-    for _ in range(steps):
-        cpg_two.step()
-    multi = time.perf_counter() - start
-
+    single = timed(1)
+    two = timed(2)
+    per_sample = two / 2.0
     with capsys.disabled():
-        print(f"\n[NEST speed] steps={steps} 1-thread={single * 1e3:.1f} ms "
-              f"2-thread={multi * 1e3:.1f} ms ratio={multi / single:.2f}x")
+        print(f"\n[NEST replicas] 1 replica={single * 1e3:.1f} ms "
+              f"2 replicas={two * 1e3:.1f} ms "
+              f"per-sample ratio={per_sample / single:.2f}x")
 
-    assert multi <= single * 5.0
+    assert per_sample <= single * 3.0

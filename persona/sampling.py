@@ -21,6 +21,41 @@ def _sample_chunk(items) -> list[tuple[str, float]]:
             for name, param in items]
 
 
+class ReplicaSampler:
+    """Draws one *different* exploratory sample per replica.
+
+    The shared policy's ``PersonaParam`` objects draw ``N`` values in one
+    vectorised call.  Replica ``i`` receives the ``i``-th draw, so the samples
+    are different by construction and the sampling cost stays low.
+    """
+
+    def __init__(self, replicas: int = 1):
+        self.replicas = validate_threads(replicas)
+
+    def sample(self, params: Mapping[str, PersonaParam]):
+        actions: list[dict[str, float]] = [{} for _ in range(self.replicas)]
+        snapshots: list[dict[str, tuple[float, float, float]]] = [
+            {} for _ in range(self.replicas)]
+        for name, param in params.items():
+            mu = float(param.mean)
+            sigma = float(param.sigma)
+            values = param.sample_explorations(self.replicas)
+            for replica, value in enumerate(values):
+                xhat = float(value)
+                actions[replica][name] = xhat
+                snapshots[replica][name] = (mu, sigma, xhat)
+        return list(zip(actions, snapshots))
+
+    def close(self) -> None:
+        """Compatibility no-op: vectorised sampling owns no pool."""
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
+
 class ExplorationSampler:
     """Samples a site mapping, optionally across a persistent thread pool."""
 
