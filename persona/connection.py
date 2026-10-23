@@ -20,6 +20,8 @@ class Connection:
     extra_syn_spec: Dict[str, Any] = field(default_factory=dict)
     key: str | None = None
     weight_recorder: Any = None
+    # Creation-only NEURON connection options (ignored by the NEST adapter).
+    neuron: Dict[str, Any] = field(default_factory=dict)
 
     def get_effective_p(self) -> float:
         return float(self.p)

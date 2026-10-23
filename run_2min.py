@@ -63,7 +63,12 @@ def main():
     ap.add_argument("--cut-multisite", action="store_true",
                     help="Option B: one CUT Poisson relay and STDP projection "
                          "per plantar site (requires the PERSONA update)")
+    ap.add_argument("--threads", type=int, default=2,
+                    help="independent CPG/MuJoCo replicas and NEST local "
+                         "threads (>= 2 uses the parallel MultiAgent path)")
     args = ap.parse_args()
+    if args.threads < 1:
+        ap.error("--threads must be >= 1")
     run_validation.run(
         duration_s=args.duration_s, view=args.view,
         width=1920, height=1080, fps=40, out_dir=args.out,
@@ -76,7 +81,7 @@ def main():
         pose_max_s=args.pose_max_s, belt_mode=args.belt,
         snapshot_s=args.snapshot_s, realize_every_k=args.realize_every_k,
         resolution_ms=args.resolution_ms,
-        cut_multisite=args.cut_multisite)
+        cut_multisite=args.cut_multisite, threads=args.threads)
 
 
 if __name__ == "__main__":

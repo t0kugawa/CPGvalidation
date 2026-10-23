@@ -143,12 +143,13 @@ class L2CPG(CPGAdapter):
                 cut_active=cpg_in.cut_active_R,
             )
 
-    def step(self) -> CPGOutput:
-        """
-        Simulates NEST for dt_ms and reads out motor activations.
-        """
-        t_before = self.current_time_ms
+    def simulate(self) -> None:
+        """Advance the shared NEST kernel by one control step."""
         nest.Simulate(self.dt_ms)
+
+    def readout(self) -> CPGOutput:
+        """Drain this replica's recorders after the shared ``nest.Simulate``."""
+        t_before = self.current_time_ms
         self.current_time_ms += self.dt_ms
 
         d_e_L, d_f_L = 0.0, 0.0
@@ -169,7 +170,7 @@ class L2CPG(CPGAdapter):
             rg_e, rg_f = self.legs["R"].get_rg_rates(self.dt_ms, self.current_time_ms)
             rg.update({"rg_e_R": rg_e, "rg_f_R": rg_f})
 
-        out = CPGOutput(
+        return CPGOutput(
             mus_E_L=d_e_L,
             mus_F_L=d_f_L,
             mus_E_R=d_e_R,
@@ -177,7 +178,13 @@ class L2CPG(CPGAdapter):
             t_ms=self.current_time_ms,
             extra={"plastic": plastic, "rg": rg},
         )
-        return out
+
+    def step(self) -> CPGOutput:
+        """
+        Simulates NEST for dt_ms and reads out motor activations.
+        """
+        self.simulate()
+        return self.readout()
 
     def build_cpg(self):
         pass
@@ -187,3 +194,42 @@ class L2CPG(CPGAdapter):
             "time_ms": self.current_time_ms,
             "legs": list(self.legs.keys())
         }
+
+
+class MultiCPG:
+    """N independent ``L2CPG`` replicas sharing one NEST kernel.
+
+    One ``nest.Simulate(dt)`` advances every replica; each replica's recorders
+    are drained afterwards. This is the only place that may call
+    ``simulate()`` in a multi-replica run.
+    """
+
+    def __init__(self, cpgs):
+        self.cpgs = list(cpgs)
+        if not self.cpgs:
+            raise ValueError("MultiCPG needs at least one replica")
+        self.dt_ms = float(self.cpgs[0].dt_ms)
+
+    @property
+    def current_time_ms(self) -> float:
+        return float(self.cpgs[0].current_time_ms)
+
+    def update(self, cpg_inputs) -> None:
+        inputs = list(cpg_inputs)
+        if len(inputs) != len(self.cpgs):
+            raise ValueError("one CPGInput per replica is required")
+        for cpg, cpg_in in zip(self.cpgs, inputs):
+            cpg.update(cpg_in)
+
+    def step(self):
+        self.cpgs[0].simulate()
+        return [cpg.readout() for cpg in self.cpgs]
+
+    def get_logs(self) -> Dict[str, Any]:
+        return {
+            "time_ms": self.current_time_ms,
+            "replicas": len(self.cpgs),
+        }
+
+    def build_cpg(self):
+        pass

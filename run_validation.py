@@ -104,7 +104,8 @@ def run(duration_s, view, width, height, fps, out_dir,
         n_rg, n_mn, n_int, n_aff, n_bs, render=True, budget_s=None,
         pose_max_s=1.0, belt_mode="dataset", snapshot_s=900.0,
         tau_mem_s=2.0, realize_every_k=1,
-        resolution_ms=DEFAULT_RESOLUTION_MS, cut_multisite=False):
+        resolution_ms=DEFAULT_RESOLUTION_MS, cut_multisite=False,
+        threads=1):
     os.makedirs(out_dir, exist_ok=True)
     steps = int(round(duration_s / (DT_MS / 1000.0)))
     n_frames = int(round(duration_s * fps))
@@ -116,14 +117,16 @@ def run(duration_s, view, width, height, fps, out_dir,
         max_steps=steps, eps_pose=0.10, pose_hold_steps=3,
         loss_stop=1e-4, loss_window=20, w_scale=w_scale, ref_hz=ref_hz,
         belt_mode=belt_mode, loop=True, tau_mem_s=tau_mem_s,
-        resolution_ms=resolution_ms, cut_multisite=cut_multisite)
+        resolution_ms=resolution_ms, cut_multisite=cut_multisite,
+        threads=threads)
     pers.belt_mps = float(belt_mps)
     pers.belt_start_step = int(round(belt_start_s / (DT_MS / 1000.0)))
     pers.belt_ramp_steps = max(1, int(round(belt_ramp_s / (DT_MS / 1000.0))))
     pers.log_every = 100
     pers.stdp_every = 20
     agent = pers.agent
-    rig = pers.rig
+    # ParallelPersonalizer owns a list of rigs; the single-thread path owns one.
+    rig = getattr(pers, "rig", None) or pers.rigs[0]
 
     def _meta(step, log):
         return {"duration_s": float(duration_s), "dt_ms": float(DT_MS),
@@ -274,7 +277,12 @@ if __name__ == "__main__":
                          "per plantar site (changes the PERSONA dimension)")
     ap.add_argument("--fast", action="store_true",
                     help="quick low-res short run for iteration")
+    ap.add_argument("--threads", type=int, default=2,
+                    help="independent CPG/MuJoCo replicas and NEST local "
+                         "threads (>= 2 uses the parallel MultiAgent path)")
     args = ap.parse_args()
+    if args.threads < 1:
+        ap.error("--threads must be >= 1")
     if args.fast:
         args.duration_s = min(args.duration_s, 4.0)
         args.width, args.height, args.fps = 480, 270, 20
@@ -292,4 +300,4 @@ if __name__ == "__main__":
         snapshot_s=args.snapshot_s, tau_mem_s=args.tau_mem_s,
         realize_every_k=args.realize_every_k,
         resolution_ms=args.resolution_ms,
-        cut_multisite=args.cut_multisite)
+        cut_multisite=args.cut_multisite, threads=args.threads)

@@ -4,6 +4,7 @@ import numpy as np
 from persona.registry import Registry
 from persona.strategy import FisherMatrix
 from persona.parameter import PersonaParam
+from persona.sampling import ExplorationSampler
 from persona.game import GameConfig, StackGame
 from persona.homeostasis import (
     HomeostaticConfig,
@@ -34,11 +35,13 @@ class Agent:
                  smooth_kernel_size: int = 5,
                  homeostasis: HomeostaticConfig | None = None,
                  game: GameConfig | None = None,
-                 lr_schedule: CosineLR | None = None):
+                 lr_schedule: CosineLR | None = None,
+                 sampling_threads: int = 1):
         self.registry = registry
         self.lr_mu = float(lr_mu)
         self.lr_sigma = float(lr_sigma)
         self.lr_schedule = lr_schedule
+        self.sampler = ExplorationSampler(sampling_threads)
         self.dt_ms = float(dt_ms)
         self.warmup = int(warmup)
         self.smooth_kernel_size = int(smooth_kernel_size)
@@ -154,15 +157,21 @@ class Agent:
         (the realize step's own clock supplies the recording timestamp).
         """
         self.refresh_params()
-        self.current_actions = {}
-        self._snap = {}
-        for name, param in self.params.items():
-            mu = float(param.mean)
-            sig = float(param.sigma)
-            xhat = param.sample_exploration()
-            self.current_actions[name] = xhat
-            self._snap[name] = (mu, sig, xhat)
+        # Snapshot (mu, sigma) before sampling: they are constant for the
+        # whole call, and threaded sampling must not change them.
+        snapshot = {name: (float(param.mean), float(param.sigma))
+                    for name, param in self.params.items()}
+        self.current_actions = self.sampler.sample(self.params)
+        self._snap = {
+            name: (snapshot[name][0], snapshot[name][1],
+                   float(self.current_actions[name]))
+            for name in self.params
+        }
         return dict(self.current_actions)
+
+    def close(self) -> None:
+        """Release the sampling thread pool (if any)."""
+        self.sampler.close()
 
     def _smooth(self, signal: np.ndarray, buffer: List[np.ndarray]) -> np.ndarray:
         buf_arr = np.asarray(signal, dtype=np.float64)
@@ -200,7 +209,9 @@ class Agent:
              target: np.ndarray,
              phase: str = "stance",
              zero_shift: float = 0.0,
-             t_ms: float | None = None) -> Dict[str, Any]:
+             t_ms: float | None = None,
+             *,
+             advantage_phase=None) -> Dict[str, Any]:
         """
         Runs one optimization step:
         1. Preprocesses output/target with the same moving-average filter.
@@ -231,12 +242,19 @@ class Agent:
         phase_key = tuple(
             self.strategy._per_component_phases(phase, len(error_vec)))
         phase_record = phase if isinstance(phase, str) else phase_key
+        # The advantage baseline must be conditioned on the *reference* gait
+        # phase when one is available: the model phase is what the policy is
+        # changing, so using it makes the baseline endogenous. `phase` stays
+        # the model phase for logging and the Fisher refresh.
+        adv_source = phase if advantage_phase is None else advantage_phase
+        adv_key = tuple(
+            self.strategy._per_component_phases(adv_source, len(error_vec)))
 
         phase_shift = (self._prev_phase is not None
                        and phase_key != self._prev_phase)
         self._prev_phase = phase_key
 
-        advantage_vec = self.strategy.compute_advantage(error_vec, phase=phase_key)
+        advantage_vec = self.strategy.compute_advantage(error_vec, phase=adv_key)
         adv_scalar = float(np.mean(advantage_vec))
 
         apply_updates = (self.strategy.steps + 1) > self.strategy.warmup

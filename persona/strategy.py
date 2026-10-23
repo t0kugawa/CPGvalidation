@@ -257,29 +257,11 @@ class FisherMatrix:
             self.baselines.update(i, phases[i], loss[i])
         return advantage
 
-    def step(self,
-             sites: Dict[str, tuple],
-             noise: Dict[str, tuple],
-             advantage: np.ndarray,
-             *,
-             phase_shift: bool = False) -> Dict[str, float]:
-        """
-        One strategy step.
-
-        ``sites[key] = (Δθ, σ_sampled, Δlogσ)`` for every site (sampling-time
-        values); ``noise[name] = (δ, R)`` for every producer this step, where
-        `R` is the producer's current value at registration (missing producers
-        contribute δ=0); ``advantage`` is the per-component advantage vector
-        A(t) (length 2, one per limb).
-
-        Updates F/Xbar/G, refreshes the recursive inverse on ``phase_shift``
-        or at ``refresh_every``, counts the step, and returns the per-site Δμ
-        (all zero during warm-up).
-        """
-        self.ensure_names(list(sites.keys()), list(noise.keys()))
-        m, k = self.n_sites, self.n_noise
+    def _score_vectors(self, sites: Dict[str, tuple],
+                       noise: Dict[str, tuple]) -> tuple[np.ndarray, np.ndarray]:
+        """Sampling-time score ``s`` and trace ``a`` for one observation."""
+        m = self.n_sites
         n = self.n_total
-
         s = np.zeros(n, dtype=np.float64)
         a = np.zeros(n, dtype=np.float64)
         for i, name in enumerate(self.param_names):
@@ -299,18 +281,25 @@ class FisherMatrix:
             if r > 0.0:
                 s[2 * m + j] = float(delta) / (r * r)
                 self.noise_scales[name] = r
+        return s, a
 
+    @staticmethod
+    def _pad_advantage(advantage) -> np.ndarray:
         A = np.asarray(advantage, dtype=np.float64).ravel()
         if A.size < 2:
             A = np.pad(A, (0, 2 - A.size))
-        A = A[:2]
+        return A[:2]
 
+    def _accumulate(self, s: np.ndarray, a: np.ndarray,
+                    A: np.ndarray) -> None:
+        """F/X̄/G recurrence for one observation (no policy step)."""
         b = self.beta
         self.F = b * self.F + (1.0 - b) * np.outer(s, s)
         self.Xbar = b * self.Xbar + (1.0 - b) * a
         self.G = b * self.G + (1.0 - b) * np.outer(self.Xbar, A)
         self.steps += 1
 
+    def _update_inverse(self, s: np.ndarray, phase_shift: bool) -> None:
         self._steps_since_refresh += 1
         if self.refresh_every == 1:
             # Every step has the constant ridge. Solve directly instead of
@@ -322,6 +311,10 @@ class FisherMatrix:
         else:
             self._rank1_update_inverse(s)
 
+    def _deltas(self, sites: Dict[str, tuple],
+                A: np.ndarray) -> Dict[str, float]:
+        """Δμ from the current merged/accumulated state."""
+        m = self.n_sites
         deltas = {name: 0.0 for name in self.param_names}
         if self.steps <= self.warmup:
             return deltas
@@ -356,6 +349,109 @@ class FisherMatrix:
             for i, name in enumerate(self.param_names):
                 deltas[name] = float(move[i])
         return deltas
+
+    def step(self,
+             sites: Dict[str, tuple],
+             noise: Dict[str, tuple],
+             advantage: np.ndarray,
+             *,
+             phase_shift: bool = False,
+             accumulate_only: bool = False) -> Dict[str, float]:
+        """
+        One strategy step.
+
+        ``sites[key] = (Δθ, σ_sampled, Δlogσ)`` for every site (sampling-time
+        values); ``noise[name] = (δ, R)`` for every producer this step, where
+        `R` is the producer's current value at registration (missing producers
+        contribute δ=0); ``advantage`` is the per-component advantage vector
+        A(t) (length 2, one per limb).
+
+        Updates F/X̄/G, refreshes the recursive inverse on ``phase_shift`` or at
+        ``refresh_every``, counts the step, and returns the per-site Δμ (all
+        zero during warm-up). With ``accumulate_only`` the inverse and Δμ are
+        skipped: the replica strategies use this and merge later.
+        """
+        self.ensure_names(list(sites.keys()), list(noise.keys()))
+        s, a = self._score_vectors(sites, noise)
+        A = self._pad_advantage(advantage)
+        self._accumulate(s, a, A)
+        if accumulate_only:
+            return {}
+        self._update_inverse(s, phase_shift)
+        return self._deltas(sites, A)
+
+    def deltas(self, sites: Dict[str, tuple],
+               advantage) -> Dict[str, float]:
+        """Public Δμ for the current state (used after a merge)."""
+        return self._deltas(sites, self._pad_advantage(advantage))
+
+    def step_batch(self, observations) -> Dict[str, float]:
+        """Combined update from several observations (comparison rule).
+
+        Averages the sufficient statistics of all observations and performs
+        one F/X̄/G update. The inverse is refreshed directly, so this path is
+        exact but O(n³) per call; the production merge path avoids it.
+        """
+        observations = list(observations)
+        if not observations:
+            return {name: 0.0 for name in self.param_names}
+
+        all_sites = list(observations[0]["sites"].keys())
+        all_noise = list(observations[0]["noise"].keys())
+        self.ensure_names(all_sites, all_noise)
+        n = self.n_total
+        S = np.zeros((n, len(observations)), dtype=np.float64)
+        a_sum = np.zeros(n, dtype=np.float64)
+        A_sum = np.zeros(2, dtype=np.float64)
+        for j, obs in enumerate(observations):
+            s, a = self._score_vectors(obs["sites"], obs["noise"])
+            S[:, j] = s
+            a_sum += a
+            A_sum += self._pad_advantage(obs["advantage"])
+
+        T = float(len(observations))
+        b = self.beta
+        self.F = b * self.F + (1.0 - b) * (S @ S.T) / T
+        self.Xbar = b * self.Xbar + (1.0 - b) * (a_sum / T)
+        self.G = b * self.G + (1.0 - b) * np.outer(self.Xbar, A_sum / T)
+        self.steps += 1
+        self._refresh_inverse()
+        return self._deltas(observations[-1]["sites"], A_sum / T)
+
+    def merge(self, others, weights) -> "FisherMatrix":
+        """Weighted merge of other strategies' F/X̄/G into this one."""
+        others = list(others)
+        weights = np.asarray(weights, dtype=np.float64)
+        if len(others) != len(weights):
+            raise ValueError("merge needs one weight per strategy")
+        if not others:
+            return self
+        for other in others:
+            if (list(other.param_names) != list(self.param_names)
+                    or list(other.noise_names) != list(self.noise_names)):
+                raise ValueError("cannot merge strategies with different sites")
+
+        total = float(weights.sum())
+        if not np.isfinite(total) or total <= 0.0:
+            weights = np.full(len(others), 1.0 / len(others))
+        else:
+            weights = weights / total
+
+        F = np.zeros_like(self.F)
+        Xbar = np.zeros_like(self.Xbar)
+        G = np.zeros_like(self.G)
+        steps = 0
+        for weight, other in zip(weights, others):
+            F += weight * other.F
+            Xbar += weight * other.Xbar
+            G += weight * other.G
+            steps = max(steps, int(other.steps))
+        self.F, self.Xbar, self.G = F, Xbar, G
+        self.steps = steps
+        for other in others:
+            self.noise_scales.update(other.noise_scales)
+        self._refresh_inverse()
+        return self
 
     # --- introspection -------------------------------------------------------
 

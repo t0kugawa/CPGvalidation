@@ -222,3 +222,17 @@ def test_agent_refreshes_when_the_second_leg_changes_phase(nest_kernel):
         agent.step(np.zeros(2), np.zeros(2), phase=phase,
                    t_ms=(t + 1) * 10.0)
     assert calls == [3]
+
+
+def test_advantage_phase_uses_the_reference_phase_for_the_baseline(nest_kernel):
+    agent, _ = _agent(lr_mu=0.0, lr_sigma=0.0)
+    agent.step(np.ones(2), np.zeros(2), phase=["stance", "stance"],
+               advantage_phase=["swing", "swing"])
+    assert agent.strategy.baselines.get_baseline(0, "swing") == 1.0
+    assert agent.strategy.baselines.get_baseline(0, "stance") == 0.0
+
+
+def test_advantage_phase_defaults_to_the_model_phase(nest_kernel):
+    agent, _ = _agent(lr_mu=0.0, lr_sigma=0.0)
+    agent.step(np.ones(2), np.zeros(2), phase=["stance", "stance"])
+    assert agent.strategy.baselines.get_baseline(0, "stance") == 1.0

@@ -65,6 +65,21 @@ class PersonaParam:
         sample = float(self.rng.normal(self.mean, max(1e-6, self.sigma)))
         return float(np.clip(sample, self.min, self.max))
 
+    def sample_explorations(self, n: int) -> np.ndarray:
+        """Draw ``n`` different exploratory values in one vectorised call.
+
+        The multi-replica path uses this to give every replica its own sample
+        without paying one Python call per site and replica.
+        """
+        count = int(n)
+        if count <= 0:
+            return np.empty(0, dtype=np.float64)
+        if count == 1:
+            return np.asarray([self.sample_exploration()], dtype=np.float64)
+        values = self.rng.normal(
+            self.mean, max(1e-6, self.sigma), size=count)
+        return np.clip(values, self.min, self.max)
+
     def sigma_step(self, sample: float, mu_at_sample: float, sigma_at_sample: float,
                    advantage: float, lr_sigma: float = 0.005) -> float:
         """
@@ -89,6 +104,37 @@ class PersonaParam:
         new = float(np.clip(
             float(sigma_at_sample) * np.exp(
                 self.sigma_step(sample, mu_at_sample, sigma_at_sample, advantage, lr_sigma)),
+            self.sigma_min, self.sigma_max))
+        self.sigma = new
+        return new
+
+    def update_sigma_batch(self, samples, mu_at_sample: float,
+                           sigma_at_sample: float, advantages,
+                           lr_sigma: float = 0.005,
+                           weights=None) -> float:
+        """Weighted mean of several sampling-time log-σ steps.
+
+        Used by the multi-replica merge: every replica contributes its own
+        ``sigma_step`` and the policy sigma receives the weighted mean once.
+        """
+        samples = list(samples)
+        advantages = list(advantages)
+        if len(samples) != len(advantages):
+            raise ValueError("samples and advantages must have equal length")
+        if not samples:
+            return float(self.sigma)
+        steps = [self.sigma_step(s, mu_at_sample, sigma_at_sample, a, lr_sigma)
+                 for s, a in zip(samples, advantages)]
+        if weights is None:
+            dlog = float(np.mean(steps))
+        else:
+            w = np.asarray(weights, dtype=np.float64)
+            total = float(w.sum())
+            dlog = (float(np.dot(w, steps)) / total
+                    if np.isfinite(total) and total > 0.0
+                    else float(np.mean(steps)))
+        new = float(np.clip(
+            float(sigma_at_sample) * np.exp(dlog),
             self.sigma_min, self.sigma_max))
         self.sigma = new
         return new

@@ -1,11 +1,15 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List
 
 import numpy as np
 
-from persona.registry import Registry
-from persona.agent import Agent
 from model.adapter import CPGInput
+
+if TYPE_CHECKING:
+    from persona.agent import Agent
+    from persona.registry import Registry
 
 
 class MocapTargetDriver:
@@ -335,6 +339,7 @@ class Personalizer:
                 output=np.array([cpg_in.ankle_angle_m_L, cpg_in.ankle_angle_m_R]),
                 target=np.array([tgt_L, tgt_R]),
                 phase=[cpg_in.phase_L, cpg_in.phase_R],
+                advantage_phase=[cpg_in.phase_ref_L, cpg_in.phase_ref_R],
                 t_ms=self.cpg.current_time_ms,
             )
 
@@ -437,6 +442,285 @@ class Personalizer:
         if log.stdp:
             log.stdp["time_ms"] = np.asarray(log.time_ms, dtype=np.float64)
             log.stdp["sample_time_ms"] = np.asarray(log.stdp["sample_time_ms"], dtype=np.float64)
+            for grp in ("delta", "n", "weight_mean", "weight_min", "weight_max"):
+                log.stdp[grp] = {k: np.asarray(v, dtype=np.float64)
+                                 for k, v in log.stdp[grp].items()}
+            log.stdp["final_weights"] = self.registry.final_plastic_weights()
+
+        return log.finalize()
+
+
+class ParallelPersonalizer:
+    """Two-stage loop over N independent CPG/MuJoCo replicas.
+
+    One NEST kernel steps all replicas at once; the rigs are stepped in a
+    thread pool. Numeric logs are the mean across replicas, and the step hook
+    sees replica 0.
+    """
+
+    def __init__(self,
+                 registries,
+                 cpg: Any,
+                 rigs,
+                 agent: Any,
+                 target_driver: Any,
+                 dt_ms: float = 10.0,
+                 eps_pose: float = 0.08,
+                 pose_hold_steps: int = 20,
+                 loss_stop: float = 0.05,
+                 loss_window: int = 30,
+                 max_steps: int = 1000,
+                 log_every: int = 20,
+                 stdp_every: int = 100,
+                 verbose: bool = True,
+                 belt_mps: float = 0.2,
+                 belt_start_step: int = 20,
+                 belt_ramp_steps: int = 50):
+        from concurrent.futures import ThreadPoolExecutor
+
+        self.registries = list(registries)
+        if not self.registries:
+            raise ValueError("ParallelPersonalizer needs at least one registry")
+        self.registry = self.registries[0]
+        self.cpg = cpg
+        self.rigs = list(rigs)
+        if len(self.rigs) != len(self.registries):
+            raise ValueError("one rig per registry is required")
+        self.agent = agent
+        self.target_driver = target_driver
+        self.dt_ms = float(dt_ms)
+        self.eps_pose = float(eps_pose)
+        self.pose_hold_steps = int(pose_hold_steps)
+        self.loss_stop = float(loss_stop)
+        self.loss_window = int(loss_window)
+        self.max_steps = int(max_steps)
+        self.log_every = int(log_every)
+        self.stdp_every = int(stdp_every)
+        self.verbose = bool(verbose)
+        self.belt_mps = float(belt_mps)
+        self.belt_start_step = int(belt_start_step)
+        self.belt_ramp_steps = max(1, int(belt_ramp_steps))
+        self.rig_pool = ThreadPoolExecutor(
+            max_workers=len(self.rigs), thread_name_prefix="persona-rig")
+        self._seen_apply_errors: set[tuple] = set()
+
+    def close(self) -> None:
+        self.rig_pool.shutdown(wait=True)
+        close = getattr(self.agent, "close", None)
+        if close is not None:
+            close()
+
+    def _log_new_apply_errors(self):
+        for replica, registry in enumerate(self.registries):
+            for key, msg in registry.last_apply_errors:
+                entry = (replica, str(key), str(msg))
+                if entry not in self._seen_apply_errors:
+                    self._seen_apply_errors.add(entry)
+                    print(f"[apply-error r{replica}] {entry[1]}: {entry[2]}",
+                          flush=True)
+
+    def _step_rigs(self, cpg_outputs, rig_kwargs):
+        futures = [
+            self.rig_pool.submit(rig.step, output, **rig_kwargs)
+            for rig, output in zip(self.rigs, cpg_outputs)
+        ]
+        return [future.result() for future in futures]
+
+    @staticmethod
+    def _mean(values):
+        return float(np.mean(np.asarray(values, dtype=np.float64)))
+
+    def _log_progress(self, log: RunLog, stage: str):
+        if not self.verbose:
+            return
+        i = len(log.stage) - 1
+        print(
+            f"[{log.time_ms[i]:7.0f} ms] {stage:5s} "
+            f"| L mean {log.ankle_model_L[i]:+.3f} tgt {log.ankle_target_L[i]:+.3f} "
+            f"| R mean {log.ankle_model_R[i]:+.3f} tgt {log.ankle_target_R[i]:+.3f} "
+            f"| loss {log.loss[i]:.4f} adv {log.advantage[i]:+.4f} "
+            f"| drive E/F {log.mus_E_L[i]:.2f}/{log.mus_F_L[i]:.2f} "
+            f"| CUT {log.cut_L[i]:.0f} Ia {log.ia_rate_E_L[i]:.0f} "
+            f"Ib {log.ib_rate_E_L[i]:.0f}",
+            flush=True)
+
+    def _log_plastic(self, log: RunLog, cpg_outputs, t_ms: float):
+        st = log.stdp
+        if "delta" not in st:
+            st.update({"delta": {}, "n": {}, "sample_time_ms": [],
+                       "weight_mean": {}, "weight_min": {}, "weight_max": {}})
+        plastic = [
+            ((getattr(output, "extra", None) or {}).get("plastic") or {})
+            for output in cpg_outputs
+        ]
+        keys = set()
+        for item in plastic:
+            keys.update((item.get("delta") or {}).keys())
+        for key in sorted(keys):
+            deltas = [float(item.get("delta", {}).get(key, 0.0))
+                      for item in plastic]
+            counts = [int(item.get("n", {}).get(key, 0)) for item in plastic]
+            st["delta"].setdefault(key, []).append(float(np.mean(deltas)))
+            st["n"].setdefault(key, []).append(int(np.sum(counts)))
+        if self.stdp_every > 0 and len(log.stage) % self.stdp_every == 0:
+            st["sample_time_ms"].append(float(t_ms))
+            for key, stats in self.registry.sample_plastic_weight_stats().items():
+                st["weight_mean"].setdefault(key, []).append(stats["mean"])
+                st["weight_min"].setdefault(key, []).append(stats["min"])
+                st["weight_max"].setdefault(key, []).append(stats["max"])
+
+    def run(self, step_hook=None, wall_clock_s: float | None = None,
+            pose_max_steps: int = 0, realize_every_k: int = 1) -> RunLog:
+        import time
+
+        t_start = time.monotonic()
+        k_realize = max(1, int(realize_every_k))
+        log = RunLog()
+        cpg_inputs = [CPGInput() for _ in self.rigs]
+        stage = "pose"
+        pose_ok = 0
+        pose_steps = 0
+        self._log_new_apply_errors()
+
+        for step in range(self.max_steps):
+            if step >= self.belt_start_step:
+                frac = min(1.0, (step - self.belt_start_step + 1)
+                           / self.belt_ramp_steps)
+                for rig in self.rigs:
+                    if hasattr(rig, "set_treadmill_surfacevel"):
+                        rig.set_treadmill_surfacevel(self.belt_mps * frac)
+
+            if stage == "pose":
+                rig_kwargs = self.target_driver.target(0.0)
+            else:
+                rig_kwargs = self.target_driver.target(self.cpg.current_time_ms)
+            tgt_L = rig_kwargs["target_ankle_L"]
+            tgt_R = rig_kwargs["target_ankle_R"]
+
+            if step % k_realize == 0:
+                actions = self.agent.sample_actions(
+                    t_ms=self.cpg.current_time_ms)
+                self.agent.apply_actions(actions)
+                self._log_new_apply_errors()
+
+            self.cpg.update(cpg_inputs)
+            cpg_outputs = self.cpg.step()
+            cpg_inputs = self._step_rigs(cpg_outputs, rig_kwargs)
+
+            outputs = [
+                np.array([inp.ankle_angle_m_L, inp.ankle_angle_m_R])
+                for inp in cpg_inputs
+            ]
+            targets = [np.array([tgt_L, tgt_R]) for _ in cpg_inputs]
+            ref_phases = [
+                (inp.phase_ref_L, inp.phase_ref_R) for inp in cpg_inputs
+            ]
+            model_phases = [
+                (inp.phase_L, inp.phase_R) for inp in cpg_inputs
+            ]
+            res = self.agent.step(
+                outputs=outputs, targets=targets,
+                ref_phases=ref_phases, model_phases=model_phases,
+                t_ms=self.cpg.current_time_ms)
+
+            first_in, first_out = cpg_inputs[0], cpg_outputs[0]
+            log.time_ms.append(self.cpg.current_time_ms)
+            log.stage.append(stage)
+            log.ankle_model_L.append(self._mean(
+                [inp.ankle_angle_m_L for inp in cpg_inputs]))
+            log.ankle_model_R.append(self._mean(
+                [inp.ankle_angle_m_R for inp in cpg_inputs]))
+            log.ankle_target_L.append(tgt_L)
+            log.ankle_target_R.append(tgt_R)
+            log.loss.append(float(res["loss"]))
+            adv = np.asarray(res["advantage_vector"], dtype=np.float64).ravel()
+            log.advantage.append(float(np.mean(adv)) if adv.size else 0.0)
+            log.adv_L.append(float(adv[0]) if adv.size > 0 else 0.0)
+            log.adv_R.append(float(adv[1]) if adv.size > 1 else 0.0)
+            log.phase_L.append(first_in.phase_L)
+            log.phase_R.append(first_in.phase_R)
+            log.phase_ref_L.append(first_in.phase_ref_L)
+            log.phase_ref_R.append(first_in.phase_ref_R)
+            log.mus_E_L.append(self._mean([o.mus_E_L for o in cpg_outputs]))
+            log.mus_F_L.append(self._mean([o.mus_F_L for o in cpg_outputs]))
+            log.mus_E_R.append(self._mean([o.mus_E_R for o in cpg_outputs]))
+            log.mus_F_R.append(self._mean([o.mus_F_R for o in cpg_outputs]))
+            rg = [
+                ((getattr(o, "extra", None) or {}).get("rg") or {})
+                for o in cpg_outputs
+            ]
+            for key, target in (("rg_e_L", "rg_e_L"), ("rg_f_L", "rg_f_L"),
+                                ("rg_e_R", "rg_e_R"), ("rg_f_R", "rg_f_R")):
+                getattr(log, target).append(self._mean(
+                    [item.get(key, 0.0) for item in rg]))
+
+            numeric_inputs = {
+                "cut_L": "cut_L", "cut_R": "cut_R",
+                "ia_len_E_L": "ia_len_E_L", "ia_vel_E_L": "ia_vel_E_L",
+                "ia_rate_E_L": "ia_rate_E_L",
+                "ia_len_F_L": "ia_len_F_L", "ia_vel_F_L": "ia_vel_F_L",
+                "ia_rate_F_L": "ia_rate_F_L",
+                "ia_len_E_R": "ia_len_E_R", "ia_vel_E_R": "ia_vel_E_R",
+                "ia_rate_E_R": "ia_rate_E_R",
+                "ia_len_F_R": "ia_len_F_R", "ia_vel_F_R": "ia_vel_F_R",
+                "ia_rate_F_R": "ia_rate_F_R",
+                "ib_act_E_L": "ib_act_E_L", "ib_force_E_L": "ib_force_E_L",
+                "ib_rate_E_L": "ib_rate_E_L",
+                "ib_act_F_L": "ib_act_F_L", "ib_force_F_L": "ib_force_F_L",
+                "ib_rate_F_L": "ib_rate_F_L",
+                "ib_act_E_R": "ib_act_E_R", "ib_force_E_R": "ib_force_E_R",
+                "ib_rate_E_R": "ib_rate_E_R",
+                "ib_act_F_R": "ib_act_F_R", "ib_force_F_R": "ib_force_F_R",
+                "ib_rate_F_R": "ib_rate_F_R",
+                "hip_angle_m_L": "hip_model_L", "hip_angle_m_R": "hip_model_R",
+                "knee_angle_m_L": "knee_model_L", "knee_angle_m_R": "knee_model_R",
+                "hip_angle_ref_L": "hip_ref_L", "hip_angle_ref_R": "hip_ref_R",
+                "knee_angle_ref_L": "knee_ref_L", "knee_angle_ref_R": "knee_ref_R",
+                "ankle_angle_ref_L": "ankle_ref_L",
+                "ankle_angle_ref_R": "ankle_ref_R",
+                "contact_m_L": "contact_m_L", "contact_m_R": "contact_m_R",
+                "contact_ref_L": "contact_ref_L",
+                "contact_ref_R": "contact_ref_R",
+                "foot_x_m_L": "foot_x_m_L", "foot_x_m_R": "foot_x_m_R",
+                "foot_z_m_L": "foot_z_m_L", "foot_z_m_R": "foot_z_m_R",
+                "foot_z_ref_L": "foot_z_ref_L",
+                "foot_z_ref_R": "foot_z_ref_R",
+            }
+            for source, target in numeric_inputs.items():
+                getattr(log, target).append(self._mean(
+                    [getattr(inp, source) for inp in cpg_inputs]))
+
+            self._log_plastic(log, cpg_outputs, self.cpg.current_time_ms)
+
+            if step_hook is not None:
+                step_hook(step, log, first_in, first_out, stage)
+
+            if self.log_every > 0 and (len(log.stage) % self.log_every == 0
+                                       or len(log.stage) == 1):
+                self._log_progress(log, stage)
+
+            mean_L = self._mean([inp.ankle_angle_m_L for inp in cpg_inputs])
+            mean_R = self._mean([inp.ankle_angle_m_R for inp in cpg_inputs])
+            if stage == "pose":
+                err = max(abs(mean_L - tgt_L), abs(mean_R - tgt_R))
+                pose_ok = pose_ok + 1 if err < self.eps_pose else 0
+                pose_steps += 1
+                if pose_ok >= self.pose_hold_steps or \
+                        (pose_max_steps and pose_steps >= pose_max_steps):
+                    stage = "track"
+            else:
+                if len(log.loss) >= self.loss_window and \
+                        float(np.mean(log.loss[-self.loss_window:])) < self.loss_stop:
+                    break
+
+            if wall_clock_s is not None and \
+                    time.monotonic() - t_start >= wall_clock_s:
+                break
+
+        if log.stdp:
+            log.stdp["time_ms"] = np.asarray(log.time_ms, dtype=np.float64)
+            log.stdp["sample_time_ms"] = np.asarray(
+                log.stdp["sample_time_ms"], dtype=np.float64)
             for grp in ("delta", "n", "weight_mean", "weight_min", "weight_max"):
                 log.stdp[grp] = {k: np.asarray(v, dtype=np.float64)
                                  for k, v in log.stdp[grp].items()}
