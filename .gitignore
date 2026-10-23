@@ -1,5 +1,6 @@
 data/
 .superpowers/
+agent_sessions/
 .idea/
 __pycache__/
 *.pyc
@@ -27,3 +28,6 @@ fastrun/
 run_output/
 h5out/
 test_results/
+
+# README is under review; keep local edits out of version control.
+README.md
