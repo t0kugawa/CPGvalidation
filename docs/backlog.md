@@ -4,7 +4,8 @@
   E/F command reciprocal and audit control authority (2 s post-fix check)
 * Phase/frequency entrainment and bilateral symmetry (R phase agreement ~0.12)
 * Per-limb/phase credit assignment (stop summing anti-correlated advantages)
-* 120 s game-on validation with `--realize-every-k 10` and a seed sweep
+* 120 s game-on validation with `--realize-every-k 1` and a seed sweep
+  (`k=10` is rejected for learning: 2 s last10 `0.276` vs `1.001`)
 
 **Medium**
 

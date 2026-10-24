@@ -53,13 +53,12 @@ design records remain valid.
 ## Commands
 
 ```powershell
-# Fast current run (3x faster than realize-every-k 1 in the short sweep)
+# Default learning/validation run (full realization)
 python run_2min.py --out experiments/current/2min_120s --no-render `
-  --duration-s 120 --snapshot-s 60 --realize-every-k 10
-
-# Full-fidelity realization
-python run_2min.py --out experiments/current/2min_120s_k1 --no-render `
   --duration-s 120 --snapshot-s 60 --realize-every-k 1
+
+# k=10 is a speed microbenchmark only; it does not preserve learning quality.
+# See docs/reports/single_cpg_speed.md.
 
 # Tests
 python -m pytest -q

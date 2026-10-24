@@ -28,7 +28,7 @@ NEST threads are slower on this network: the Python/NEST API
 (`apply_explored_parameters`, recorders, `GetConnections`) is serial, and the
 per-thread work is too small. **Keep `--nest-threads 1`.**
 
-## Real optimization: realize less often
+## Real optimization: realize less often (speed only; currently rejected)
 
 `--realize-every-k 10` samples/realizes/records every 10th control step while
 the strategy still updates every dt:
@@ -38,7 +38,14 @@ the strategy still updates every dt:
 --realize-every-k 10: 50 steps  14.33 s   3.489 steps/s   last10 loss 0.200
 ```
 
-That is the practical speedup without extra CPG/MuJoCo resources.
+**2026-10-24 update: k=10 is rejected for learning/validation.** In a matched
+2 s run it raised last-10 loss from `0.276` (k=1) to `1.001` (k=10) and drove
+the right ankle to the upper stop while the target was at the lower stop. The
+120 s k=10 run also ends with both E/F saturated at 1.0. Use k=1 for learning;
+keep k=10 only as a speed microbenchmark.
+
+That is the practical speedup without extra CPG/MuJoCo resources, but not yet
+acceptable as the learning path.
 
 ## Next serial optimizations, in order
 
@@ -56,7 +63,7 @@ That is the practical speedup without extra CPG/MuJoCo resources.
 ## Recommended run
 
 ```powershell
-python run_2min.py --out experiments/current/2min_120s --no-render --duration-s 120 --snapshot-s 60 --realize-every-k 10
+python run_2min.py --out experiments/current/2min_120s --no-render --duration-s 120 --snapshot-s 60 --realize-every-k 1
 ```
 
 Defaults: `--game selected`, `--nest-threads 1`, one CPG, one MuJoCo.

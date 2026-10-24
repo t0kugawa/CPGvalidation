@@ -72,13 +72,13 @@ sites into functional modules (phase/frequency, amplitude, bilateral coupling,
 stiffness), and test whether fewer, structured players are more stable than
 137 site-level players.
 
-## 7. `realize_every_k` needs a long-run check
+## 7. `realize_every_k` is rejected for learning
 
-`--realize-every-k 10` gave a 3x speedup and better short-window loss
-(`14.33 s` vs `42.60 s` for 50 steps; last10 `0.200` vs `0.260`). It changes
-the algorithm: the strategy updates every dt while realization/recording is
-every k. Validate it on a full 120 s run against `k=1` before adopting it as a
-default.
+`--realize-every-k 10` gave a 3x speedup in the 0.5 s microbenchmark, but a
+matched 2 s A/B on the fixed model degraded last-10 loss from `0.276` (k=1) to
+`1.001` (k=10) and drove the right ankle to the upper stop. The 120 s k=10 run
+ends with both E/F saturated at 1.0. Use k=1 for learning/validation; k=10 is a
+speed-only probe until the stale-realization effect is understood.
 
 ## 8. Classical homeostasis with attractor parameters
 
@@ -90,7 +90,7 @@ bands, consistent with the accepted design.
 ## Immediate next step
 
 After this MuJoCo fix is committed, run the 120 s selected-game validation with
-one CPG/MuJoCo and `--realize-every-k 10`, then inspect:
+one CPG/MuJoCo and `--realize-every-k 1`, then inspect:
 
 - no ankle outside `[0.19, 1.76]`;
 - the fraction of steps with both E/F saturated at 1.0;

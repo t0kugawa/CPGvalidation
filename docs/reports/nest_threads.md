@@ -21,4 +21,7 @@ Result: NEST threading the single CPG is slower. Keep `--nest-threads 1`.
 | 1 | 42.60 s | 1.174 | 0.260 |
 | 10 | **14.33 s** | **3.489** | **0.200** |
 
-`--realize-every-k 10` is the practical speedup with one CPG/MuJoCo.
+`--realize-every-k 10` is **not** acceptable for learning/validation: the
+matched 2 s run degraded last-10 loss from `0.276` (k=1) to `1.001` and drove
+the right ankle to the upper stop. Keep k=1; k=10 is a speed microbenchmark
+only.
