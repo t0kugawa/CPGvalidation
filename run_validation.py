@@ -108,7 +108,7 @@ def run(duration_s, view, width, height, fps, out_dir,
         resolution_ms=DEFAULT_RESOLUTION_MS, cut_multisite=False,
         game: GameConfig | None = None, seed: int = 0,
         lr_mode: str = "constant", lr_start: float = 0.03,
-        lr_end: float | None = None, threads=1):
+        lr_end: float | None = None, nest_threads=1):
     os.makedirs(out_dir, exist_ok=True)
     steps = int(round(duration_s / (DT_MS / 1000.0)))
     n_frames = int(round(duration_s * fps))
@@ -123,17 +123,17 @@ def run(duration_s, view, width, height, fps, out_dir,
         belt_mode=belt_mode, loop=True, tau_mem_s=tau_mem_s,
         resolution_ms=resolution_ms, cut_multisite=cut_multisite,
         game=game, seed=seed, lr_mode=lr_mode, lr_start=lr_start,
-        lr_end=lr_end, threads=threads)
+        lr_end=lr_end, nest_threads=nest_threads)
     build_s = time.perf_counter() - t_build0
-    print(f"[timing] threads={int(threads)} build_s={build_s:.2f}", flush=True)
+    print(f"[timing] nest_threads={int(nest_threads)} build_s={build_s:.2f}",
+          flush=True)
     pers.belt_mps = float(belt_mps)
     pers.belt_start_step = int(round(belt_start_s / (DT_MS / 1000.0)))
     pers.belt_ramp_steps = max(1, int(round(belt_ramp_s / (DT_MS / 1000.0))))
     pers.log_every = 100
     pers.stdp_every = 20
     agent = pers.agent
-    # ParallelPersonalizer owns a list of rigs; the single-thread path owns one.
-    rig = getattr(pers, "rig", None) or pers.rigs[0]
+    rig = pers.rig
 
     def _meta(step, log):
         return {"duration_s": float(duration_s), "dt_ms": float(DT_MS),
@@ -179,9 +179,8 @@ def run(duration_s, view, width, height, fps, out_dir,
 
     run_s = time.perf_counter() - t_run0
     n_done = int(len(log.time_ms))
-    print(f"[timing] threads={int(threads)} steps={n_done} run_s={run_s:.2f} "
-          f"steps_per_s={n_done / max(run_s, 1e-9):.3f} "
-          f"replica_steps_per_s={n_done * int(threads) / max(run_s, 1e-9):.3f}",
+    print(f"[timing] nest_threads={int(nest_threads)} steps={n_done} "
+          f"run_s={run_s:.2f} steps_per_s={n_done / max(run_s, 1e-9):.3f}",
           flush=True)
 
     try:
@@ -294,22 +293,21 @@ if __name__ == "__main__":
                          "per plantar site (changes the PERSONA dimension)")
     ap.add_argument("--fast", action="store_true",
                     help="quick low-res short run for iteration")
-    ap.add_argument("--threads", type=int, default=1,
-                    help="independent CPG/MuJoCo replicas and NEST local "
-                         "threads (>= 2 uses the parallel MultiAgent path; "
-                         "the current thread path is experimental and slow)")
     ap.add_argument("--game", choices=("none", "selected"), default="selected",
                     help="conserved-stack game; 'selected' uses "
                          "GameConfig.current_best()")
     ap.add_argument("--seed", type=int, default=0,
                     help="run seed (also the NEST rng_seed)")
+    ap.add_argument("--nest-threads", type=int, default=1,
+                    help="NEST local threads for the single CPG/MuJoCo run; "
+                         "does not build replicas")
     ap.add_argument("--lr-mode", choices=("constant", "cosine"),
                     default="constant")
     ap.add_argument("--lr-start", type=float, default=0.03)
     ap.add_argument("--lr-end", type=float, default=None)
     args = ap.parse_args()
-    if args.threads < 1:
-        ap.error("--threads must be >= 1")
+    if args.nest_threads < 1:
+        ap.error("--nest-threads must be >= 1")
     if args.lr_mode == "cosine" and args.lr_end is None:
         ap.error("--lr-end is required with --lr-mode cosine")
     if args.fast:
@@ -332,4 +330,4 @@ if __name__ == "__main__":
         cut_multisite=args.cut_multisite,
         game=(GameConfig.current_best() if args.game == "selected" else None),
         seed=args.seed, lr_mode=args.lr_mode, lr_start=args.lr_start,
-        lr_end=args.lr_end, threads=args.threads)
+        lr_end=args.lr_end, nest_threads=args.nest_threads)

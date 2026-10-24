@@ -1,80 +1,62 @@
-# True multithread / parallel PERSONA — implementation plan
+# Single-CPG / single-MuJoCo threading and speed plan
 
-## Why the current `--threads N` path is slow
+## Constraint
 
-Measured on the same 0.5 s, FINAL-size workload:
-
-```text
-threads=1  build 5.46 s   run 41.31 s / 50 steps   1.21 steps/s
-threads=6  build 142.38 s (killed before the run)
-```
-
-`cProfile` of the 6-thread build/one step:
+No multiple CPGs and no multiple MuJoCo models. Parallel **samples** would
+require a separate network state per sample, so that path is removed. The only
+threading that applies is NEST `local_num_threads` on the **single** CPG:
 
 ```text
-build_parallel_personalizer   157.4 s
-  finalize_connections        140.3 s   (1,374 nest.GetConnections, 138.7 s)
-one apply_actions step         28.7 s   (6 x apply_explored_parameters; 26.9 s in nest.set)
+one CPG (NEST)  ── local_num_threads = M ── neurons/synapses split across M threads
+one MuJoCo      ── serial
+one PERSONA sample per step ── applied to that one CPG
 ```
 
-The thread path is not parallel for the expensive work. NEST's Python API
-(`GetConnections`, `set`, `Connect`) is called from the main thread and the GIL
-serializes the per-replica Python loops. `local_num_threads` only helps
-`nest.Simulate`; it does not help parameter application or connection
-discovery. The `ParallelPersonalizer` thread pool parallelizes only the MuJoCo
-rigs, which are a small fraction of the step.
+The sampled parameters are shared by all threads; each thread owns a subset of
+the one network, not another CPG.
 
-## Step 1 — quick wins, no architecture change
+## Measured on one CPG (0.5 s, 50 steps, selected game)
 
-1. **Cache connection handles.** `nest.Connect` returns a `SynapseCollection`;
-   store it on the `Connection`/adapter and reuse it. Stop re-querying every
-   projection with `nest.GetConnections` in `finalize_connections`. This is the
-   140 s build cost.
-2. **Split the flags.** Replace the single `--threads` with:
-   - `--replicas N` — independent CPG/MuJoCo replicas;
-   - `--nest-threads M` — NEST `local_num_threads` (default 1).
-   The current code conflates them; `local_num_threads=6` adds contention
-   without parallelizing the API calls.
-3. **Reduce realization frequency.** `--realize-every-k 10` samples/realizes/
-   records every 10th step while the strategy still updates every dt. This cuts
-   the 28.7 s `apply_actions` cost roughly 10x.
-4. **Apply only changed sites.** `apply_explored_parameters` currently re-sets
-   every site on every replica every realized step. Skip frozen sites (already
-   done in the agent) and batch the remaining `set` calls.
+| NEST threads | build | run | steps/s |
+|---:|---:|---:|---:|
+| **1** | **5.39 s** | **42.60 s** | **1.174** |
+| 2 | 4.29 s | 65.29 s | 0.766 |
+| 4 | 22.37 s | 93.06 s | 0.537 |
+| 6 | 34.98 s | 95.60 s | 0.523 |
 
-## Step 2 — process-per-replica (the real parallel path)
+NEST threads are slower on this network: the Python/NEST API
+(`apply_explored_parameters`, recorders, `GetConnections`) is serial, and the
+per-thread work is too small. **Keep `--nest-threads 1`.**
 
-Threads cannot bypass the GIL/NEST API. Use processes:
+## Real optimization: realize less often
 
-- Spawn one worker process per replica (`multiprocessing` with `spawn`, never
-  `fork`; NEST is one kernel per process).
-- Each worker owns one registry/CPG/MuJoCo rig and one `FisherMatrix`
-  (`F/X̄/G`) and runs its own sample/realize/step loop.
-- The parent owns the shared policy (`PersonaParam.mean/sigma`) and the merge.
-- Use `multiprocessing.Queue`/`shared_memory` for:
-  - policy mean/sigma + sampled actions (parent → worker);
-  - per-replica sufficient statistics `F`, `X̄`, `G`, `steps`, `noise_scales`
-    and current sites/advantages (worker → parent) at reference-phase
-    boundaries.
-- The parent merges with `MultiAgent._merge` (already implemented) and
-  broadcasts the merged policy. The game/phase logic stays in the parent.
-- Pin one CPU per worker; keep BLAS single-threaded per worker.
+`--realize-every-k 10` samples/realizes/records every 10th control step while
+the strategy still updates every dt:
 
-## Step 3 — benchmark and verify
+```text
+--realize-every-k 1 : 50 steps  42.60 s   1.174 steps/s   last10 loss 0.260
+--realize-every-k 10: 50 steps  14.33 s   3.489 steps/s   last10 loss 0.200
+```
 
-- Measure build, per-step, and total wall time for 1, 2, 4, 8 replicas.
-- Report `replica-steps/s` as well as `steps/s`.
-- Verify the same seed gives reproducible H5 output, the M-F/Renshaw freezes
-  hold, the game diagnostics are present, and the merge weights/advantages are
-  identical to the thread path for a fixed schedule.
+That is the practical speedup without extra CPG/MuJoCo resources.
 
-## Practical now
+## Next serial optimizations, in order
 
-Use the fast single-thread path with the selected game:
+1. Cache/batch connection handles: avoid re-querying every projection with
+   `nest.GetConnections` in `finalize_connections`. This was the dominant cost
+   in the replica experiment (140 s for 6 replicas); on one CPG the build is
+   only ~5 s, so it is a smaller win.
+2. Skip frozen sites in `apply_explored_parameters` when both mean and sigma
+   are pinned (M-F Izhikevich sites).
+3. Batch `SynapseCollection.set` calls where a projection shares one parameter
+   array; avoid per-site `set` when nothing changed.
+4. Keep `local_num_threads=1`; the one-CPG measurement above shows the
+   overhead dominates.
+
+## Recommended run
 
 ```powershell
-python run_2min.py --out validation_2min_game --no-render --duration-s 120 --snapshot-s 60
+python run_2min.py --out validation_2min_game --no-render --duration-s 120 --snapshot-s 60 --realize-every-k 10
 ```
 
-`--game selected` and `--threads 1` are the defaults. Add
-`--realize-every-k 10` if wall time matters more than per-step fidelity.
+Defaults: `--game selected`, `--nest-threads 1`, one CPG, one MuJoCo.

@@ -15,11 +15,6 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--realize-every-k", type=int, default=1,
                     help="sample + realize + record the network every k steps "
                          "(strategy still updates every dt)")
-    ap.add_argument("--threads", type=validate_threads, default=1,
-                    help="NEST local threads and the number of independent "
-                         "PERSONA/CPG replicas. Each replica samples different "
-                         "parameters; strategies merge at reference phase "
-                         "changes. Results are reproducible for a fixed count.")
     ap.add_argument("--cut-multisite", action="store_true",
                     help="Option B: one CUT Poisson relay and STDP projection "
                          "per plantar site (changes the PERSONA dimension)")
@@ -35,6 +30,9 @@ def build_parser() -> argparse.ArgumentParser:
                          "GameConfig.current_best()")
     ap.add_argument("--seed", type=int, default=0,
                     help="run seed (also the NEST rng_seed)")
+    ap.add_argument("--nest-threads", type=validate_threads, default=1,
+                    help="NEST local threads for the single CPG/MuJoCo run; "
+                         "this does not build replicas")
     return ap
 
 
