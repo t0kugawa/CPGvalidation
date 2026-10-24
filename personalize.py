@@ -387,6 +387,8 @@ def run_personalization(reference_path: str = DEFAULT_REFERENCE,
                         lr_mode: str = "constant",
                         lr_start: float = 0.03,
                         lr_end: float | None = None,
+                        game: GameConfig | None = None,
+                        seed: int = 0,
                         threads: int = 1) -> dict:
     """
     Full experiment: build the loop, run the two-stage PERSONA optimization,
@@ -406,7 +408,7 @@ def run_personalization(reference_path: str = DEFAULT_REFERENCE,
         loss_stop=loss_stop, loss_window=loss_window, belt_mode=belt_mode,
         tau_mem_s=tau_mem_s, cut_multisite=cut_multisite,
         lr_mode=lr_mode, lr_start=lr_start, lr_end=lr_end,
-        threads=threads, **sizes)
+        game=game, seed=seed, threads=threads, **sizes)
     personalizer.verbose = verbose
     personalizer.log_every = log_every
 
@@ -490,13 +492,14 @@ def main(n_steps: int = 200, small: bool = False, output_dir: str | None = None,
          tau_mem_s: float = 2.0, realize_every_k: int = 1,
          cut_multisite: bool = False, lr_mode: str = "constant",
          lr_start: float = 0.03, lr_end: float | None = None,
+         game: GameConfig | None = None, seed: int = 0,
          threads: int = 1) -> dict:
     res = run_personalization(n_steps=n_steps, small=small, output_dir=output_dir,
                               verbose=verbose, log_every=log_every,
                               tau_mem_s=tau_mem_s, realize_every_k=realize_every_k,
                               cut_multisite=cut_multisite,
                               lr_mode=lr_mode, lr_start=lr_start, lr_end=lr_end,
-                              threads=threads)
+                              game=game, seed=seed, threads=threads)
     print(f"Steps: {res['n_steps_done']} (pose {res['n_pose']}, track {res['n_track']})")
     print(f"Final loss (last-20 mean): {res['final_loss']:.4f}")
     print(f"Acceptable: {res['acceptable']} | angle coverage: {res['angle_coverage']:.2f}")
@@ -510,4 +513,5 @@ if __name__ == "__main__":
          realize_every_k=args.realize_every_k,
          cut_multisite=args.cut_multisite,
          lr_mode=args.lr_mode, lr_start=args.lr_start, lr_end=args.lr_end,
-         threads=args.threads)
+         game=(GameConfig.current_best() if args.game == "selected" else None),
+         seed=args.seed, threads=args.threads)

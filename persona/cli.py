@@ -30,6 +30,11 @@ def build_parser() -> argparse.ArgumentParser:
                     help="initial mean learning rate (also the constant rate)")
     ap.add_argument("--lr-end", type=float, default=None,
                     help="target mean learning rate; required for cosine")
+    ap.add_argument("--game", choices=("none", "selected"), default="selected",
+                    help="conserved-stack game; 'selected' uses "
+                         "GameConfig.current_best()")
+    ap.add_argument("--seed", type=int, default=0,
+                    help="run seed (also the NEST rng_seed)")
     return ap
 
 

@@ -35,6 +35,7 @@ if BASE_DIR not in sys.path:
 import imageio
 
 from personalize import build_personalizer, DEFAULT_REFERENCE, DT_MS
+from persona.game import GameConfig
 from persona.validation import ValidationReport
 from persona.h5io import save_run
 from model.render import LegRenderer, hud_lines
@@ -105,12 +106,15 @@ def run(duration_s, view, width, height, fps, out_dir,
         pose_max_s=1.0, belt_mode="dataset", snapshot_s=900.0,
         tau_mem_s=2.0, realize_every_k=1,
         resolution_ms=DEFAULT_RESOLUTION_MS, cut_multisite=False,
-        threads=1):
+        game: GameConfig | None = None, seed: int = 0,
+        lr_mode: str = "constant", lr_start: float = 0.03,
+        lr_end: float | None = None, threads=1):
     os.makedirs(out_dir, exist_ok=True)
     steps = int(round(duration_s / (DT_MS / 1000.0)))
     n_frames = int(round(duration_s * fps))
     frame_steps = {int(round(k / (fps * (DT_MS / 1000.0)))) for k in range(n_frames)}
 
+    t_build0 = time.perf_counter()
     pers, loader = build_personalizer(
         reference_path=DEFAULT_REFERENCE,
         n_rg=n_rg, n_mn=n_mn, n_int=n_int, n_aff=n_aff, n_bs=n_bs,
@@ -118,7 +122,10 @@ def run(duration_s, view, width, height, fps, out_dir,
         loss_stop=1e-4, loss_window=20, w_scale=w_scale, ref_hz=ref_hz,
         belt_mode=belt_mode, loop=True, tau_mem_s=tau_mem_s,
         resolution_ms=resolution_ms, cut_multisite=cut_multisite,
-        threads=threads)
+        game=game, seed=seed, lr_mode=lr_mode, lr_start=lr_start,
+        lr_end=lr_end, threads=threads)
+    build_s = time.perf_counter() - t_build0
+    print(f"[timing] threads={int(threads)} build_s={build_s:.2f}", flush=True)
     pers.belt_mps = float(belt_mps)
     pers.belt_start_step = int(round(belt_start_s / (DT_MS / 1000.0)))
     pers.belt_ramp_steps = max(1, int(round(belt_ramp_s / (DT_MS / 1000.0))))
@@ -152,6 +159,7 @@ def run(duration_s, view, width, height, fps, out_dir,
         snap.maybe(step, log, agent)
 
     status = {}
+    t_run0 = time.perf_counter()
     try:
         log = pers.run(step_hook=_hook, wall_clock_s=budget_s,
                        pose_max_steps=int(round(pose_max_s / (DT_MS / 1000.0))),
@@ -168,6 +176,13 @@ def run(duration_s, view, width, height, fps, out_dir,
                 renderer.close()
             except Exception:
                 pass
+
+    run_s = time.perf_counter() - t_run0
+    n_done = int(len(log.time_ms))
+    print(f"[timing] threads={int(threads)} steps={n_done} run_s={run_s:.2f} "
+          f"steps_per_s={n_done / max(run_s, 1e-9):.3f} "
+          f"replica_steps_per_s={n_done * int(threads) / max(run_s, 1e-9):.3f}",
+          flush=True)
 
     try:
         log.to_csv(os.path.join(out_dir, "run_log.csv"))
@@ -194,7 +209,9 @@ def run(duration_s, view, width, height, fps, out_dir,
                        "belt_ramp_s": float(belt_ramp_s),
                        "tau_mem_s": float(tau_mem_s),
                        "realize_every_k": int(realize_every_k),
-                       "pose_max_s": float(pose_max_s)})
+                       "pose_max_s": float(pose_max_s),
+                       "seed": int(seed),
+                       "game": "selected" if game is not None else "none"})
         status["run.h5"] = "ok"
     except Exception as e:
         status["run.h5"] = f"ERROR {e}"
@@ -277,12 +294,24 @@ if __name__ == "__main__":
                          "per plantar site (changes the PERSONA dimension)")
     ap.add_argument("--fast", action="store_true",
                     help="quick low-res short run for iteration")
-    ap.add_argument("--threads", type=int, default=2,
+    ap.add_argument("--threads", type=int, default=1,
                     help="independent CPG/MuJoCo replicas and NEST local "
-                         "threads (>= 2 uses the parallel MultiAgent path)")
+                         "threads (>= 2 uses the parallel MultiAgent path; "
+                         "the current thread path is experimental and slow)")
+    ap.add_argument("--game", choices=("none", "selected"), default="selected",
+                    help="conserved-stack game; 'selected' uses "
+                         "GameConfig.current_best()")
+    ap.add_argument("--seed", type=int, default=0,
+                    help="run seed (also the NEST rng_seed)")
+    ap.add_argument("--lr-mode", choices=("constant", "cosine"),
+                    default="constant")
+    ap.add_argument("--lr-start", type=float, default=0.03)
+    ap.add_argument("--lr-end", type=float, default=None)
     args = ap.parse_args()
     if args.threads < 1:
         ap.error("--threads must be >= 1")
+    if args.lr_mode == "cosine" and args.lr_end is None:
+        ap.error("--lr-end is required with --lr-mode cosine")
     if args.fast:
         args.duration_s = min(args.duration_s, 4.0)
         args.width, args.height, args.fps = 480, 270, 20
@@ -300,4 +329,7 @@ if __name__ == "__main__":
         snapshot_s=args.snapshot_s, tau_mem_s=args.tau_mem_s,
         realize_every_k=args.realize_every_k,
         resolution_ms=args.resolution_ms,
-        cut_multisite=args.cut_multisite, threads=args.threads)
+        cut_multisite=args.cut_multisite,
+        game=(GameConfig.current_best() if args.game == "selected" else None),
+        seed=args.seed, lr_mode=args.lr_mode, lr_start=args.lr_start,
+        lr_end=args.lr_end, threads=args.threads)
