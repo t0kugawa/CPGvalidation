@@ -1,5 +1,7 @@
 **High**
 
+* CPG drives both E/F to 1.0 and parks the ankle at a physical stop; make the
+  E/F command reciprocal and audit control authority (2 s post-fix check)
 * Phase/frequency entrainment and bilateral symmetry (R phase agreement ~0.12)
 * Per-limb/phase credit assignment (stop summing anti-correlated advantages)
 * 120 s game-on validation with `--realize-every-k 10` and a seed sweep
@@ -22,5 +24,7 @@
 
 **Done**
 
+* MuJoCo ankle geometry/range: SOL insertion moved to the calcaneus;
+  physical `[0.19, 1.76]` range; target clipping; regression tests
 * Single-CPG runtime: replica path removed; NEST threads measured slower; keep
   `--nest-threads 1`

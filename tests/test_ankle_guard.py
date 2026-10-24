@@ -1,9 +1,9 @@
-"""The ankle must not hyper-plantarflex past a physiological stop.
+"""The controlled ankle must stay on the physical ankle stop, not invert.
 
-With a low muscle drive the controlled ankle collapsed onto the old wide range
-([-1.0, 2.6] rad) and the soft limit let qpos reach +2.97 rad, so the paw
-visually trailed behind the knee. The guard narrows both ankles to the trial's
-mocap envelope plus a small margin and stiffens the joint limit.
+The old guard narrowed the joint to the trial's raw mocap min/max. A single
+marker glitch opened it to about -0.196 rad, so the muscle-driven ankle could
+park upside down. The production model now uses the OpenSim-derived physical
+range in ``model_cfg.ANKLE_RANGE_RAD`` and the loader clips to the same range.
 """
 import os
 
@@ -14,7 +14,7 @@ import pytest
 from loader.mocap import MocapLoader
 from model.adapter import CPGOutput
 from model.leg import Leg
-from model.model_cfg import ANKLE_RANGE_MARGIN_RAD, TREADMILL_PENETRATION_M
+from model.model_cfg import ANKLE_RANGE_RAD, TREADMILL_PENETRATION_M
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 XML = os.path.join(HERE, "dual_rat_hindlimb.xml")
@@ -60,8 +60,7 @@ def _build_guarded_leg(trial):
         foot = float(np.mean(trial[f"seg_foot_{side}"])) / 1000.0
         leg.set_limb_lengths("m", side, thigh, shank, foot)
         leg.set_limb_lengths("ref", side, thigh, shank, foot)
-    lo = min(float(np.min(trial[f"ankle_{s}"][:200])) for s in "LR") - ANKLE_RANGE_MARGIN_RAD
-    hi = max(float(np.max(trial[f"ankle_{s}"][:200])) for s in "LR") + ANKLE_RANGE_MARGIN_RAD
+    lo, hi = ANKLE_RANGE_RAD
     leg.set_ankle_range(lo, hi)
     hip_x = {s: (trial[f"hip_x_{s}"] - np.mean(trial[f"hip_x_{s}"])) / 1000.0
              for s in "LR"}

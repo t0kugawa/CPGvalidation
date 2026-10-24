@@ -25,7 +25,7 @@ def test_sides_driven_independently():
     leg.set_treadmill_height(-1.0)  # keep the target foot out of ground contact
     out = CPGOutput()
     for _ in range(60):
-        ci = leg.step(out, target_ankle_L=0.4, target_ankle_R=-0.2)
+        ci = leg.step(out, target_ankle_L=0.4, target_ankle_R=0.3)
     assert abs(ci.ankle_angle_ref_L - 0.4) < 0.05
-    assert abs(ci.ankle_angle_ref_R - (-0.2)) < 0.05
-    assert abs(ci.ankle_angle_ref_L - ci.ankle_angle_ref_R) > 0.3
+    assert abs(ci.ankle_angle_ref_R - 0.3) < 0.05
+    assert abs(ci.ankle_angle_ref_L - ci.ankle_angle_ref_R) > 0.05

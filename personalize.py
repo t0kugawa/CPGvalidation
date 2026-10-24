@@ -22,7 +22,7 @@ from t2xcpg.cpg import L2CPG
 from model.leg import Leg as MuJoCo_Leg
 from loader.mocap import MocapLoader, treadmill_surfacevel
 from loader.stats import StatsLoader, LocomotionMetrics
-from model.model_cfg import ANKLE_RANGE_MARGIN_RAD, TREADMILL_PENETRATION_M
+from model.model_cfg import TREADMILL_PENETRATION_M
 from persona.parameter import reset_rng_stream
 from persona.schedule import resolve_lr_schedule
 from persona.cli import build_parser as build_parser
@@ -128,9 +128,10 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
     belt = fast if loader.meta.condition != "T" else slow
     rig.set_treadmill_surfacevel(belt)
     angles = loader.resample()
-    n_guard = min(int(max_steps), len(angles["hip_L"]))
-    ankle_lo = min(float(np.min(angles[f"ankle_{s}"][:n_guard])) for s in ("L", "R")) - ANKLE_RANGE_MARGIN_RAD
-    ankle_hi = max(float(np.max(angles[f"ankle_{s}"][:n_guard])) for s in ("L", "R")) + ANKLE_RANGE_MARGIN_RAD
+    # The ankle joint limit and the reference servo ctrlrange are fixed in the
+    # XML to the physical ANKLE_RANGE_RAD; the loader clips target angles to the
+    # same range. Do not widen the stop from the raw mocap min/max: a single
+    # marker glitch used to open the joint into an inverted pose.
 
     for s in ("L", "R"):
         thigh = float(np.mean(angles[f"seg_thigh_{s}"])) / 1000.0
@@ -138,10 +139,6 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
         foot = float(np.mean(angles[f"seg_foot_{s}"])) / 1000.0
         rig.set_limb_lengths("m", s, thigh, shank, foot)
         rig.set_limb_lengths("ref", s, thigh, shank, foot)
-    # Physiological ankle stop: with the still-weak muscle drive the free ankle
-    # would otherwise collapse onto the wide [-1.0, 2.6] range (V19/V21).
-    rig.set_ankle_range(ankle_lo, ankle_hi)
-
     # Approach A: the target limb is driven straight from the dataset points —
     # absolute segment orientations (-> rig hinge angles, already in range) and a
     # mocap hip base tracking the GT marker. No range rescaling / zero-alignment.

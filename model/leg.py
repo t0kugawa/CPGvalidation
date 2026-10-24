@@ -335,10 +335,11 @@ class Leg:
 
     def set_ankle_range(self, lo: float, hi: float):
         """
-        Narrows both limbs' ankle joints to a physiological range (rad).
-        `build_personalizer` passes the run window's mocap ankle envelope plus
-        `ANKLE_RANGE_MARGIN_RAD`; the stiff joint limit then stops a low-drive
-        or contact-driven ankle from hyper-plantarflexing past the stop.
+        Narrows both limbs' ankle joints to an explicit physical range (rad).
+        The production XML already uses ``model_cfg.ANKLE_RANGE_RAD``; this
+        method is retained for tests and explicit model experiments. The stiff
+        joint limit stops a low-drive or contact-driven ankle from
+        hyper-plantarflexing past the stop.
         """
         lo, hi = float(lo), float(hi)
         for s in SIDES:

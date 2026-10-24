@@ -67,7 +67,9 @@ def test_markers_to_angles_straight_leg():
     for s in ("L", "R"):
         assert np.isclose(a[f"hip_{s}"][0], THIGH_REST_ANG)
         assert np.isclose(a[f"knee_{s}"][0], SHANK_REST_ANG - THIGH_REST_ANG)
-        assert np.isclose(a[f"ankle_{s}"][0], FOOT_REST_ANG - SHANK_REST_ANG)
+        assert np.isclose(a[f"ankle_{s}"][0],
+                          np.clip(FOOT_REST_ANG - SHANK_REST_ANG,
+                                  *JOINT_RANGES["ankle"]))
     # Hip position is the GT marker (2nd marker => x=1.0, z=0.0).
     assert np.isclose(a["hip_x_L"][0], 1.0)
     assert np.isclose(a["hip_z_L"][0], 0.0)
@@ -91,7 +93,9 @@ def test_point_based_angles_round_trip():
         assert np.isclose(a[f"hip_{s}"][0], THIGH_REST_ANG - phi_t)
         knee = (SHANK_REST_ANG - phi_k) - (THIGH_REST_ANG - phi_t)
         assert np.isclose(a[f"knee_{s}"][0], knee)
-        assert np.isclose(a[f"ankle_{s}"][0], (FOOT_REST_ANG - phi_a) - (THIGH_REST_ANG - phi_t) - knee)
+        assert np.isclose(a[f"ankle_{s}"][0],
+                          np.clip((FOOT_REST_ANG - phi_a) - (THIGH_REST_ANG - phi_t) - knee,
+                                  *JOINT_RANGES["ankle"]))
 
 
 def test_bad_filename_raises():

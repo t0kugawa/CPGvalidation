@@ -5,6 +5,8 @@ from typing import Dict
 import numpy as np
 import pandas as pd
 
+from model.model_cfg import ANKLE_RANGE_RAD
+
 MARKERS = ("IC", "GT", "KN", "EA", "MH")
 SIDES = ("L", "R")
 
@@ -67,7 +69,7 @@ FOOT_REST_ANG = float(np.arctan2(-0.004, 0.022))
 JOINT_RANGES = {
     "hip": (-1.8, 1.4),
     "knee": (-1.6, 1.8),
-    "ankle": (-1.0, 2.6),
+    "ankle": ANKLE_RANGE_RAD,
 }
 
 
