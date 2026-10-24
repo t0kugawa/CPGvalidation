@@ -1,5 +1,7 @@
 # One-CPG threading sweep (2026-10-24)
 
+Run outputs: `experiments/current/nest_threads/{t1,t2,t4,t6,realk10}`.
+
 All runs: one CPG, one MuJoCo, 0.5 s (50 steps), selected game, seed 0,
 `--snapshot-s 0`.
 

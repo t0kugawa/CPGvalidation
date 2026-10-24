@@ -56,7 +56,7 @@ That is the practical speedup without extra CPG/MuJoCo resources.
 ## Recommended run
 
 ```powershell
-python run_2min.py --out validation_2min_game --no-render --duration-s 120 --snapshot-s 60 --realize-every-k 10
+python run_2min.py --out experiments/current/2min_120s --no-render --duration-s 120 --snapshot-s 60 --realize-every-k 10
 ```
 
 Defaults: `--game selected`, `--nest-threads 1`, one CPG, one MuJoCo.

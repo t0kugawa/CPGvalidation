@@ -1,5 +1,10 @@
 # Single-thread vs multithread short run (2026-10-24)
 
+> **Historical.** This compares the removed `--threads` replica path. The flag,
+> `MultiAgent`, and `ParallelPersonalizer` were removed in `fcaabae`;
+> production is one CPG/MuJoCo. Kept because it is the evidence for the
+> reference-phase advantage fix.
+
 Same command, seed, duration, and checkpoint interval:
 
 ```text
@@ -40,7 +45,8 @@ M-F/Renshaw sites hold, and the C1 flexor drives no longer collapse in the first
 
 Run the longer comparison with:
 
+The old two-replica commands are no longer valid. Use the single-CPG path:
+
 ```powershell
-python run_2min.py --out validation_2min_st --no-render --threads 1 --duration-s 120 --snapshot-s 60
-python run_2min.py --out validation_2min_mt --no-render --threads 2 --duration-s 120 --snapshot-s 60
+python run_2min.py --out experiments/current/2min_st --no-render --duration-s 120 --snapshot-s 60
 ```

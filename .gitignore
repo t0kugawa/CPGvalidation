@@ -28,6 +28,7 @@ fastrun/
 run_output/
 h5out/
 test_results/
+archive/
 
 # README is under review; keep local edits out of version control.
 README.md

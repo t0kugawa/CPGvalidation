@@ -1,7 +1,9 @@
 # PERSONA multi-sample parallel design
 
 **Date:** 2026-10-23
-**Status:** approved for implementation
+**Status:** **superseded** — the replica path was removed in `fcaabae` under
+the one-CPG/one-MuJoCo resource constraint. Production uses one network with
+`--nest-threads 1`; see `docs/reports/single_cpg_speed.md`. Kept for history.
 **Supersedes:** the "identical samples for every thread count" contract in
 `persona/sampling.py` (commit `1e8d708`).
 

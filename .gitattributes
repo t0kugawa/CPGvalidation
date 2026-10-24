@@ -1,0 +1,13 @@
+# Keep the repository in LF regardless of the Windows checkout.
+* text=auto eol=lf
+
+# Binary artifacts must not be normalized.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.mp4 binary
+*.h5 binary
+*.npz binary
+*.xlsx binary
+*.pdf binary

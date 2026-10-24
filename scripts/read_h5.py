@@ -4,9 +4,13 @@ Usage: python read_h5.py --h5 <run.h5> --out <fig_dir>
 """
 import argparse
 import os
+import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from persona.h5io import load_run
 from persona.validation import ValidationReport
