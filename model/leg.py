@@ -5,8 +5,26 @@ import mujoco
 from model.adapter import CPGOutput, CPGInput
 from model.cut import ContactPhase, IaAfferent, IbAfferent, PlantarCut
 from model.model_cfg import TREADMILL_PENETRATION_M
+from model.phase_clock import PhaseClock, wrap_pi
 
 SIDES = ("L", "R")
+
+
+def reciprocal_drives(e: float, f: float, phase: str) -> tuple[float, float]:
+    """Phase-gated reciprocal muscle drive.
+
+    The E (extensor) command is allowed in stance; the F (flexor) command in
+    swing. The raw CPG can co-contract, so this is the explicit reciprocal
+    gate. The phase comes from the debounced contact state (the model phase);
+    the reference phase remains a PERSONA baseline concern.
+    """
+    e = float(np.clip(e, 0.0, 1.0))
+    f = float(np.clip(f, 0.0, 1.0))
+    if phase == "stance":
+        return e, 0.0
+    if phase == "swing":
+        return 0.0, f
+    return e, f
 
 
 class Leg:
@@ -135,6 +153,10 @@ class Leg:
             for s in SIDES
         }
         self.cut_phase = {s: ContactPhase(initial="stance") for s in SIDES}
+        self._applied_muscles = {s: (0.0, 0.0) for s in SIDES}
+        self.phase_clock = {s: PhaseClock(dt_ms=self.dt_ms) for s in SIDES}
+        self._phase_offset_target = None
+        self._seen_swing = {s: False for s in SIDES}
         # Back-compatible name: per-site afferents are a list now.
         self.cut_afferent = {s: self.cut_plantar[s].afferents for s in SIDES}
         # Reference lengths are placeholders: `calibrate_spindles` overwrites
@@ -475,9 +497,13 @@ class Leg:
 
     def contract_muscles(self, cpg_output: CPGOutput):
         for s, e_key, f_key in (("L", "mus_E_L", "mus_F_L"), ("R", "mus_E_R", "mus_F_R")):
-            self.data.ctrl[self.act_sol_m[s]] = float(np.clip(getattr(cpg_output, e_key), 0.0, 1.0))
-            self.data.ctrl[self.act_ta_m[s]] = float(np.clip(getattr(cpg_output, f_key), 0.0, 1.0))
+            phase = "stance" if self.phase_clock[s].stance else "swing"
+            e, f = reciprocal_drives(getattr(cpg_output, e_key),
+                                     getattr(cpg_output, f_key), phase)
+            self.data.ctrl[self.act_sol_m[s]] = e
+            self.data.ctrl[self.act_ta_m[s]] = f
             self.data.ctrl[self.act_toe_m[s]] = 0.0
+            self._applied_muscles[s] = (e, f)
 
     def step(self, cpg_output: CPGOutput,
              target_ankle_L: float | None = None,
@@ -589,6 +615,36 @@ class Leg:
                 q_knee_ref=q_knee_ref, q_hip_ref=q_hip_ref,
             )
 
+        # Advance first-class phase clocks from the debounced contacts. The
+        # clocks provide the muscle E/F gate and the bilateral offset lock;
+        # they are not reference-tracked.
+        contact_stance = {s: sensory[s]["phase"] == "stance" for s in SIDES}
+        for s in SIDES:
+            if not contact_stance[s]:
+                self._seen_swing[s] = True
+        if (self._phase_offset_target is None
+                and all(contact_stance.values())
+                and all(self._seen_swing.values())):
+            self._phase_offset_target = float(wrap_pi(
+                self.phase_clock["R"].phase - self.phase_clock["L"].phase))
+        for s in SIDES:
+            offset = (self._phase_offset_target
+                      if s == "R" and self._phase_offset_target is not None
+                      else 0.0)
+            bilateral = 0.0
+            if s == "R" and self._phase_offset_target is not None:
+                target = float(wrap_pi(
+                    self.phase_clock["L"].phase + self._phase_offset_target))
+                bilateral = float(wrap_pi(self.phase_clock["R"].phase - target))
+            self.phase_clock[s].update(
+                contact_stance[s], offset=offset or 0.0,
+                bilateral_error=bilateral)
+            sensory[s]["phase"] = ("stance" if self.phase_clock[s].stance
+                                   else "swing")
+            sensory[s]["phase_period"] = self.phase_clock[s].period_s
+            sensory[s]["phase_confidence"] = self.phase_clock[s].confidence
+            sensory[s]["phase_error"] = self.phase_clock[s].error
+
         L, R = sensory["L"], sensory["R"]
         return CPGInput(
             cut_L=L["cut"], cut_R=R["cut"],
@@ -619,4 +675,16 @@ class Leg:
             knee_angle_m_R=R["q_knee_m"], hip_angle_m_R=R["q_hip_m"],
             knee_angle_ref_L=L["q_knee_ref"], hip_angle_ref_L=L["q_hip_ref"],
             knee_angle_ref_R=R["q_knee_ref"], hip_angle_ref_R=R["q_hip_ref"],
+            applied_mus_E_L=self._applied_muscles["L"][0],
+            applied_mus_F_L=self._applied_muscles["L"][1],
+            applied_mus_E_R=self._applied_muscles["R"][0],
+            applied_mus_F_R=self._applied_muscles["R"][1],
+            phase_period_L=self.phase_clock["L"].period_s,
+            phase_period_R=self.phase_clock["R"].period_s,
+            phase_confidence_L=self.phase_clock["L"].confidence,
+            phase_confidence_R=self.phase_clock["R"].confidence,
+            phase_error_L=self.phase_clock["L"].error,
+            phase_error_R=self.phase_clock["R"].error,
+            phase_clock_L=self.phase_clock["L"].phase,
+            phase_clock_R=self.phase_clock["R"].phase,
         )

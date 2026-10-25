@@ -134,3 +134,19 @@ left ankle on that stop while the right parks on the lower stop. The upper
 range is provisional. The detector and fix plan are in
 `docs/superpowers/plans/2026-10-25-ankle-inversion-stuck-fix.md`.
 
+The conservative fixed upper has since been lowered to **1.10** (observed
+gait safe minimum was 1.125), with the same target clipping. The fast
+`test_ankle_pose` passes; the slow gate is pending. A pose-aware foot-sole guard
+is the follow-up if the fixed stop is too restrictive.
+
+The controlled ankles also carry a small passive tone (`stiffness=0.05`,
+`springref=1.0`) so they do not hang on the lower stop when the muscles are
+quiet; `tests/test_ankle_tone.py` covers the coefficient and the movement off
+the stop.
+
+After Fix 1/2 the five-cycle lite gate reaches 8 cycles with no stuck-at-stop
+and no sole-up failures, and angle correlation 0.548. The remaining phase
+failures (period CV, E/F, stance/E, L/R) are not yet trustworthy for the full
+model: the 1/5 lite drives differ from full (full E/F ~1.0; lite F max <0.5).
+Lite equivalence must be fixed before phase tuning.
+

@@ -16,7 +16,9 @@ CONTACT_Z_EPS: float = 0.003
 # Physical ankle range in this model's hinge convention. The OpenSim
 # reference ankle_flx coordinate runs [-0.52359878, 1.04719755] rad about a
 # default of 0.87266463 rad; with the MuJoCo neutral near 1.59 rad the
-# equivalent range is about [0.19, 1.76]. This is a plant limit, not a PERSONA
-# parameter setpoint.
-ANKLE_RANGE_RAD: tuple[float, float] = (0.19, 1.76)
+# equivalent range is about [0.19, 1.76]. The upper 1.76 puts the foot sole
+# upward (sole_world_z +0.188), and the last gait's observed poses need an
+# upper as low as 1.125 to keep the sole down. Use a conservative fixed stop
+# below that envelope for now; a pose-aware foot-sole guard is the follow-up.
+ANKLE_RANGE_RAD: tuple[float, float] = (0.19, 1.10)
 

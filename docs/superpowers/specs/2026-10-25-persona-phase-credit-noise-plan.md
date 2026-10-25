@@ -40,25 +40,52 @@ validation jobs and require longer runs.
 
 **Lite-equivalence check.** A one-time lite-vs-full comparison on the phase
 metrics. The lite model is acceptable only if it preserves the five-cycle
-pattern. Current evidence: the 1/5 lite model produced **1 cycle** in 8 s while
-the full model produced ~113 cycles in 120 s, so **1/5 is not accepted yet**.
-The gate scale must be raised or the full model used; the 2-minute target is
-conditional on equivalence.
+pattern. Current evidence: after Fix 1/2 the 1/5 lite gate reaches 8 cycles
+with no stuck/sole failures, but its motor drives differ sharply from full
+(full E/F ~1.0; lite F max <0.5). **1/5 is not accepted.** The gate scale must
+be raised or the full model used; the 2-minute target is conditional on
+equivalence.
 
 **Current implementation (tests first)**
 
 - `persona/phase_metrics.py` — period, E/F, stance/E, L/R, angle, stuck-at-stop,
   sole-up metrics.
 - `tests/test_phase_metrics.py` — synthetic metric tests (pass).
-- `tests/test_ankle_pose.py` — fast MuJoCo sole-orientation test (currently
-  fails: upper `1.76` gives sole `+0.188`).
+- `tests/test_ankle_pose.py` — fast MuJoCo sole-orientation test (passes after
+  the upper stop was lowered to 1.10).
+- `tests/test_ankle_tone.py` — fast passive-tone test (passes after
+  `stiffness=0.05`, `springref=1.0`).
 - `tests/test_phase_gate.py` — slow five-cycle lite gate (`phase_gate` marker),
-  currently fails: 1/5 cycles, 347 s, render OK, ankles pinned.
+  currently fails on phase metrics: 8 cycles, no stuck/sole, period CV 0.239,
+  no E/F pair, stance/E and L/R drift.
 - `pytest.ini` — `phase_gate` marker.
 
-**Gate 0 status:** implemented but red. The first gate log is
+**Gate 0 status:** implemented; ankle Fix 1/2 green; phase gate red; lite 1/5
+not equivalent; no commit/approval. The first gate log is
 `archive/phase_gate_current/`; the 3D render is
 `locomotion_oblique_view.mp4`.
+
+### Production run modes (backlog)
+
+Formalize `full`, `1/2`, and `1/5` as first-class production run modes across
+`run_2min.py`, `run_validation.py`, and `personalize.py`. They must be
+orthogonal to `--persona/--no-persona`, `--game`, seed, `realize_every_k`, and
+render, with one central size/provenance config. Current gaps: `run_2min`
+hardcodes full, `run_validation` has `--debug-small`, `personalize` has
+small/normal, and the gate has its own LITE 1/5. Deferred; recorded for the
+next production pass.
+
+**Game-axis confound:** the full logs are `game=selected`, and both E/F drives
+are near 1.0 there, while the lite gate has F max <0.5. The phase-pattern gate
+should run `game=none` (game is a separate axis); game-selected validation
+belongs with task 5. The slow gate test currently uses `game=selected`; remove
+that in Fix 4.
+
+**Fix 3 progress:** reciprocal phase-gated E/F, applied-command logging, and a
+first-class `PhaseClock` (period/confidence/error/PLL/bilateral offset) are in.
+The 1/5 game-off gate now passes cycles (8), period CV (0.090), E/F
+(-3.058 ± 0.054), stance/E (0.068 ± 0.041), stuck/sole, and render. Remaining:
+L/R drift 0.367, L/R spread 0.746, angle correlation 0.444. No commit yet.
 
 ## 1. Phase/frequency/bilateral state
 
@@ -153,12 +180,15 @@ validation at 4. This is recorded as an open numbering ambiguity; do not start
 ## Immediate sequence
 
 1. Keep the current-model test evidence.
-2. Fix 1: upper ankle stop from foot orientation (see the ankle plan); fast
-   `test_ankle_pose` must pass.
-3. Fix 2: ankle tone/attractor for the lower-stop/silent-muscle pin.
-4. Fix 3: reciprocal E/F and phase/credit; gate green.
-5. Fix 4: lite equivalence and gate runtime; game-none fast gate, game-selected
+2. Fix 1: upper ankle stop from foot orientation — done (1.10); fast
+   `test_ankle_pose` passes.
+3. Fix 2: ankle tone/attractor — done (stiffness 0.05, rest 1.0); fast tone test
+   passes.
+4. **Fix 4 next: lite equivalence and gate runtime.** The 1/5 lite is not
+   equivalent to full (full E/F ~1.0; lite F <0.5). Use the smallest scale that
+   preserves the full pattern, or full. Game-none fast gate; game-selected
    separate.
+5. Fix 3: reciprocal E/F and phase/credit; gate green.
 6. Then decide phase/PLL, fine-grained credit, objective/k, and the rest in the
    recorded order.
 

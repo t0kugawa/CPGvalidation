@@ -66,6 +66,20 @@ class CPGInput:
     # Target-limb (reference) locomotion phase + normal contact force (N)
     phase_ref_L: str = "stance"
     phase_ref_R: str = "swing"
+    # Applied reciprocal muscle commands after phase gating.
+    applied_mus_E_L: float = 0.0
+    applied_mus_F_L: float = 0.0
+    applied_mus_E_R: float = 0.0
+    applied_mus_F_R: float = 0.0
+    # First-class circular phase state (contact-derived PLL)
+    phase_period_L: float = 0.0
+    phase_period_R: float = 0.0
+    phase_confidence_L: float = 0.0
+    phase_confidence_R: float = 0.0
+    phase_error_L: float = 0.0
+    phase_error_R: float = 0.0
+    phase_clock_L: float = 0.0
+    phase_clock_R: float = 0.0
     contact_m_L: float = 0.0
     contact_m_R: float = 0.0
     contact_ref_L: float = 0.0

@@ -88,7 +88,7 @@ def test_ta_stays_dorsiflexor(q):
 
 def test_full_sol_lifts_the_ankle_from_the_target_pose():
     m, d = _model()
-    q0 = 1.66
+    q0 = 1.00
     _set_pose(m, d, q0)
     for side in "LR":
         d.ctrl[_id(m, mujoco.mjtObj.mjOBJ_ACTUATOR, f"sol_m_{side}")] = 1.0

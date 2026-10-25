@@ -95,6 +95,19 @@ class RunLog:
     mus_F_L: List[float] = field(default_factory=list)
     mus_E_R: List[float] = field(default_factory=list)
     mus_F_R: List[float] = field(default_factory=list)
+    # Applied reciprocal commands after phase gating
+    applied_mus_E_L: List[float] = field(default_factory=list)
+    applied_mus_F_L: List[float] = field(default_factory=list)
+    applied_mus_E_R: List[float] = field(default_factory=list)
+    applied_mus_F_R: List[float] = field(default_factory=list)
+    phase_period_L: List[float] = field(default_factory=list)
+    phase_period_R: List[float] = field(default_factory=list)
+    phase_confidence_L: List[float] = field(default_factory=list)
+    phase_confidence_R: List[float] = field(default_factory=list)
+    phase_error_L: List[float] = field(default_factory=list)
+    phase_error_R: List[float] = field(default_factory=list)
+    phase_clock_L: List[float] = field(default_factory=list)
+    phase_clock_R: List[float] = field(default_factory=list)
 
     # Rhythm-generator population activity [0, 1]
     rg_e_L: List[float] = field(default_factory=list)
@@ -164,6 +177,12 @@ class RunLog:
     _NUMERIC = ("time_ms", "ankle_model_L", "ankle_model_R", "ankle_target_L",
                 "ankle_target_R", "loss", "advantage", "adv_L", "adv_R",
                 "mus_E_L", "mus_F_L", "mus_E_R", "mus_F_R",
+                "applied_mus_E_L", "applied_mus_F_L",
+                "applied_mus_E_R", "applied_mus_F_R",
+                "phase_period_L", "phase_period_R",
+                "phase_confidence_L", "phase_confidence_R",
+                "phase_error_L", "phase_error_R",
+                "phase_clock_L", "phase_clock_R",
                 "rg_e_L", "rg_f_L", "rg_e_R", "rg_f_R",
                 "cut_L", "cut_R",
                 "ia_len_E_L", "ia_vel_E_L", "ia_rate_E_L",
@@ -362,6 +381,18 @@ class Personalizer:
             log.mus_F_L.append(cpg_out.mus_F_L)
             log.mus_E_R.append(cpg_out.mus_E_R)
             log.mus_F_R.append(cpg_out.mus_F_R)
+            log.applied_mus_E_L.append(cpg_in.applied_mus_E_L)
+            log.applied_mus_F_L.append(cpg_in.applied_mus_F_L)
+            log.applied_mus_E_R.append(cpg_in.applied_mus_E_R)
+            log.applied_mus_F_R.append(cpg_in.applied_mus_F_R)
+            log.phase_period_L.append(cpg_in.phase_period_L)
+            log.phase_period_R.append(cpg_in.phase_period_R)
+            log.phase_confidence_L.append(cpg_in.phase_confidence_L)
+            log.phase_confidence_R.append(cpg_in.phase_confidence_R)
+            log.phase_error_L.append(cpg_in.phase_error_L)
+            log.phase_error_R.append(cpg_in.phase_error_R)
+            log.phase_clock_L.append(cpg_in.phase_clock_L)
+            log.phase_clock_R.append(cpg_in.phase_clock_R)
             rg = (getattr(cpg_out, "extra", None) or {}).get("rg") or {}
             log.rg_e_L.append(float(rg.get("rg_e_L", 0.0)))
             log.rg_f_L.append(float(rg.get("rg_f_L", 0.0)))
