@@ -7,8 +7,10 @@
   PASSES** (7 cycles, period CV `0.196`, E/F `-3.033`, L/R drift `0.159`,
   angle corr `0.679`, no stuck/sole-up, render present); plan
   `docs/superpowers/plans/2026-10-25-ankle-inversion-stuck-fix.md`
-* 1/2 and full-scale equivalence of the green 1/5 pattern; the pass is close
-  to the period-CV limit (`0.196` vs `0.20`), so do not assume equivalence
+* 1/2 and full-scale equivalence of the green 1/5 pattern; **1/2 measured
+  FAIL** (7 cycles, period CV `0.326`, E/F `+0.920` std `0.976`, angle corr
+  `0.360`; raw contacts ~9 but clock exports 14; raw CPG E/F corr `+0.69/+0.81`).
+  The 1/5 pass is not an equivalence result; fix clock/CPG scaling first
 * Separate game-selected validation arm (`game=None` is the gate arm)
 * CPG drives both E/F to 1.0 and parks the ankle at a physical stop; make the
   E/F command reciprocal and audit control authority (2 s post-fix check)

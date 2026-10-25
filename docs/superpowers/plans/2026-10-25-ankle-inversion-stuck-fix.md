@@ -240,6 +240,29 @@ The period CV is close to the `0.20` limit, so the next validation is the
 1/2/full-scale equivalence check and a separate game-selected arm. Do not
 treat the 1/5 pass as proof that the lite and full models are equivalent.
 
+### Scale equivalence check — 1/2 FAIL (2026-10-25)
+
+The 1/2 arm (`n_rg=50, n_mn=50, n_int=25, n_aff=50, n_bs=50`, same 8 s,
+`game=None`, `realize_every_k=1`) **fails**:
+
+```text
+cycles=7  period=0.753 s  cv=0.326
+E/F=+0.920 rad  std=0.976
+L/R=-1.268 rad  drift=0.213
+stance/E=+0.312 rad  std=0.025
+angle corr=0.360
+FAIL: period CV, E/F anti-phase/drift, angle periodicity
+```
+
+The raw contact detector sees about 9 onsets in 8 s on the right, but the
+phase clock exports 14 stance onsets. The raw CPG E/F populations are
+co-active at 1/2 (`corr = +0.69` left, `+0.81` right), whereas at 1/5 they are
+near zero correlation. So the 1/5 pass is **not** a valid stand-in for the full
+model: the phase clock count and the CPG E/F phase both change with scale.
+The next work is to make the clock count match the raw contact and to make the
+CPG E/F anti-phase at 1/2/full; the 1/5 result must not be used for approval
+until that equivalence is restored.
+
 ## Verification
 
 - `pytest -q -m "not phase_gate"` must pass, including `test_ankle_pose.py`.
