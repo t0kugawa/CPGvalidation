@@ -263,6 +263,37 @@ The next work is to make the clock count match the raw contact and to make the
 CPG E/F anti-phase at 1/2/full; the 1/5 result must not be used for approval
 until that equivalence is restored.
 
+### Full-scale gate — FAIL (2026-10-25)
+
+The full arm (`100/100/50/100/100`, same 8 s, `game=None`,
+`realize_every_k=1`) also fails:
+
+```text
+cycles=7  period=1.060 s  cv=0.206
+E/F=+2.973 rad  std=0.076
+L/R=+2.488 rad  drift=0.361  spread=0.844
+stance/E=+0.125 rad  std=0.110
+angle corr=0.230
+FAIL: period CV, L/R drift/spread, angle periodicity
+```
+
+The full arm has the right E/F phase (near pi, low drift) and better L/R
+phase, but the right leg is the drag leg:
+
+```text
+right hip swing -0.063 vs reference -0.400 (0.34 rad short)
+right foot z swing -0.0019 m; contact swing 5.69 N vs stance 4.80 N
+right hip/knee/ankle ac: +0.04/+0.04/-0.28
+left  hip/knee/ankle ac: +0.56/+0.64/+0.39
+raw CPG E/F corr: +0.61 left, +0.31 right
+```
+
+A swing-only hip/knee flexion assist (`-0.20 rad`) was tested at 1/2 and also
+failed (period CV `0.316`, E/F drift `1.452`, angle `0.257`); it is discarded.
+The next work is a scale-invariant single rhythm / contact-count fix and a
+right-leg swing-clearance mechanism, not more 1/5 parameter tuning. Until then
+the full arm is the reference and 1/5 is a fast diagnostic only.
+
 ## Verification
 
 - `pytest -q -m "not phase_gate"` must pass, including `test_ankle_pose.py`.

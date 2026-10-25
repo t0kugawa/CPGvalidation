@@ -7,10 +7,13 @@
   PASSES** (7 cycles, period CV `0.196`, E/F `-3.033`, L/R drift `0.159`,
   angle corr `0.679`, no stuck/sole-up, render present); plan
   `docs/superpowers/plans/2026-10-25-ankle-inversion-stuck-fix.md`
-* 1/2 and full-scale equivalence of the green 1/5 pattern; **1/2 measured
-  FAIL** (7 cycles, period CV `0.326`, E/F `+0.920` std `0.976`, angle corr
-  `0.360`; raw contacts ~9 but clock exports 14; raw CPG E/F corr `+0.69/+0.81`).
-  The 1/5 pass is not an equivalence result; fix clock/CPG scaling first
+* 1/2 and full-scale equivalence of the green 1/5 pattern; **1/2 FAIL**
+  (period CV `0.326`, E/F `+0.920` std `0.976`, angle `0.360`; raw contacts
+  ~9 but clock 14; raw CPG E/F corr `+0.69/+0.81`) and **full FAIL** (CV
+  `0.206`, L/R drift `0.361`, angle `0.230`; right hip 0.34 rad short in swing,
+  right foot 1.9 mm clearance, contact 5.69 N in swing; raw E/F corr
+  `+0.61/+0.31`). The 1/5 pass is not an equivalence result; fix scale-invariant
+  clock/CPG and right-leg swing clearance first
 * Separate game-selected validation arm (`game=None` is the gate arm)
 * CPG drives both E/F to 1.0 and parks the ankle at a physical stop; make the
   E/F command reciprocal and audit control authority (2 s post-fix check)
