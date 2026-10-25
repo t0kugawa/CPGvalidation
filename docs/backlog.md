@@ -1,5 +1,9 @@
 **High**
 
+* Ankle inversion/stuck gate: upper stop `1.76` puts the sole up
+  (`sole_z=+0.188`); lower pin when muscles are quiet. Upper stop from foot
+  orientation, ankle tone/attractor, reciprocal E/F; plan
+  `docs/superpowers/plans/2026-10-25-ankle-inversion-stuck-fix.md`
 * CPG drives both E/F to 1.0 and parks the ankle at a physical stop; make the
   E/F command reciprocal and audit control authority (2 s post-fix check)
 * Phase/frequency entrainment and bilateral symmetry (R phase agreement ~0.12)

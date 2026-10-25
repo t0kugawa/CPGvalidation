@@ -125,3 +125,12 @@ controller/credit problem, not a reason to widen the plant stops.
 - `tests/test_mujoco_ankle.py` — new regression tests.
 - `tests/test_ankle_guard.py`, `tests/test_mocap.py`, `tests/test_adapter.py` —
   updated for the physical range.
+
+## 2026-10-25 addendum: upper stop is still sole-up
+
+The upper limit `1.76` from the OpenSim mapping is not safe for the foot
+geometry: the foot's sole world-z is `+0.188` there, and the lite gate parks the
+left ankle on that stop while the right parks on the lower stop. The upper
+range is provisional. The detector and fix plan are in
+`docs/superpowers/plans/2026-10-25-ankle-inversion-stuck-fix.md`.
+
