@@ -294,6 +294,30 @@ The next work is a scale-invariant single rhythm / contact-count fix and a
 right-leg swing-clearance mechanism, not more 1/5 parameter tuning. Until then
 the full arm is the reference and 1/5 is a fast diagnostic only.
 
+### Shared-frequency full diagnostic (2026-10-25)
+
+Locking both clocks to a common omega (contact still corrects phase) fixes the
+full-size period and L/R stability:
+
+```text
+cycles=8  period=1.012 s  cv=0.150  (pass)
+E/F=-2.473 rad  std=0.786          (pass)
+L/R=+2.438 rad  drift=0.286        (pass)
+stance/E=-0.042 rad  std=0.139
+angle corr=0.331                   (only failure)
+```
+
+The remaining failure is the longer right leg. The right foot is loaded during
+swing (foot z `-0.0033 m`, contact `8.74 N` vs stance `3.38 N`); right
+hip/knee angle correlations are `0.153/0.175` versus left `0.603/0.595`.
+Adding the right-only 2x swing gain on top of the frequency lock fails period
+CV (`0.231`) and angle (`0.320`); a right-only bias (`-0.1 rad`) also fails
+(`0.187`). The frequency lock is therefore the correct base, but it is not
+committed because the mandatory gate is still red on the right-leg angle.
+The next work is a physical/geometric right-leg swing-clearance fix (the right
+shank/foot bones are about 5 mm longer) or an equivalent CPG-driven clearance,
+not more gain/bias tuning.
+
 ## Verification
 
 - `pytest -q -m "not phase_gate"` must pass, including `test_ankle_pose.py`.

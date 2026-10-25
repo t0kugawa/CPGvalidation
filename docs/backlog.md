@@ -13,7 +13,11 @@
   `0.206`, L/R drift `0.361`, angle `0.230`; right hip 0.34 rad short in swing,
   right foot 1.9 mm clearance, contact 5.69 N in swing; raw E/F corr
   `+0.61/+0.31`). The 1/5 pass is not an equivalence result; fix scale-invariant
-  clock/CPG and right-leg swing clearance first
+  clock/CPG and right-leg swing clearance first. Shared-frequency diagnostic:
+  full period CV `0.150` and L/R drift `0.286` pass, only angle `0.331` fails;
+  right foot swing z `-0.0033 m`, contact `8.74 N`, right hip/knee ac
+  `0.153/0.175` vs left `0.603/0.595`. Right-only gain/bias additions fail;
+  next is a physical right-leg clearance/symmetry fix
 * Separate game-selected validation arm (`game=None` is the gate arm)
 * CPG drives both E/F to 1.0 and parks the ankle at a physical stop; make the
   E/F command reciprocal and audit control authority (2 s post-fix check)
