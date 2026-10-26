@@ -108,7 +108,9 @@ def run(duration_s, view, width, height, fps, out_dir,
         resolution_ms=DEFAULT_RESOLUTION_MS, cut_multisite=False,
         game: GameConfig | None = None, seed: int = 0,
         lr_mode: str = "constant", lr_start: float = 0.03,
-        lr_end: float | None = None, nest_threads=1):
+        lr_end: float | None = None, nest_threads=1,
+        noise_config: str = "all", trace_strategy: bool = False,
+        trace_float32: bool = False, snapshot_strategy: int = 0):
     os.makedirs(out_dir, exist_ok=True)
     steps = int(round(duration_s / (DT_MS / 1000.0)))
     n_frames = int(round(duration_s * fps))
@@ -123,7 +125,9 @@ def run(duration_s, view, width, height, fps, out_dir,
         belt_mode=belt_mode, loop=True, tau_mem_s=tau_mem_s,
         resolution_ms=resolution_ms, cut_multisite=cut_multisite,
         game=game, seed=seed, lr_mode=lr_mode, lr_start=lr_start,
-        lr_end=lr_end, nest_threads=nest_threads)
+        lr_end=lr_end, nest_threads=nest_threads,
+        noise_config=noise_config, trace_strategy=trace_strategy,
+        trace_float32=trace_float32, snapshot_strategy=snapshot_strategy)
     build_s = time.perf_counter() - t_build0
     print(f"[timing] nest_threads={int(nest_threads)} build_s={build_s:.2f}",
           flush=True)
@@ -305,6 +309,14 @@ if __name__ == "__main__":
                     default="constant")
     ap.add_argument("--lr-start", type=float, default=0.03)
     ap.add_argument("--lr-end", type=float, default=None)
+    ap.add_argument("--noise-config", default="all",
+                    help="producer filter: all|none|poisson|stdp|one-relay:<name>")
+    ap.add_argument("--trace-strategy", action="store_true",
+                    help="record the applied-sample strategy trace")
+    ap.add_argument("--trace-float32", action="store_true",
+                    help="store the trace as float32 (approximate replay)")
+    ap.add_argument("--snapshot-strategy", type=int, default=0,
+                    help="take a strategy snapshot every N steps (0 = off)")
     args = ap.parse_args()
     if args.nest_threads < 1:
         ap.error("--nest-threads must be >= 1")
@@ -330,4 +342,7 @@ if __name__ == "__main__":
         cut_multisite=args.cut_multisite,
         game=(GameConfig.current_best() if args.game == "selected" else None),
         seed=args.seed, lr_mode=args.lr_mode, lr_start=args.lr_start,
-        lr_end=args.lr_end, nest_threads=args.nest_threads)
+        lr_end=args.lr_end, nest_threads=args.nest_threads,
+        noise_config=args.noise_config, trace_strategy=args.trace_strategy,
+        trace_float32=args.trace_float32,
+        snapshot_strategy=args.snapshot_strategy)

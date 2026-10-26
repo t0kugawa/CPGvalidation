@@ -33,6 +33,14 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--nest-threads", type=validate_threads, default=1,
                     help="NEST local threads for the single CPG/MuJoCo run; "
                          "this does not build replicas")
+    ap.add_argument("--noise-config", default="all",
+                    help="producer filter: all|none|poisson|stdp|one-relay:<name>")
+    ap.add_argument("--trace-strategy", action="store_true",
+                    help="record the applied-sample strategy trace (float64)")
+    ap.add_argument("--trace-float32", action="store_true",
+                    help="store the trace as float32 (approximate replay)")
+    ap.add_argument("--snapshot-strategy", type=int, default=0,
+                    help="take a strategy snapshot every N steps (0 = off)")
     return ap
 
 

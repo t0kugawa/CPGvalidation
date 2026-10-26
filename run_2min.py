@@ -76,6 +76,14 @@ def main():
                     default="constant")
     ap.add_argument("--lr-start", type=float, default=0.03)
     ap.add_argument("--lr-end", type=float, default=None)
+    ap.add_argument("--noise-config", default="all",
+                    help="producer filter: all|none|poisson|stdp|one-relay:<name>")
+    ap.add_argument("--trace-strategy", action="store_true",
+                    help="record the applied-sample strategy trace")
+    ap.add_argument("--trace-float32", action="store_true",
+                    help="store the trace as float32 (approximate replay)")
+    ap.add_argument("--snapshot-strategy", type=int, default=0,
+                    help="take a strategy snapshot every N steps (0 = off)")
     args = ap.parse_args()
     if args.nest_threads < 1:
         ap.error("--nest-threads must be >= 1")
@@ -96,7 +104,10 @@ def main():
         cut_multisite=args.cut_multisite,
         game=(GameConfig.current_best() if args.game == "selected" else None),
         seed=args.seed, lr_mode=args.lr_mode, lr_start=args.lr_start,
-        lr_end=args.lr_end, nest_threads=args.nest_threads)
+        lr_end=args.lr_end, nest_threads=args.nest_threads,
+        noise_config=args.noise_config, trace_strategy=args.trace_strategy,
+        trace_float32=args.trace_float32,
+        snapshot_strategy=args.snapshot_strategy)
 
 
 if __name__ == "__main__":

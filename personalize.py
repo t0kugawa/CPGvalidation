@@ -80,7 +80,10 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
                        lr_start: float = 0.03,
                        lr_end: float | None = None,
                        nest_threads: int = 1,
-                       noise_config: str = "all"
+                       noise_config: str = "all",
+                       trace_strategy: bool = False,
+                       trace_float32: bool = False,
+                       snapshot_strategy: int = 0
                        ) -> tuple[Any, MocapLoader]:
     """
     Builds the full closed loop: bilateral CPG (via the PERSONA registry),
@@ -197,7 +200,10 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
                   tau_mem_s=tau_mem_s, dt_ms=DT_MS,
                   homeostasis=homeostasis, game=game,
                   lr_schedule=lr_schedule, sampling_threads=nest_threads,
-                  noise_config=noise_config)
+                  noise_config=noise_config,
+                  trace_strategy=trace_strategy,
+                  trace_float32=trace_float32,
+                  snapshot_strategy=snapshot_strategy)
 
     personalizer = Personalizer(
         registry=reg, cpg=cpg, rig=rig, agent=agent, target_driver=driver,
@@ -227,7 +233,11 @@ def run_personalization(reference_path: str = DEFAULT_REFERENCE,
                         lr_end: float | None = None,
                         game: GameConfig | None = None,
                         seed: int = 0,
-                        nest_threads: int = 1) -> dict:
+                        nest_threads: int = 1,
+                        noise_config: str = "all",
+                        trace_strategy: bool = False,
+                        trace_float32: bool = False,
+                        snapshot_strategy: int = 0) -> dict:
     """
     Full experiment: build the loop, run the two-stage PERSONA optimization,
     write the validation figure, the CSV/npz logs, and return the acceptance dict.
@@ -246,11 +256,22 @@ def run_personalization(reference_path: str = DEFAULT_REFERENCE,
         loss_stop=loss_stop, loss_window=loss_window, belt_mode=belt_mode,
         tau_mem_s=tau_mem_s, cut_multisite=cut_multisite,
         lr_mode=lr_mode, lr_start=lr_start, lr_end=lr_end,
-        game=game, seed=seed, nest_threads=nest_threads, **sizes)
+        game=game, seed=seed, nest_threads=nest_threads,
+        noise_config=noise_config, trace_strategy=trace_strategy,
+        trace_float32=trace_float32, snapshot_strategy=snapshot_strategy,
+        **sizes)
     personalizer.verbose = verbose
     personalizer.log_every = log_every
 
     log = personalizer.run(realize_every_k=realize_every_k)
+    if trace_strategy:
+        trace = personalizer.agent.strategy_trace_arrays()
+        if trace is not None:
+            payload = {key: value for key, value in trace.items()
+                       if isinstance(value, np.ndarray)}
+            payload["param_names"] = np.asarray(trace["param_names"], dtype=object)
+            payload["noise_names"] = np.asarray(trace["noise_names"], dtype=object)
+            np.savez(os.path.join(output_dir, "strategy_trace.npz"), **payload)
     close = getattr(personalizer, "close", None)
     if close is not None:
         close()
@@ -331,14 +352,20 @@ def main(n_steps: int = 200, small: bool = False, output_dir: str | None = None,
          cut_multisite: bool = False, lr_mode: str = "constant",
          lr_start: float = 0.03, lr_end: float | None = None,
          game: GameConfig | None = None, seed: int = 0,
-         nest_threads: int = 1) -> dict:
+         nest_threads: int = 1, noise_config: str = "all",
+         trace_strategy: bool = False, trace_float32: bool = False,
+         snapshot_strategy: int = 0) -> dict:
     res = run_personalization(n_steps=n_steps, small=small, output_dir=output_dir,
                               verbose=verbose, log_every=log_every,
                               tau_mem_s=tau_mem_s, realize_every_k=realize_every_k,
                               cut_multisite=cut_multisite,
                               lr_mode=lr_mode, lr_start=lr_start, lr_end=lr_end,
                               game=game, seed=seed,
-                              nest_threads=nest_threads)
+                              nest_threads=nest_threads,
+                              noise_config=noise_config,
+                              trace_strategy=trace_strategy,
+                              trace_float32=trace_float32,
+                              snapshot_strategy=snapshot_strategy)
     print(f"Steps: {res['n_steps_done']} (pose {res['n_pose']}, track {res['n_track']})")
     print(f"Final loss (last-20 mean): {res['final_loss']:.4f}")
     print(f"Acceptable: {res['acceptable']} | angle coverage: {res['angle_coverage']:.2f}")
@@ -353,4 +380,7 @@ if __name__ == "__main__":
          cut_multisite=args.cut_multisite,
          lr_mode=args.lr_mode, lr_start=args.lr_start, lr_end=args.lr_end,
          game=(GameConfig.current_best() if args.game == "selected" else None),
-         seed=args.seed, nest_threads=args.nest_threads)
+         seed=args.seed, nest_threads=args.nest_threads,
+         noise_config=args.noise_config, trace_strategy=args.trace_strategy,
+         trace_float32=args.trace_float32,
+         snapshot_strategy=args.snapshot_strategy)
