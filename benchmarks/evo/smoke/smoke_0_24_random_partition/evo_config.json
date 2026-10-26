@@ -1,0 +1,19 @@
+{
+  "n_players": 24,
+  "generations": 1,
+  "steps_per_generation": 400,
+  "eval_window": 50,
+  "init": "random",
+  "stop": "partition",
+  "patience": 2,
+  "nash_tol": 0.001,
+  "impact_eps": 0.0,
+  "min_players": 2,
+  "seed": 0,
+  "extension_steps": 0,
+  "fresh_process": true,
+  "final_run": false,
+  "sizes": null,
+  "n_segments": 141,
+  "n_sites": 273
+}

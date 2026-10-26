@@ -1,0 +1,13 @@
+{
+  "stop_reason": "max_generations",
+  "equilibrium": {
+    "stop_reason": "max_generations",
+    "generations": 3,
+    "replicator_residual": 0.0009154672363998048,
+    "movement": 0.0037633131261726863,
+    "fraction_stability": null,
+    "partition_stable": false,
+    "floor_hit": false
+  },
+  "generations": 3
+}

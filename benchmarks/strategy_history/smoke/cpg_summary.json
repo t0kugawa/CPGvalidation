@@ -1,0 +1,27 @@
+{
+  "steps": 10,
+  "seeds": [
+    0
+  ],
+  "noise_configs": [
+    "all"
+  ],
+  "runs": [
+    {
+      "noise_config": "all",
+      "seed": 0,
+      "steps": 10,
+      "n_sites": 273,
+      "n_noise": 16,
+      "loss_eval": 0.08205311930646364,
+      "noise_F_norm": 2.2964718954395148e+16,
+      "noise_G_norm": 0.0,
+      "trace_F_error": 0.0,
+      "trace_Xbar_error": 0.0,
+      "trace_G_error": 0.0,
+      "recorders": 16,
+      "wall_s": 6.205284239000001,
+      "error": null
+    }
+  ]
+}

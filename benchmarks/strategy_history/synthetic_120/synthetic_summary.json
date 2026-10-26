@@ -1,0 +1,52 @@
+{
+  "steps": 120,
+  "seed": 0,
+  "trace_rebuild_error": 0.0,
+  "parameter_trace_error": 0.9985071507126583,
+  "no_trace_error": 4.23783961117191,
+  "merge_F_error": 0.450371104684187,
+  "merge_Xbar_error": 0.34721780700881066,
+  "merge_G_error": 0.7150180112470979,
+  "noise_configs": [
+    {
+      "config": "all",
+      "n_noise": 16,
+      "steps": 120,
+      "wall_s": 0.010736899974290282,
+      "F_noise_norm": 0.3547939747184273,
+      "G_noise_norm": 0.0
+    },
+    {
+      "config": "none",
+      "n_noise": 0,
+      "steps": 120,
+      "wall_s": 0.010861999995540828,
+      "F_noise_norm": 0.0,
+      "G_noise_norm": 0.0
+    },
+    {
+      "config": "poisson",
+      "n_noise": 10,
+      "steps": 120,
+      "wall_s": 0.009351200016681105,
+      "F_noise_norm": 0.27952955585730094,
+      "G_noise_norm": 0.0
+    },
+    {
+      "config": "stdp",
+      "n_noise": 6,
+      "steps": 120,
+      "wall_s": 0.006569100019987673,
+      "F_noise_norm": 0.21602565003641347,
+      "G_noise_norm": 0.0
+    },
+    {
+      "config": "one-relay:p0",
+      "n_noise": 1,
+      "steps": 120,
+      "wall_s": 0.005520300008356571,
+      "F_noise_norm": 0.08793781312892716,
+      "G_noise_norm": 0.0
+    }
+  ]
+}

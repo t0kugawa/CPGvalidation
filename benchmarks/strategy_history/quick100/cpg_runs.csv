@@ -1,0 +1,2 @@
+noise_config,seed,steps,n_sites,n_noise,loss_eval,noise_F_norm,noise_F_rel,noise_G_norm,trace_F_error,trace_Xbar_error,trace_G_error,recorders,wall_s,error
+all,0,100,273,16,0.29533281118950416,5.495789713718148e+16,5.342272023208505e-20,0.0,0.0,0.0,0.0,16,44.242928079999956,

@@ -1,0 +1,14 @@
+{
+  "stop_reason": "partition",
+  "equilibrium": {
+    "stop_reason": "partition",
+    "generations": 2,
+    "replicator_residual": 0.008189534683870583,
+    "movement": 0.010768116601098516,
+    "fraction_stability": 0.0,
+    "partition_stable": true,
+    "floor_hit": false,
+    "n_players": 24
+  },
+  "generations": 2
+}

@@ -1,0 +1,12 @@
+[
+  {
+    "arm": "cmaes_sub",
+    "seed": 0,
+    "steps": 100,
+    "players": null,
+    "wall_s": 77.856430107,
+    "loss_eval": 0.2819076382433701,
+    "k": 16,
+    "trials": 2
+  }
+]

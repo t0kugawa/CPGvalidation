@@ -1,0 +1,95 @@
+{
+  "steps": 400,
+  "seeds": [
+    0
+  ],
+  "noise_configs": [
+    "all",
+    "none",
+    "poisson",
+    "stdp",
+    "one-relay:cut_L"
+  ],
+  "runs": [
+    {
+      "noise_config": "all",
+      "seed": 0,
+      "steps": 400,
+      "n_sites": 273,
+      "n_noise": 16,
+      "loss_eval": 0.1632137145397084,
+      "noise_F_norm": 7.540026653788626e+16,
+      "noise_G_norm": 0.0,
+      "trace_F_error": 0.0,
+      "trace_Xbar_error": 0.0,
+      "trace_G_error": 0.0,
+      "recorders": 16,
+      "wall_s": 170.65420312400002,
+      "error": null
+    },
+    {
+      "noise_config": "none",
+      "seed": 0,
+      "steps": 400,
+      "n_sites": 273,
+      "n_noise": 0,
+      "loss_eval": 0.27315859522940156,
+      "noise_F_norm": 0.0,
+      "noise_G_norm": 0.0,
+      "trace_F_error": 0.0,
+      "trace_Xbar_error": 0.0,
+      "trace_G_error": 0.0,
+      "recorders": 16,
+      "wall_s": 206.61191392900002,
+      "error": null
+    },
+    {
+      "noise_config": "poisson",
+      "seed": 0,
+      "steps": 400,
+      "n_sites": 273,
+      "n_noise": 10,
+      "loss_eval": 0.18592848005395235,
+      "noise_F_norm": 7.676744644842883e+16,
+      "noise_G_norm": 0.0,
+      "trace_F_error": 0.0,
+      "trace_Xbar_error": 0.0,
+      "trace_G_error": 0.0,
+      "recorders": 16,
+      "wall_s": 202.16582479500005,
+      "error": null
+    },
+    {
+      "noise_config": "stdp",
+      "seed": 0,
+      "steps": 400,
+      "n_sites": 273,
+      "n_noise": 6,
+      "loss_eval": 0.2603762462914927,
+      "noise_F_norm": 685358489034935.0,
+      "noise_G_norm": 0.0,
+      "trace_F_error": 0.0,
+      "trace_Xbar_error": 0.0,
+      "trace_G_error": 0.0,
+      "recorders": 16,
+      "wall_s": 196.49452529099995,
+      "error": null
+    },
+    {
+      "noise_config": "one-relay:cut_L",
+      "seed": 0,
+      "steps": 400,
+      "n_sites": 273,
+      "n_noise": 1,
+      "loss_eval": 0.2729799764350925,
+      "noise_F_norm": 5.738390775497014e+16,
+      "noise_G_norm": 0.0,
+      "trace_F_error": 0.0,
+      "trace_Xbar_error": 0.0,
+      "trace_G_error": 0.0,
+      "recorders": 16,
+      "wall_s": 224.960197806,
+      "error": null
+    }
+  ]
+}

@@ -1,0 +1,98 @@
+{
+  "runs": [
+    {
+      "prefix": "smoke",
+      "seed": 0,
+      "players": 24,
+      "init": "territory",
+      "stop": "partition",
+      "stop_reason": "max_generations",
+      "generations": 1,
+      "final_players": 23,
+      "loss_eval": 0.18529280485246397,
+      "loss_full": 0.23448578903427708,
+      "r_p90": 0.5860666987491291,
+      "at_bound": 13,
+      "q_gt_1": 50,
+      "violations": 0,
+      "active_players": 23,
+      "stack_entropy": 0.2951676518677869,
+      "ari": 0.18182152314681155,
+      "nmi": 0.5970467295120491,
+      "purity": 0.49645390070921985,
+      "coverage": 1.0,
+      "v_measure": 0.597046729512049,
+      "pairwise_f1": 0.22672811059907835,
+      "global_drive": "other",
+      "residual": 0.0035641549520507515,
+      "movement": 0.004047053165086031,
+      "fraction_stability": null,
+      "wall_total": 193.65762329
+    },
+    {
+      "prefix": "smoke",
+      "seed": 0,
+      "players": 24,
+      "init": "random",
+      "stop": "partition",
+      "stop_reason": "max_generations",
+      "generations": 1,
+      "final_players": 24,
+      "loss_eval": 0.17578907484812029,
+      "loss_full": 0.23103707037164958,
+      "r_p90": 0.559142843244001,
+      "at_bound": 13,
+      "q_gt_1": 51,
+      "violations": 0,
+      "active_players": 24,
+      "stack_entropy": 0.637576848198398,
+      "ari": 0.0008484028360057404,
+      "nmi": 0.4116779055554569,
+      "purity": 0.2695035460992908,
+      "coverage": 1.0,
+      "v_measure": 0.4116779055554568,
+      "pairwise_f1": 0.04670912951167728,
+      "global_drive": "other",
+      "residual": 0.008189534683870583,
+      "movement": 0.010768116601098516,
+      "fraction_stability": null,
+      "wall_total": 163.43501531699997
+    }
+  ],
+  "summary": [
+    {
+      "players": 24,
+      "init": "random",
+      "stop": "partition",
+      "n": 1,
+      "mean_loss_eval": 0.17578907484812029,
+      "mean_ari": 0.0008484028360057404,
+      "mean_nmi": 0.4116779055554569,
+      "mean_purity": 0.2695035460992908,
+      "mean_violations": 0.0,
+      "mean_final_players": 24.0,
+      "mean_residual": 0.008189534683870583,
+      "mean_wall_total": 163.43501531699997,
+      "stop_reasons": [
+        "max_generations"
+      ]
+    },
+    {
+      "players": 24,
+      "init": "territory",
+      "stop": "partition",
+      "n": 1,
+      "mean_loss_eval": 0.18529280485246397,
+      "mean_ari": 0.18182152314681155,
+      "mean_nmi": 0.5970467295120491,
+      "mean_purity": 0.49645390070921985,
+      "mean_violations": 0.0,
+      "mean_final_players": 23.0,
+      "mean_residual": 0.0035641549520507515,
+      "mean_wall_total": 193.65762329,
+      "stop_reasons": [
+        "max_generations"
+      ]
+    }
+  ]
+}

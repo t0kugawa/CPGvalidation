@@ -1,0 +1,2 @@
+arm,seed,steps,players,wall_s,loss_eval,k,trials
+cmaes_sub,0,100,,77.856430107,0.2819076382433701,16,2
