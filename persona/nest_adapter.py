@@ -45,6 +45,7 @@ class NestAdapter(Adapter):
         self._plastic_n_syn: Dict[str, int] = {}
         self._relay_noise: Dict[str, str] = {}
         self._relay_last: Dict[str, float] = {}
+        self._relay_links: Dict[str, tuple[str, str]] = {}
         self._syn_counts: Dict[str, int] = {}
         # Creation-time values per canonical site key, and the attributes the
         # caller pinned to them (PersonaParam exposes mean/sigma as learned).
@@ -92,6 +93,9 @@ class NestAdapter(Adapter):
         """All producer recorders (STDP projections and sensory Poisson groups)."""
         return {n: r for n, r in self.noise_recorders.items()
                 if n.startswith("producer:")}
+
+    def relay_links(self) -> Dict[str, tuple[str, str]]:
+        return dict(self._relay_links)
 
     # --- creation defaults and freeze ---------------------------------------
 
@@ -431,6 +435,7 @@ class NestAdapter(Adapter):
         nest.Connect(pg, parrot, conn_spec={"rule": "one_to_one"})
         self.register_nodes(pg_key, pg)
         self.register_nodes(in_key, parrot)
+        self._relay_links[in_key] = (pg_key, str(pop_name or ""))
 
         if rate_param is not None:
             name = pop_name or pg_key

@@ -82,6 +82,7 @@ class NeuronAdapter(Adapter):
 
         self._relay_noise: Dict[str, str] = {}
         self._relay_last: Dict[str, float] = {}
+        self._relay_links: Dict[str, tuple[str, str]] = {}
 
         self._next_id = 0
         self._object_ids: Dict[int, int] = {}
@@ -190,6 +191,9 @@ class NeuronAdapter(Adapter):
     def producer_recorders(self) -> Dict[str, NoiseRecorder]:
         return {n: r for n, r in self.noise_recorders.items()
                 if n.startswith("producer:")}
+
+    def relay_links(self) -> Dict[str, tuple[str, str]]:
+        return dict(self._relay_links)
 
     # ------------------------------------------------------------------
     # creation defaults and freeze
@@ -505,6 +509,7 @@ class NeuronAdapter(Adapter):
                            rate_group=pg)
         self.register_nodes(pg_key, pg)
         self.register_nodes(in_key, relay)
+        self._relay_links[in_key] = (pg_key, str(pop_name or ""))
 
         if rate_param is not None:
             name = pop_name or pg_key

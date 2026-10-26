@@ -216,6 +216,10 @@ class Adapter(ABC):
     def producer_recorders(self) -> Dict[str, NoiseRecorder]:
         raise NotImplementedError
 
+    def relay_links(self) -> Dict[str, tuple[str, str]]:
+        """Relay input key -> (generator key, optimizable population name)."""
+        return {}
+
     # --- creation defaults, freeze, springs --------------------------------
 
     @abstractmethod
