@@ -1,7 +1,7 @@
 """PERSONA-Evo: segment-matrix initialization, pruning, and training."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 
 import numpy as np
 from scipy.sparse import csr_matrix
@@ -164,6 +164,233 @@ def prune_and_redistribute(partition: PlayerPartition, fractions,
     result = PlayerPartition(tuple(tuple(group) for group in groups))
     result.validate(matrix)
     return result, log, "pruned"
+
+
+@dataclass
+class EvoConfig:
+    n_players: int = 24
+    generations: int = 6
+    steps_per_generation: int = 400
+    eval_window: int = 50
+    init: str = "territory"
+    stop: str = "both"
+    patience: int = 2
+    nash_tol: float = 1e-3
+    impact_eps: float = 0.0
+    min_players: int = 2
+    seed: int = 0
+    extension_steps: int = 0
+    fresh_process: bool = True
+    sizes: dict | None = field(default=None, compare=False)
+
+    def __post_init__(self):
+        self.n_players = int(self.n_players)
+        self.generations = int(self.generations)
+        self.steps_per_generation = int(self.steps_per_generation)
+        self.eval_window = int(self.eval_window)
+        self.patience = int(self.patience)
+        self.nash_tol = float(self.nash_tol)
+        self.impact_eps = float(self.impact_eps)
+        self.min_players = int(self.min_players)
+        self.seed = int(self.seed)
+        self.extension_steps = int(self.extension_steps)
+        if self.n_players < 1:
+            raise ValueError("n_players must be >= 1")
+        if self.generations < 1:
+            raise ValueError("generations must be >= 1")
+        if self.steps_per_generation < 1:
+            raise ValueError("steps_per_generation must be >= 1")
+        if self.eval_window < 1:
+            raise ValueError("eval_window must be >= 1")
+        if self.init not in ("territory", "random"):
+            raise ValueError("init must be 'territory' or 'random'")
+        if self.stop not in ("partition", "nash", "both"):
+            raise ValueError("stop must be 'partition', 'nash', or 'both'")
+        if self.patience < 1:
+            raise ValueError("patience must be >= 1")
+        if self.nash_tol < 0.0:
+            raise ValueError("nash_tol must be >= 0")
+        if self.impact_eps < 0.0:
+            raise ValueError("impact_eps must be >= 0")
+        if self.min_players < 1:
+            raise ValueError("min_players must be >= 1")
+        if self.extension_steps < 0:
+            raise ValueError("extension_steps must be >= 0")
+
+
+@dataclass
+class GenerationResult:
+    partition: PlayerPartition
+    generation: int
+    seed: int
+    fractions: np.ndarray
+    fraction_mean: np.ndarray
+    contribution: np.ndarray
+    transfer: np.ndarray
+    replicator_residual: float
+    movement: float
+    metrics: dict
+    wall_s: float
+
+
+@dataclass
+class EvoResult:
+    final_partition: PlayerPartition
+    history: list[dict]
+    stop_reason: str
+    equilibrium: dict
+
+
+class EvoTrainer:
+    """Restart-from-seed evolutionary outer loop over player partitions."""
+
+    def __init__(self, matrix, config: EvoConfig, runner):
+        self.matrix = matrix
+        self.config = config
+        self.runner = runner
+        self.history: list[dict] = []
+
+    def run(self) -> EvoResult:
+        cfg = self.config
+        if cfg.init == "territory":
+            partition = territory_partition(self.matrix, cfg.n_players,
+                                            cfg.seed)
+        else:
+            partition = random_partition(self.matrix, cfg.n_players, cfg.seed)
+        stable = 0
+        seen: dict[tuple, int] = {}
+        previous_fractions = None
+        last_key = None
+        for generation in range(cfg.generations):
+            result = self.runner(partition, generation, cfg.seed)
+            partition = result.partition
+            partition.validate(self.matrix)
+            fractions = np.asarray(result.fractions, dtype=np.float64).ravel()
+            if fractions.size != len(partition.groups):
+                raise ValueError(
+                    "generation fractions do not match the partition: "
+                    f"{fractions.size} != {len(partition.groups)}")
+            threshold = max(cfg.impact_eps, 1e-12)
+            dead = fractions <= threshold
+            fraction_stability = None
+            if previous_fractions is not None and \
+                    previous_fractions.size == fractions.size:
+                fraction_stability = float(np.max(np.abs(
+                    fractions - previous_fractions)))
+            key = tuple(partition.groups)
+            record = {
+                "generation": int(generation),
+                "partition": [list(group) for group in partition.groups],
+                "fractions": fractions.tolist(),
+                "fraction_mean": np.asarray(
+                    result.fraction_mean, dtype=float).tolist(),
+                "contribution": np.asarray(
+                    result.contribution, dtype=float).tolist(),
+                "transfer": np.asarray(result.transfer, dtype=float).tolist(),
+                "replicator_residual": float(result.replicator_residual),
+                "movement": float(result.movement),
+                "fraction_stability": fraction_stability,
+                "dead": dead.tolist(),
+                "metrics": result.metrics,
+                "wall_s": float(result.wall_s),
+                "prune_reason": None,
+                "redistribution": [],
+            }
+            self.history.append(record)
+
+            no_dead = not bool(dead.any())
+            stable_next = stable + 1 if no_dead else 0
+            partition_ok = no_dead and stable_next >= cfg.patience
+            nash_ok = no_dead and result.replicator_residual <= cfg.nash_tol
+
+            if not np.any(~dead):
+                reason = "all_dead"
+            elif int(np.sum(~dead)) < cfg.min_players:
+                reason = "min_players"
+            elif cfg.stop == "partition":
+                reason = "partition" if partition_ok else None
+            elif cfg.stop == "nash":
+                if nash_ok:
+                    reason = "nash"
+                elif no_dead:
+                    reason = "partition_stable_nash_failed"
+                else:
+                    reason = None
+            else:  # both
+                if partition_ok and nash_ok:
+                    reason = "both"
+                elif no_dead and not nash_ok:
+                    reason = "partition_stable_nash_failed"
+                else:
+                    reason = None
+            if reason is None and key in seen and key != last_key:
+                reason = "cycle"
+            if reason is not None:
+                if reason == "all_dead":
+                    final = PlayerPartition((tuple(sorted(
+                        segment for group in partition.groups
+                        for segment in group)),))
+                else:
+                    final = partition
+                return EvoResult(
+                    final_partition=final,
+                    history=self.history,
+                    stop_reason=reason,
+                    equilibrium=self._equilibrium(
+                        final, result, no_dead, reason, generation + 1,
+                        fraction_stability),
+                )
+
+            seen[key] = generation
+            last_key = key
+            stable = stable_next
+            previous_fractions = fractions
+            new_partition, redistribution, prune_reason = \
+                prune_and_redistribute(
+                    partition, fractions, self.matrix, seed=cfg.seed,
+                    impact_eps=cfg.impact_eps, min_players=cfg.min_players)
+            record["prune_reason"] = prune_reason
+            record["redistribution"] = [asdict(entry)
+                                        for entry in redistribution]
+            if prune_reason in ("all_dead", "min_players"):
+                return EvoResult(
+                    final_partition=new_partition,
+                    history=self.history,
+                    stop_reason=prune_reason,
+                    equilibrium=self._equilibrium(
+                        new_partition, result, False, prune_reason,
+                        generation + 1, fraction_stability),
+                )
+            partition = new_partition
+        last = self.history[-1] if self.history else {}
+        return EvoResult(
+            final_partition=partition,
+            history=self.history,
+            stop_reason="max_generations",
+            equilibrium={
+                "stop_reason": "max_generations",
+                "generations": len(self.history),
+                "replicator_residual": last.get("replicator_residual"),
+                "movement": last.get("movement"),
+                "fraction_stability": last.get("fraction_stability"),
+                "partition_stable": bool(
+                    self.history and not any(self.history[-1]["dead"])),
+                "floor_hit": False,
+            },
+        )
+
+    def _equilibrium(self, partition, result, partition_stable, reason,
+                     generations, fraction_stability) -> dict:
+        return {
+            "stop_reason": reason,
+            "generations": int(generations),
+            "replicator_residual": float(result.replicator_residual),
+            "movement": float(result.movement),
+            "fraction_stability": fraction_stability,
+            "partition_stable": bool(partition_stable),
+            "floor_hit": reason == "min_players",
+            "n_players": len(partition.groups),
+        }
 
 
 def _seed_allocation(n_players: int, component_sizes: list[int]) -> list[int]:
