@@ -40,11 +40,13 @@ class Agent:
                  sampling_threads: int = 1,
                  noise_config: str = "all",
                  trace_strategy: bool = False,
-                 trace_float32: bool = False):
+                 trace_float32: bool = False,
+                 snapshot_strategy: int = 0):
         self.registry = registry
         self.noise_config = str(noise_config)
         self.trace_strategy = bool(trace_strategy)
         self.trace_float32 = bool(trace_float32)
+        self.snapshot_strategy = max(0, int(snapshot_strategy))
         self._trace_site_names: tuple[str, ...] | None = None
         self.lr_mu = float(lr_mu)
         self.lr_sigma = float(lr_sigma)
@@ -406,6 +408,10 @@ class Agent:
         self.strategy.lr_mu = lr_t
         delta_means = self.strategy.step(
             sites, noise, advantage_vec, phase_shift=phase_shift)
+        if (self.snapshot_strategy > 0
+                and self.current_step % self.snapshot_strategy == 0):
+            self.history.setdefault("strategy_checkpoints", []).append(
+                self.strategy.snapshot())
         if self.lr_schedule is not None:
             self.history["lr_mu"].append(lr_t)
         if self.homeostasis is not None:

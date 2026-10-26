@@ -191,7 +191,8 @@ class FisherMatrix:
             "F": self.F.copy(),
             "Xbar": self.Xbar.copy(),
             "G": self.G.copy(),
-            "P": self.P.copy(),
+            "P": self._P.copy(),
+            "_P_valid": bool(self._P_valid),
             "steps": int(self.steps),
             "_steps_since_refresh": int(self._steps_since_refresh),
             "beta": float(self.beta),
@@ -226,6 +227,7 @@ class FisherMatrix:
         fm.Xbar = np.array(data["Xbar"], dtype=np.float64, copy=True)
         fm.G = np.array(data["G"], dtype=np.float64, copy=True)
         fm.P = np.array(data["P"], dtype=np.float64, copy=True)
+        fm._P_valid = bool(data.get("_P_valid", True))
         fm.steps = int(data["steps"])
         fm._steps_since_refresh = int(data["_steps_since_refresh"])
         fm.noise_scales = dict(data.get("noise_scales", {}))
