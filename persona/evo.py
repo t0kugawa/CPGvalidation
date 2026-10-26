@@ -181,6 +181,7 @@ class EvoConfig:
     seed: int = 0
     extension_steps: int = 0
     fresh_process: bool = True
+    final_run: bool = True
     sizes: dict | None = field(default=None, compare=False)
 
     def __post_init__(self):
@@ -391,6 +392,87 @@ class EvoTrainer:
             "floor_hit": reason == "min_players",
             "n_players": len(partition.groups),
         }
+
+
+def write_evo_outputs(out_dir, result: EvoResult, matrix,
+                      config: EvoConfig, *,
+                      initial_partition: PlayerPartition | None = None
+                      ) -> dict:
+    """Write the Evo config, per-generation partitions, history, and report."""
+    import csv
+    import json
+    import os
+
+    os.makedirs(out_dir, exist_ok=True)
+    history = list(result.history)
+    if initial_partition is None and history:
+        initial_partition = PlayerPartition(tuple(
+            tuple(group) for group in history[0]["partition"]))
+    config_dict = asdict(config)
+    config_dict.update({"n_segments": int(matrix.n_segments),
+                        "n_sites": int(matrix.n_sites)})
+    with open(os.path.join(out_dir, "evo_config.json"), "w",
+              encoding="utf-8") as fh:
+        json.dump(config_dict, fh, indent=2, default=str)
+    if initial_partition is not None:
+        with open(os.path.join(out_dir, "initial_partition.json"), "w",
+                  encoding="utf-8") as fh:
+            json.dump(initial_partition.to_json(), fh, indent=2)
+    for index, record in enumerate(history):
+        with open(os.path.join(out_dir, f"gen_{index:03d}.json"), "w",
+                  encoding="utf-8") as fh:
+            json.dump(record, fh, indent=2, default=str)
+    with open(os.path.join(out_dir, "final_partition.json"), "w",
+              encoding="utf-8") as fh:
+        json.dump(result.final_partition.to_json(), fh, indent=2)
+    with open(os.path.join(out_dir, "history.json"), "w",
+              encoding="utf-8") as fh:
+        json.dump(history, fh, indent=2, default=str)
+    with open(os.path.join(out_dir, "evo_metrics.json"), "w",
+              encoding="utf-8") as fh:
+        json.dump({"stop_reason": result.stop_reason,
+                   "equilibrium": result.equilibrium,
+                   "generations": len(history)}, fh, indent=2,
+                  default=str)
+    if history:
+        fields = ("generation", "fractions", "fraction_mean",
+                  "replicator_residual", "movement", "fraction_stability",
+                  "prune_reason", "wall_s")
+        with open(os.path.join(out_dir, "history.csv"), "w", newline="",
+                  encoding="utf-8") as fh:
+            writer = csv.DictWriter(fh, fieldnames=fields)
+            writer.writeheader()
+            for record in history:
+                row = {key: record.get(key) for key in fields}
+                row["fractions"] = ";".join(
+                    f"{value:.6g}" for value in record.get("fractions", []))
+                row["fraction_mean"] = ";".join(
+                    f"{value:.6g}" for value in record.get("fraction_mean", []))
+                writer.writerow(row)
+    lines = [
+        "# PERSONA-Evo report",
+        "",
+        f"- stop reason: `{result.stop_reason}`",
+        f"- generations: {len(history)}",
+        f"- equilibrium: {json.dumps(result.equilibrium, default=str)}",
+        "",
+        "## Final players",
+        "",
+    ]
+    for index, group in enumerate(result.final_partition.groups):
+        names = [matrix.segments[segment].name for segment in group]
+        lines.append(f"- player_{index:03d}: {', '.join(names)}")
+    lines += ["", "## Generations", ""]
+    for record in history:
+        lines.append(
+            f"- gen {record['generation']}: residual "
+            f"{record.get('replicator_residual')}, fractions "
+            f"{record.get('fractions')}, prune {record.get('prune_reason')}")
+    with open(os.path.join(out_dir, "report.md"), "w",
+              encoding="utf-8") as fh:
+        fh.write("\n".join(lines) + "\n")
+    return {"out_dir": out_dir, "stop_reason": result.stop_reason,
+            "generations": len(history)}
 
 
 def _seed_allocation(n_players: int, component_sizes: list[int]) -> list[int]:

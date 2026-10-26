@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 from typing import Any
@@ -13,6 +14,7 @@ import nest
 from persona.registry import Registry
 from persona.agent import Agent
 from persona.game import GameConfig
+from persona.evo import EvoConfig
 from persona.homeostasis import HomeostaticConfig
 from persona.personalization import MocapTargetDriver, Personalizer
 from persona.validation import ValidationReport
@@ -239,7 +241,12 @@ def run_personalization(reference_path: str = DEFAULT_REFERENCE,
                         noise_config: str = "all",
                         trace_strategy: bool = False,
                         trace_float32: bool = False,
-                        snapshot_strategy: int = 0) -> dict:
+                        snapshot_strategy: int = 0,
+                        training: str = "manual",
+                        player_map: Any = None,
+                        evo: Any = None,
+                        evo_out: str | None = None,
+                        _sizes: dict | None = None) -> dict:
     """
     Full experiment: build the loop, run the two-stage PERSONA optimization,
     write the validation figure, the CSV/npz logs, and return the acceptance dict.
@@ -248,9 +255,29 @@ def run_personalization(reference_path: str = DEFAULT_REFERENCE,
     os.makedirs(output_dir, exist_ok=True)
     sizes = dict(n_rg=8, n_mn=8, n_int=6, n_aff=6, n_bs=8) if small \
         else dict(n_rg=20, n_mn=20, n_int=15, n_aff=20, n_bs=30)
+    if _sizes is not None:
+        sizes = dict(_sizes)
     if small:
         pose_hold_steps = min(pose_hold_steps, 3)
         loss_window = min(loss_window, 5)
+    if player_map is not None and isinstance(player_map, (str, os.PathLike)):
+        from persona.partition import PlayerPartition
+        with open(player_map, "r", encoding="utf-8") as fh:
+            player_map = PlayerPartition.from_json(json.load(fh))
+    if training == "evo":
+        return _run_evo_training(
+            reference_path=reference_path, output_dir=output_dir,
+            n_steps=n_steps, small=small, eps_pose=eps_pose,
+            pose_hold_steps=pose_hold_steps, loss_stop=loss_stop,
+            loss_window=loss_window, verbose=verbose, log_every=log_every,
+            belt_mode=belt_mode, tau_mem_s=tau_mem_s,
+            realize_every_k=realize_every_k,
+            cut_multisite=cut_multisite, lr_mode=lr_mode,
+            lr_start=lr_start, lr_end=lr_end, game=game, seed=seed,
+            nest_threads=nest_threads, noise_config=noise_config,
+            trace_strategy=trace_strategy, trace_float32=trace_float32,
+            snapshot_strategy=snapshot_strategy, evo=evo, evo_out=evo_out,
+            sizes=sizes)
 
     personalizer, loader = build_personalizer(
         reference_path=reference_path, max_steps=n_steps,
@@ -261,7 +288,7 @@ def run_personalization(reference_path: str = DEFAULT_REFERENCE,
         game=game, seed=seed, nest_threads=nest_threads,
         noise_config=noise_config, trace_strategy=trace_strategy,
         trace_float32=trace_float32, snapshot_strategy=snapshot_strategy,
-        **sizes)
+        player_map=player_map, **sizes)
     personalizer.verbose = verbose
     personalizer.log_every = log_every
 
@@ -320,6 +347,102 @@ def run_personalization(reference_path: str = DEFAULT_REFERENCE,
     }
 
 
+def _run_evo_training(*, reference_path: str, output_dir: str, n_steps: int,
+                      small: bool, eps_pose: float, pose_hold_steps: int,
+                      loss_stop: float, loss_window: int, verbose: bool,
+                      log_every: int, belt_mode: str, tau_mem_s: float,
+                      realize_every_k: int, cut_multisite: bool,
+                      lr_mode: str, lr_start: float, lr_end: float | None,
+                      game: GameConfig | None, seed: int, nest_threads: int,
+                      noise_config: str, trace_strategy: bool,
+                      trace_float32: bool, snapshot_strategy: int,
+                      evo: Any, evo_out: str | None, sizes: dict) -> dict:
+    from bench_homeostasis import FAST_SIZES
+    from persona.evo import (
+        EvoConfig,
+        EvoTrainer,
+        random_partition,
+        territory_partition,
+        write_evo_outputs,
+    )
+    from persona.evo_runner import run_generation, run_generation_fresh
+    from persona.segments import SegmentMatrix
+
+    if evo is None:
+        evo = EvoConfig(seed=seed)
+    if evo.seed is None:
+        evo.seed = int(seed)
+    sizes = dict(evo.sizes) if evo.sizes else dict(FAST_SIZES)
+
+    scratch, _ = build_personalizer(
+        reference_path=reference_path, max_steps=1, eps_pose=eps_pose,
+        pose_hold_steps=pose_hold_steps, loss_stop=loss_stop,
+        loss_window=loss_window, belt_mode=belt_mode, tau_mem_s=tau_mem_s,
+        cut_multisite=cut_multisite, lr_mode=lr_mode, lr_start=lr_start,
+        lr_end=lr_end, game=None, seed=seed, nest_threads=nest_threads,
+        noise_config="all", **sizes)
+    matrix = SegmentMatrix.from_registry(scratch.registry)
+    scratch.agent.close()
+
+    if evo.init == "territory":
+        initial = territory_partition(matrix, evo.n_players, evo.seed)
+    else:
+        initial = random_partition(matrix, evo.n_players, evo.seed)
+
+    runner = run_generation_fresh if evo.fresh_process else run_generation
+
+    def _runner(partition, generation, generation_seed):
+        return runner(partition, evo, generation, generation_seed)
+
+    trainer = EvoTrainer(matrix, evo, _runner)
+    result = trainer.run()
+    evo_dir = evo_out or os.path.join(output_dir, "evo")
+    write_evo_outputs(evo_dir, result, matrix, evo,
+                      initial_partition=initial)
+
+    if evo.final_run:
+        final = run_personalization(
+            reference_path=reference_path, output_dir=os.path.join(
+                output_dir, "evo_final"), n_steps=n_steps, small=small,
+            eps_pose=eps_pose, pose_hold_steps=pose_hold_steps,
+            loss_stop=loss_stop, loss_window=loss_window, verbose=verbose,
+            log_every=log_every, belt_mode=belt_mode, tau_mem_s=tau_mem_s,
+            realize_every_k=realize_every_k,
+            cut_multisite=cut_multisite, lr_mode=lr_mode,
+            lr_start=lr_start, lr_end=lr_end, game=game, seed=seed,
+            nest_threads=nest_threads, noise_config=noise_config,
+            trace_strategy=trace_strategy, trace_float32=trace_float32,
+            snapshot_strategy=snapshot_strategy, training="manual",
+            player_map=result.final_partition, _sizes=sizes)
+        final["evo"] = {
+            "out_dir": evo_dir,
+            "stop_reason": result.stop_reason,
+            "equilibrium": result.equilibrium,
+            "final_partition": result.final_partition.to_json(),
+        }
+        return final
+
+    last = result.history[-1] if result.history else {}
+    metrics = last.get("metrics", {}) if isinstance(last, dict) else {}
+    return {
+        "acceptable": False,
+        "duty_factor_in_distribution": False,
+        "angle_coverage": 0.0,
+        "final_loss": float(metrics.get("loss_eval", float("nan"))),
+        "n_steps_done": int(metrics.get("n_steps", 0)),
+        "n_pose": 0,
+        "n_track": int(metrics.get("n_steps", 0)),
+        "metrics": metrics,
+        "output_dir": output_dir,
+        "evo": {
+            "out_dir": evo_dir,
+            "stop_reason": result.stop_reason,
+            "equilibrium": result.equilibrium,
+            "final_partition": result.final_partition.to_json(),
+        },
+    }
+
+
 def _save_combined_figure(log, output_dir: str):
     import matplotlib
     matplotlib.use("Agg")
@@ -356,7 +479,9 @@ def main(n_steps: int = 200, small: bool = False, output_dir: str | None = None,
          game: GameConfig | None = None, seed: int = 0,
          nest_threads: int = 1, noise_config: str = "all",
          trace_strategy: bool = False, trace_float32: bool = False,
-         snapshot_strategy: int = 0) -> dict:
+         snapshot_strategy: int = 0, training: str = "manual",
+         player_map: Any = None, evo: Any = None,
+         evo_out: str | None = None) -> dict:
     res = run_personalization(n_steps=n_steps, small=small, output_dir=output_dir,
                               verbose=verbose, log_every=log_every,
                               tau_mem_s=tau_mem_s, realize_every_k=realize_every_k,
@@ -367,7 +492,9 @@ def main(n_steps: int = 200, small: bool = False, output_dir: str | None = None,
                               noise_config=noise_config,
                               trace_strategy=trace_strategy,
                               trace_float32=trace_float32,
-                              snapshot_strategy=snapshot_strategy)
+                              snapshot_strategy=snapshot_strategy,
+                              training=training, player_map=player_map,
+                              evo=evo, evo_out=evo_out)
     print(f"Steps: {res['n_steps_done']} (pose {res['n_pose']}, track {res['n_track']})")
     print(f"Final loss (last-20 mean): {res['final_loss']:.4f}")
     print(f"Acceptable: {res['acceptable']} | angle coverage: {res['angle_coverage']:.2f}")
@@ -377,6 +504,23 @@ def main(n_steps: int = 200, small: bool = False, output_dir: str | None = None,
 
 if __name__ == "__main__":
     args = parse_cli()
+    evo_cfg = None
+    if args.training == "evo":
+        evo_cfg = EvoConfig(
+            n_players=args.evo_players,
+            generations=args.evo_generations,
+            steps_per_generation=args.evo_steps,
+            eval_window=args.evo_eval_window,
+            init=args.evo_init,
+            stop=args.evo_stop,
+            patience=args.evo_patience,
+            nash_tol=args.evo_nash_tol,
+            impact_eps=args.evo_impact_eps,
+            min_players=args.evo_min_players,
+            seed=(args.evo_seed if args.evo_seed is not None else args.seed),
+            fresh_process=args.evo_fresh_process,
+            final_run=args.evo_final_run,
+        )
     main(n_steps=args.steps, tau_mem_s=args.tau_mem_s,
          realize_every_k=args.realize_every_k,
          cut_multisite=args.cut_multisite,
@@ -385,4 +529,6 @@ if __name__ == "__main__":
          seed=args.seed, nest_threads=args.nest_threads,
          noise_config=args.noise_config, trace_strategy=args.trace_strategy,
          trace_float32=args.trace_float32,
-         snapshot_strategy=args.snapshot_strategy)
+         snapshot_strategy=args.snapshot_strategy,
+         training=args.training, player_map=args.player_map,
+         evo=evo_cfg, evo_out=args.evo_out)
