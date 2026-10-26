@@ -177,6 +177,62 @@ class FisherMatrix:
         self.P = 0.5 * (P + P.T)
         self._steps_since_refresh = 0
 
+    # --- snapshots -----------------------------------------------------------
+
+    def snapshot(self) -> dict:
+        """Self-contained strategy checkpoint.
+
+        Restoring a snapshot restores the exact strategy state, including the
+        lazy inverse and its refresh age. It is not a full Agent resume:
+        ``PhaseBaselines``, ``_prev_phase``, means/sigmas, game stacks,
+        homeostasis, springs, and RNG streams live outside the strategy.
+        """
+        return {
+            "F": self.F.copy(),
+            "Xbar": self.Xbar.copy(),
+            "G": self.G.copy(),
+            "P": self.P.copy(),
+            "steps": int(self.steps),
+            "_steps_since_refresh": int(self._steps_since_refresh),
+            "beta": float(self.beta),
+            "lambda_reg": float(self.lambda_reg),
+            "warmup": int(self.warmup),
+            "refresh_every": int(self.refresh_every),
+            "lr_mu": float(self.lr_mu),
+            "lr_sigma": float(self.lr_sigma),
+            "dt_s": float(self.dt_s),
+            "param_names": list(self.param_names),
+            "noise_names": list(self.noise_names),
+            "noise_scales": dict(self.noise_scales),
+            "homeostasis": None,
+            "game": None,
+        }
+
+    @classmethod
+    def from_snapshot(cls, data: dict) -> "FisherMatrix":
+        """Rebuild a strategy from :meth:`snapshot` without recomputing ``P``."""
+        fm = cls(
+            param_names=list(data["param_names"]),
+            noise_names=list(data["noise_names"]),
+            lr_mu=float(data["lr_mu"]),
+            lr_sigma=float(data.get("lr_sigma", 0.005)),
+            lambda_reg=float(data["lambda_reg"]),
+            beta=float(data["beta"]),
+            warmup=int(data["warmup"]),
+            refresh_every=int(data["refresh_every"]),
+            dt_s=float(data["dt_s"]),
+        )
+        fm.F = np.array(data["F"], dtype=np.float64, copy=True)
+        fm.Xbar = np.array(data["Xbar"], dtype=np.float64, copy=True)
+        fm.G = np.array(data["G"], dtype=np.float64, copy=True)
+        fm.P = np.array(data["P"], dtype=np.float64, copy=True)
+        fm.steps = int(data["steps"])
+        fm._steps_since_refresh = int(data["_steps_since_refresh"])
+        fm.noise_scales = dict(data.get("noise_scales", {}))
+        fm.homeostasis = None
+        fm.game = None
+        return fm
+
     # --- layout helpers ------------------------------------------------------
 
     @property
