@@ -85,10 +85,11 @@ one-relay give n_noise 16/0/10/6/1, G-noise rows 0, A-trace error 0; wall
 
 **Algorithm comparison findings (2026-10-26)**
 
-Toy (14 params, 5 seeds, 20k env steps): CMA-ES best-seen tail loss 0.00296
-in 4.6 s; surrogate gradient 0.00462 in 25.8 s; PERSONA block 0.0131, diag
-0.0222, game 0.0644, no-game 0.0698. Final online policies are unstable
-(no-game final 1.64 on one seed); best-seen is reported separately. CPG
+Toy (14 params, 5 per-seed initial vectors, 20k env steps): CMA-ES best-seen
+tail loss 0.00251 in 4.6 s; surrogate gradient 0.00456 in 25.6 s; PERSONA diag
+0.01585, no-game 0.03328, block 0.06744, game 0.09015. Final online policies
+are unstable (no-game final 0.992 on one seed); best-seen is reported
+separately. CPG
 (400 steps, seed 0): evo partition loss 0.147, no-game 0.163, manual 0.272,
 block 0.276, diag 0.312; evo/block/diag give q>1=0, evo/block at_bound 10;
 manual game reduces at_bound to 3 at a loss cost. Phase gate and bio

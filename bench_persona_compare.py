@@ -49,10 +49,23 @@ def _sigma(name: str) -> float:
     return max(0.01, 0.05 * (high - low))
 
 
-def _params(seed: int = 0) -> dict:
+def _initial_for_seed(seed: int) -> dict:
+    """Per-seed initial vector, paired across arms within a seed."""
+    rng = np.random.default_rng(int(seed) ^ 0x5EED)
+    initial = {}
+    for name in PARAM_NAMES:
+        low, high = BOUNDS[name]
+        spread = 0.05 * (high - low)
+        initial[name] = float(np.clip(
+            INITIAL[name] + rng.uniform(-spread, spread), low, high))
+    return initial
+
+
+def _params(seed: int = 0, initial: dict | None = None) -> dict:
     reset_rng_stream(int(seed))
+    values = dict(initial or _initial_for_seed(seed))
     return {
-        name: PersonaParam(mean=INITIAL[name], sigma=_sigma(name),
+        name: PersonaParam(mean=values[name], sigma=_sigma(name),
                            min=BOUNDS[name][0], max=BOUNDS[name][1])
         for name in PARAM_NAMES
     }
@@ -92,7 +105,8 @@ def _strategy(arm: str, seed: int):
 def _run_online(arm: str, seed: int, episodes: int = 200) -> dict:
     started = time.perf_counter()
     toy = ToyCPG(ToyConfig(steps=100, seed=seed))
-    params = _params(seed)
+    initial = _initial_for_seed(seed)
+    params = _params(seed, initial)
     strategy = _strategy(arm, seed)
     curve = []
     best_curve = float("inf")
@@ -166,16 +180,18 @@ def _run_online(arm: str, seed: int, episodes: int = 200) -> dict:
         "best_curve": float(best_curve),
         "curve": curve, "wall_s": float(time.perf_counter() - started),
         "final_params": final, "best_params": best_params,
+        "initial_params": initial,
     }
 
 
 def _run_offline(arm: str, seed: int, episodes: int = 200) -> dict:
     started = time.perf_counter()
     toy = ToyCPG(ToyConfig(steps=100, seed=seed))
+    initial = _initial_for_seed(seed)
     if arm == "cmaes":
         result = run_cmaes(
             lambda params: float(toy.rollout(params)["tail_loss"]),
-            BOUNDS, INITIAL, n_trials=int(episodes), seed=seed)
+            BOUNDS, initial, n_trials=int(episodes), seed=seed)
         final = dict(result["best_params"])
         best_params = dict(result["best_params"])
         best_loss = float(result["best_value"])
@@ -187,7 +203,7 @@ def _run_offline(arm: str, seed: int, episodes: int = 200) -> dict:
             best.append(current)
         curve = best
     elif arm == "surrogate":
-        params = dict(INITIAL)
+        params = dict(initial)
         m = {name: 0.0 for name in PARAM_NAMES}
         v = {name: 0.0 for name in PARAM_NAMES}
         curve = []
@@ -222,6 +238,7 @@ def _run_offline(arm: str, seed: int, episodes: int = 200) -> dict:
         "best_curve": float(best_loss),
         "curve": curve, "wall_s": float(time.perf_counter() - started),
         "final_params": final, "best_params": best_params,
+        "initial_params": initial,
     }
 
 

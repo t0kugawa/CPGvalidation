@@ -166,18 +166,25 @@ player groups. It is **game-off**, for the same reason as `persona_diag`.
 
 Benchmark-only, pure numpy:
 
-- forward the same toy LIF network for `T` steps;
-- backward through the membrane dynamics with a fast-sigmoid surrogate
-  `d spike / d v = α / (1 + α|v|)²` (α=10);
+- forward a **soft-spike relaxation** of the same toy LIF network for `T`
+  steps: `spike = sigmoid(α(v−1))` (α=10), no hard threshold in the training
+  forward;
+- backward with exact reverse-mode autodiff through the relaxation (equivalent
+  to a smooth surrogate derivative `α s (1−s)`);
 - optimize the same 14 parameters with Adam (implemented in the benchmark);
 - one epoch = one episode; batch = 1; **200 epochs**, matching the 20,000
   environment steps of the other arms;
 - objective = the same tail-window loss;
-- gradient check on a 3-parameter subset against finite differences
-  (relative error < 1e-4) is a required test.
+- gradient check on a 3-parameter subset against finite differences of the
+  **relaxation** (relative error < 1e-4) is a required test;
+- the trained vector is evaluated on the **hard** toy (`ToyCPG.rollout`), so
+  the report separates "relaxation training" from "hard-model evaluation".
 
-This is a genuine surrogate-gradient method on the spiking toy. It is not run
-on NEST.
+This is a surrogate-gradient method in the soft-spike/relaxation sense. It is
+not run on NEST. A hard-spike forward with a surrogate backward is a possible
+ablation, but it cannot pass a finite-difference check of the hard loss
+because the spike is discontinuous; the spec's check is therefore scoped to
+the relaxation.
 
 ## 4. Fairness and budgets
 

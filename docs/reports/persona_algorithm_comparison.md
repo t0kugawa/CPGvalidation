@@ -32,21 +32,21 @@ Mean held-out tail loss (lower is better; std in parentheses):
 
 | arm | best-seen held-out | final held-out | best training curve | mean wall |
 |---|---:|---:|---:|---:|
-| CMA-ES | **0.00296** (0.00081) | **0.00296** | **0.00296** | 4.6 s |
-| surrogate gradient | 0.00462 (0.0) | 0.00462 | 0.00232 | 25.8 s |
-| PERSONA block | 0.01311 (0.00572) | 0.02835 | 0.01292 | 27.6 s |
-| PERSONA diag | 0.02218 (0.00788) | 0.04007 | 0.01193 | 24.2 s |
-| PERSONA game | 0.06437 (0.08638) | 0.03836 | 0.02442 | 38.6 s |
-| PERSONA no-game | 0.06980 (0.08319) | 1.64061 | 0.02276 | 25.0 s |
+| CMA-ES | **0.00251** (0.00026) | **0.00251** | **0.00251** | 4.6 s |
+| surrogate gradient | 0.00456 (0.00160) | 0.00456 | 0.00247 | 25.6 s |
+| PERSONA diag | 0.01585 (0.00723) | 0.01842 | 0.01178 | 24.2 s |
+| PERSONA no-game | 0.03328 (0.03834) | 0.99224 | 0.01700 | 25.2 s |
+| PERSONA block | 0.06744 (0.08451) | 0.18584 | 0.01784 | 27.9 s |
+| PERSONA game | 0.09015 (0.11122) | 0.08992 | 0.02532 | 37.1 s |
 
 **Reading.** CMA-ES is the clear winner on this toy: 4.6 s for 200 episodes and
-a 4.5× lower best-seen loss than the best PERSONA variant. The surrogate
-gradient is close (0.0046) and is the best *online-style* method in cost: 25.8 s
-for 200 epochs. Among PERSONA arms, the block-diagonal preconditioner is the
-best (0.0131), then diagonal (0.0222); the full Fisher is weaker and the game
-hurts (0.0644/0.0698) and is high-variance. The no-game final policy blows up
-on one seed (final 1.64), which is exactly the online instability the toy
-exposes.
+about a 6x lower best-seen loss than the best PERSONA variant. The surrogate
+gradient is close (0.00456) and is the best *online-style* method in cost:
+25.6 s for 200 epochs. Among PERSONA arms, the diagonal preconditioner is the
+best and the most stable (best 0.01585, final 0.01842), then no-game (best
+0.03328, final 0.992 on one seed), block (best 0.06744, final 0.18584) and the
+game (best 0.09015, final 0.08992). The no-game final policy blows up on one
+seed, which is exactly the online instability the toy exposes.
 
 **Caveats.** The online arms are scored by **best-seen** because the final
 policy is unstable; the final numbers are included for honesty. The toy's
@@ -103,9 +103,9 @@ claim.
 
 | metric | winner | note |
 |---|---|---|
-| toy best-seen loss | CMA-ES | 0.00296 |
+| toy best-seen loss | CMA-ES | 0.002505 |
 | toy wall-time efficiency | CMA-ES | 4.6 s |
-| toy among PERSONA variants | block | 0.0131 |
+| toy among PERSONA variants | diag | 0.01585 |
 | CPG loss | evo partition | 0.147 |
 | CPG saturation (`q>1`, at_bound) | diag/block/evo | all q>1=0; evo/block at_bound 10 |
 | CPG participation/entropy | evo | 0.694 |
@@ -116,12 +116,12 @@ claim.
 1. **CMA-ES is a strong offline baseline on a 14-D deterministic toy.** This is
    expected and should be reported, not hidden.
 2. **PERSONA's online one-step natural gradient is noisy on this toy.** The
-   best-seen metric is competitive with the surrogate only for the block
-   variant; the final policy is unstable. The toy should be made smoother or
-   the online advantage should be windowed before drawing a general conclusion.
-3. **The block preconditioner is the best PERSONA variant on the toy**, and it
-   strongly reduces CPG saturation. The game helps CPG saturation but hurts
-   the toy; the Evo partition helps both loss and saturation on the CPG.
+   diagonal variant is the best and most stable PERSONA arm; the full/game arms
+   are weaker and the final policy is unstable. The toy should be made smoother
+   or the online advantage should be windowed before drawing a general conclusion.
+3. **The diagonal preconditioner is the best PERSONA variant on the toy**, and
+   both diag/block strongly reduce CPG saturation. The game helps CPG saturation
+   but hurts the toy; the Evo partition helps both loss and saturation on the CPG.
 4. **Phase/bio work is separate.** No algorithm arm passes the phase gate;
    tune the CPG/phase loop before using these arms for a bio-plausibility
    claim.

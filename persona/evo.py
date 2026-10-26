@@ -121,6 +121,7 @@ def prune_and_redistribute(partition: PlayerPartition, fractions,
 
     rng = np.random.default_rng(int(seed) ^ 0xE2)
     groups = [list(partition.groups[index]) for index in survivors]
+    survivor_fractions = [float(fractions[index]) for index in survivors]
     log: list[Redistribution] = []
     for dead_index in dead:
         for segment in partition.groups[dead_index]:
@@ -134,7 +135,8 @@ def prune_and_redistribute(partition: PlayerPartition, fractions,
             if fallback:
                 best = max(
                     scores,
-                    key=lambda entry: (entry[1], len(groups[entry[2]]),
+                    key=lambda entry: (entry[1],
+                                       survivor_fractions[entry[2]],
                                        -entry[2]))
                 target = int(best[2])
                 distance = float("inf")

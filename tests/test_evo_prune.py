@@ -75,6 +75,17 @@ def test_disconnected_segment_uses_flagged_fallback():
     assert 3 in [s for group in new.groups for s in group]
 
 
+def test_disconnected_fallback_prefers_largest_surviving_fraction():
+    matrix = _Matrix(5, [(0, 1), (1, 2)])
+    partition = PlayerPartition(((0, 1), (2, 3), (4,)))
+    new, log, reason = prune_and_redistribute(
+        partition, np.array([0.2, 0.8, 0.0]), matrix, seed=0,
+        impact_eps=0.0, min_players=1)
+    assert reason == "pruned"
+    assert log[0].fallback is True
+    assert (2, 3, 4) in new.groups
+
+
 def test_min_players_floor_returns_input():
     matrix = _Matrix(3, [(0, 1), (1, 2)])
     partition = PlayerPartition(((0,), (1,), (2,)))

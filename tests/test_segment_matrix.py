@@ -102,11 +102,16 @@ def test_nest_inventory_and_relay_drive(nest_kernel):
     assert "con_in_f_L_m_e_L" in names
 
     by_name = {segment.name: segment.id for segment in matrix.segments}
-    bs_id = by_name["pop_BS_E"]
+    for rate_name, efferents in (
+        ("pop_BS_E", ("con_BS_in_e_rg_e_L", "con_BS_in_e_rg_e_R")),
+        ("pop_BS_F", ("con_BS_in_f_rg_f_L", "con_BS_in_f_rg_f_R")),
+    ):
+        rate_id = by_name[rate_name]
+        for efferent in efferents:
+            assert np.isfinite(matrix.distance[rate_id, by_name[efferent]])
+            assert "relay_drive" in matrix.edge_types[
+                (min(rate_id, by_name[efferent]),
+                 max(rate_id, by_name[efferent]))]
     base_id = by_name["pop_BASE_pg"]
-    for efferent in ("con_BS_in_e_rg_e_L", "con_BS_in_e_rg_e_R"):
-        assert np.isfinite(matrix.distance[bs_id, by_name[efferent]])
-        assert "relay_drive" in matrix.edge_types[
-            (min(bs_id, by_name[efferent]), max(bs_id, by_name[efferent]))]
     for efferent in ("con_BASE_in_rg_e_L", "con_BASE_in_rg_f_R"):
         assert np.isfinite(matrix.distance[base_id, by_name[efferent]])
