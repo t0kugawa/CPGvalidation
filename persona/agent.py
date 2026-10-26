@@ -38,9 +38,14 @@ class Agent:
                  game: GameConfig | None = None,
                  lr_schedule: CosineLR | None = None,
                  sampling_threads: int = 1,
-                 noise_config: str = "all"):
+                 noise_config: str = "all",
+                 trace_strategy: bool = False,
+                 trace_float32: bool = False):
         self.registry = registry
         self.noise_config = str(noise_config)
+        self.trace_strategy = bool(trace_strategy)
+        self.trace_float32 = bool(trace_float32)
+        self._trace_site_names: tuple[str, ...] | None = None
         self.lr_mu = float(lr_mu)
         self.lr_sigma = float(lr_sigma)
         self.lr_schedule = lr_schedule
@@ -149,6 +154,16 @@ class Agent:
             if rec.beta != self.beta:
                 rec.beta = self.beta
         self.params = params
+        if self.trace_strategy:
+            names = tuple(params)
+            if self._trace_site_names is None:
+                self._trace_site_names = names
+            elif names != self._trace_site_names:
+                added = sorted(set(names) - set(self._trace_site_names))
+                removed = sorted(set(self._trace_site_names) - set(names))
+                raise RuntimeError(
+                    "strategy trace requires a fixed site set; changed sites: "
+                    f"added={added} removed={removed}")
         strategy = getattr(self, "strategy", None)
         if strategy is not None:
             selected = select_producer_names(
@@ -159,6 +174,75 @@ class Agent:
         if getattr(self, "game", None) is not None:
             self.game.ensure_params(params.keys())
         return params
+
+    def _sync_trace_noise_names(self) -> None:
+        """Extend earlier trace rows when a producer appears mid-run."""
+        trace = self.history.get("strategy_trace")
+        if trace is None:
+            return
+        current = list(self.strategy.noise_names)
+        known = list(trace["noise_names"])
+        if current == known:
+            return
+        if len(current) < len(known) or current[:len(known)] != known:
+            raise RuntimeError(
+                "strategy trace producer set changed by removal or reorder: "
+                f"known={known} current={current}")
+        pad = len(current) - len(known)
+        for key in ("noise_delta", "noise_scale"):
+            for i, row in enumerate(trace[key]):
+                trace[key][i] = np.concatenate(
+                    [row, np.zeros(pad, dtype=row.dtype)])
+        trace["noise_names"] = current
+
+    def _record_strategy_trace(self, sites: Dict[str, tuple],
+                               noise: Dict[str, tuple],
+                               advantage: np.ndarray) -> None:
+        if not self.trace_strategy:
+            return
+        trace = self.history.get("strategy_trace")
+        dtype = "float32" if self.trace_float32 else "float64"
+        if trace is None:
+            trace = {
+                "dtheta": [], "sigma": [], "dlogsigma": [],
+                "advantage": [], "noise_delta": [], "noise_scale": [],
+                "param_names": list(self.strategy.param_names),
+                "noise_names": list(self.strategy.noise_names),
+                "beta": float(self.strategy.beta),
+                "lambda_reg": float(self.strategy.lambda_reg),
+                "warmup": int(self.strategy.warmup),
+                "refresh_every": int(self.strategy.refresh_every),
+                "lr_mu": float(self.strategy.lr_mu),
+                "lr_sigma": float(self.lr_sigma),
+                "dt_s": float(self.strategy.dt_s),
+                "dtype": dtype,
+            }
+            self.history["strategy_trace"] = trace
+        self._sync_trace_noise_names()
+        names = list(trace["param_names"])
+        noise_names = list(trace["noise_names"])
+        trace["dtheta"].append(np.asarray(
+            [sites[name][0] for name in names], dtype=dtype))
+        trace["sigma"].append(np.asarray(
+            [sites[name][1] for name in names], dtype=dtype))
+        trace["dlogsigma"].append(np.asarray(
+            [sites[name][2] for name in names], dtype=dtype))
+        trace["advantage"].append(np.asarray(advantage, dtype=dtype))
+        trace["noise_delta"].append(np.asarray(
+            [noise.get(name, (0.0, 0.0))[0] for name in noise_names],
+            dtype=dtype))
+        trace["noise_scale"].append(np.asarray(
+            [noise.get(name, (0.0, 0.0))[1] for name in noise_names],
+            dtype=dtype))
+        trace["lr_mu"] = float(self.strategy.lr_mu)
+
+    def strategy_trace_arrays(self) -> Dict[str, Any] | None:
+        """Return the trace with list rows converted to arrays."""
+        trace = self.history.get("strategy_trace")
+        if trace is None:
+            return None
+        from persona.strategy_trace import trace_arrays
+        return trace_arrays(trace)
 
     # --- per-step API -------------------------------------------------------
 
@@ -318,6 +402,7 @@ class Agent:
             noise[rec_name] = (0.0 if delta is None else float(delta),
                                0.0 if rec.scale is None else float(rec.scale))
 
+        self._record_strategy_trace(sites, noise, advantage_vec)
         self.strategy.lr_mu = lr_t
         delta_means = self.strategy.step(
             sites, noise, advantage_vec, phase_shift=phase_shift)
