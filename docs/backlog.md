@@ -39,6 +39,30 @@
   distributions, not just active counts
 * Identifiability audit: freeze structural constants, group sites into
   functional players
+* PERSONA-Evo (typed covariance improves player redistribution). Redistributing orphaned segments via typed covariance — structural (from registry links) + functional (from Fisher/advantage), explicitly excluding global (shared hyperparameters/baseline) and noise (Poisson/PERSONA, via Noise Recorder) covariance — yields more stable Nash equilibria, better overlap with manual physiological segmentation, and fewer spurious captures than redistribution by raw covariance, with sensitivity analysis over thresholds. Design: `docs/superpowers/specs/2026-10-26-persona-evo-design.md`.
+
+**Strategy history / noise findings (2026-10-26)**
+
+Synthetic `FisherMatrix` probe: rebuilding `F/Xbar/G` from exact per-step
+`(sample, mu_at, sigma_at, dlogsigma, A)` is exact; rebuilding from the saved
+post-step mean/sigma traces is ~99% wrong; dropping `Xbar` changes `G` and the
+natural-gradient step by orders of magnitude. `F` and `Xbar` merge exactly only
+with decay-aware weights; `G` is a bilinear `Xbar*A` EWMA and cannot be merged
+exactly from per-segment `G` alone (35% error in a 3-way split). Current
+`merge` is a normalized ensemble average, not an exact continuation;
+`step_batch` and `merge` differ by 49% in the existing test. Parameter traces
+are diagnostic, not sufficient statistics.
+
+Noise recorders: producers are 10 Poisson sensory relays (CUT/Ia/Ib per side)
+and 6 STDP projections. BS/BASE rates and site recorders are not producers.
+Open issues: producer `scale` is fixed at registration (`Wmax`/rate can move);
+`record_delta` overwrites pending (multiple writes per step lose all but the
+last); the score `delta/R^2` uses `R` as a value, not a noise std (dimension
+check needed); a site recorder stores the policy action, not the realized
+per-neuron/per-synapse dispersion; zero-synapse projections still have sites.
+Add tests for all producer configurations (all/none/Poisson-only/STDP-only/
+per-relay), stale/duplicate/missing-scale deltas, and the fast-CPG A/B.
+Design: `docs/superpowers/specs/2026-10-26-persona-strategy-history-noise-design.md`.
 
 **Low**
 
