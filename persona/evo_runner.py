@@ -126,6 +126,7 @@ def run_generation(partition: PlayerPartition, config: EvoConfig,
             10.0, foot_pos_L=foot_L, foot_pos_R=foot_R))
     except Exception as exc:  # diagnostic only; never hide the main result
         metrics["phase_error"] = f"{type(exc).__name__}: {exc}"
+    metrics["sole_up"] = "not measured (not logged)"
     return GenerationResult(
         partition=partition,
         generation=int(generation),

@@ -30,3 +30,6 @@ pillow==12.3.0
 # --- dev tools ---
 pytest==9.1.1
 ruff==0.17.0
+
+# --- benchmark only ---
+cmaes==0.13.1
