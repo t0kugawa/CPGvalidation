@@ -28,6 +28,36 @@ def test_select_producer_names_rejects_unknown():
         select_producer_names(NAMES, "banana")
 
 
+def test_duplicate_delta_is_last_wins_and_read_clears():
+    from persona.noise_recorder import NoiseRecorder
+
+    rec = NoiseRecorder("producer:x", scale=2.0)
+    rec.record_delta(0.0, 1.0)
+    rec.record_delta(0.0, 3.0)
+    assert rec.take_delta() == 3.0
+    assert rec.take_delta() is None
+
+
+def test_missing_scale_records_stats_but_strategy_score_is_zero():
+    from persona.noise_recorder import NoiseRecorder
+
+    rec = NoiseRecorder("producer:x")
+    rec.record_delta(0.0, 2.0)
+    assert rec.scale is None
+    assert rec.take_delta() == 2.0
+    assert rec.stats()["n"] == 1
+
+
+def test_site_recorder_keeps_last_sample_and_is_not_a_producer():
+    from persona.noise_recorder import NoiseRecorder
+
+    rec = NoiseRecorder("site:pop_A_a")
+    rec.record_sample(0.0, 1.0, 0.2)
+    rec.record_sample(10.0, 1.5, 0.1)
+    assert rec.latest_sample() == (1.5, 0.1)
+    assert rec.take_delta() is None
+
+
 class _FakeRegistry:
     def __init__(self):
         from persona.parameter import PersonaParam
