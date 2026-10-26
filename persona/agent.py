@@ -41,13 +41,18 @@ class Agent:
                  noise_config: str = "all",
                  trace_strategy: bool = False,
                  trace_float32: bool = False,
-                 snapshot_strategy: int = 0):
+                 snapshot_strategy: int = 0,
+                 player_map: Any = None):
         self.registry = registry
         self.noise_config = str(noise_config)
         self.trace_strategy = bool(trace_strategy)
         self.trace_float32 = bool(trace_float32)
         self.snapshot_strategy = max(0, int(snapshot_strategy))
+        self.player_map = player_map
         self._trace_site_names: tuple[str, ...] | None = None
+        if (player_map is not None and homeostasis is not None
+                and homeostasis.enabled):
+            raise ValueError("Evo and H are mutually exclusive")
         self.lr_mu = float(lr_mu)
         self.lr_sigma = float(lr_sigma)
         self.lr_schedule = lr_schedule
@@ -90,7 +95,12 @@ class Agent:
 
         self.game = None
         if game is not None and game.enabled:
-            game_map = PhysicalMap.from_registry(registry)
+            if player_map is not None:
+                from persona.segments import SegmentMatrix
+                matrix = SegmentMatrix.from_registry(registry)
+                game_map = player_map.physical_map(matrix)
+            else:
+                game_map = PhysicalMap.from_registry(registry)
             self.game = StackGame(
                 game_map, game, dt_s=self.dt_ms / 1000.0,
                 beta=self.beta, site_names=list(self.params.keys()))

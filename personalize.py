@@ -83,7 +83,8 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
                        noise_config: str = "all",
                        trace_strategy: bool = False,
                        trace_float32: bool = False,
-                       snapshot_strategy: int = 0
+                       snapshot_strategy: int = 0,
+                       player_map: Any = None
                        ) -> tuple[Any, MocapLoader]:
     """
     Builds the full closed loop: bilateral CPG (via the PERSONA registry),
@@ -203,7 +204,8 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
                   noise_config=noise_config,
                   trace_strategy=trace_strategy,
                   trace_float32=trace_float32,
-                  snapshot_strategy=snapshot_strategy)
+                  snapshot_strategy=snapshot_strategy,
+                  player_map=player_map)
 
     personalizer = Personalizer(
         registry=reg, cpg=cpg, rig=rig, agent=agent, target_driver=driver,
