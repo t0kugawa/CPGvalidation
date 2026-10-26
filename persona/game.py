@@ -71,8 +71,8 @@ class GameConfig:
             raise ValueError("transfer_rate must be non-negative")
         if self.movement_fee < 0.0:
             raise ValueError("movement_fee must be non-negative")
-        if self.share_floor <= 0.0:
-            raise ValueError("share_floor must be positive")
+        if self.share_floor < 0.0:
+            raise ValueError("share_floor must be non-negative")
         if self.eps <= 0.0:
             raise ValueError("eps must be positive")
         self.burnin_steps = int(self.burnin_steps)
@@ -288,6 +288,7 @@ class StackGame:
 
         self.steps = int(steps)
         n = self.stacks.size
+        previous_stacks = self.stacks.copy()
         tau = self.throttle()
         d_out = d.copy()
         contrib = np.zeros(n, dtype=np.float64)
@@ -332,7 +333,12 @@ class StackGame:
                 new = new + pot * weights / float(weights.sum())
 
         new = np.maximum(new, self.config.share_floor)
-        self.stacks = new / float(new.sum())
+        total = float(new.sum())
+        if not np.isfinite(total) or total <= self.config.eps:
+            self.stacks = previous_stacks
+            self._set_last("error", error="all_zero")
+            return d_out
+        self.stacks = new / total
 
         self._set_last(
             "active" if active else "burnin",
