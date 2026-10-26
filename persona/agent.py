@@ -4,6 +4,7 @@ import numpy as np
 from persona.registry import Registry
 from persona.strategy import FisherMatrix
 from persona.parameter import PersonaParam
+from persona.noise_recorder import select_producer_names
 from persona.sampling import ExplorationSampler
 from persona.game import GameConfig, StackGame
 from persona.homeostasis import (
@@ -36,8 +37,10 @@ class Agent:
                  homeostasis: HomeostaticConfig | None = None,
                  game: GameConfig | None = None,
                  lr_schedule: CosineLR | None = None,
-                 sampling_threads: int = 1):
+                 sampling_threads: int = 1,
+                 noise_config: str = "all"):
         self.registry = registry
+        self.noise_config = str(noise_config)
         self.lr_mu = float(lr_mu)
         self.lr_sigma = float(lr_sigma)
         self.lr_schedule = lr_schedule
@@ -87,6 +90,9 @@ class Agent:
             self.history["game"] = []
 
         if strategy is not None:
+            if self.noise_config != "all":
+                raise ValueError(
+                    "noise_config cannot be applied to a supplied strategy")
             self.strategy = strategy
             if self.homeostasis is not None:
                 self.strategy.homeostasis = self.homeostasis
@@ -99,9 +105,11 @@ class Agent:
                     self.strategy.ensure_names(self.strategy.param_names,
                                                self.strategy.noise_names)
         else:
+            producer_names = select_producer_names(
+                sorted(self.registry.producer_recorders()), self.noise_config)
             self.strategy = FisherMatrix(
                 param_names=list(self.params.keys()),
-                noise_names=sorted(self.registry.producer_recorders()),
+                noise_names=producer_names,
                 lr_mu=self.lr_mu,
                 lr_sigma=self.lr_sigma,
                 beta=self.beta,
@@ -141,6 +149,11 @@ class Agent:
             if rec.beta != self.beta:
                 rec.beta = self.beta
         self.params = params
+        strategy = getattr(self, "strategy", None)
+        if strategy is not None:
+            selected = select_producer_names(
+                sorted(self.registry.producer_recorders()), self.noise_config)
+            strategy.ensure_names(list(self.params.keys()), selected)
         if getattr(self, "homeostasis", None) is not None:
             self.homeostasis.ensure_params(params.keys())
         if getattr(self, "game", None) is not None:
@@ -297,7 +310,10 @@ class Agent:
         # the producer's current value at registration (0.0 = no influence);
         # no estimation and no warm-up gate.
         noise: Dict[str, tuple] = {}
+        allowed = set(self.strategy.noise_names)
         for rec_name, rec in self.registry.producer_recorders().items():
+            if rec_name not in allowed:
+                continue
             delta = rec.take_delta()
             noise[rec_name] = (0.0 if delta is None else float(delta),
                                0.0 if rec.scale is None else float(rec.scale))

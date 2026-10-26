@@ -1,4 +1,45 @@
+from collections.abc import Iterable
+
 import numpy as np
+
+
+def select_producer_names(names: Iterable[str], config: str) -> list[str]:
+    """Select producer recorder names for one benchmark/test configuration.
+
+    ``config`` is one of ``all``, ``none``, ``poisson``, ``stdp`` or
+    ``one-relay:<name>``.  The relay name may include or omit the
+    ``producer:`` and ``poisson:`` prefixes (``cut_L`` and
+    ``producer:poisson:cut_L`` both match).  Input order is preserved.
+    """
+    ordered = [str(name) for name in names]
+    if config == "all":
+        return ordered
+    if config == "none":
+        return []
+    if config == "poisson":
+        return [name for name in ordered
+                if name.startswith("producer:poisson:")]
+    if config == "stdp":
+        return [name for name in ordered if name.startswith("producer:stdp:")]
+    prefix = "one-relay:"
+    if isinstance(config, str) and config.startswith(prefix):
+        target = config[len(prefix):]
+        if target.startswith("producer:"):
+            target = target[len("producer:"):]
+        if target.startswith("poisson:"):
+            target = target[len("poisson:"):]
+        matches = [
+            name for name in ordered
+            if name == f"producer:poisson:{target}"
+            or name.endswith(f":{target}")
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                f"producer relay {target!r} matched {len(matches)} recorders")
+        return matches
+    raise ValueError(
+        "noise_config must be 'all', 'none', 'poisson', 'stdp', or "
+        f"'one-relay:<name>'; got {config!r}")
 
 
 class NoiseRecorder:

@@ -79,7 +79,8 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
                        lr_mode: str = "constant",
                        lr_start: float = 0.03,
                        lr_end: float | None = None,
-                       nest_threads: int = 1
+                       nest_threads: int = 1,
+                       noise_config: str = "all"
                        ) -> tuple[Any, MocapLoader]:
     """
     Builds the full closed loop: bilateral CPG (via the PERSONA registry),
@@ -195,7 +196,8 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
     agent = Agent(registry=reg, lr_mu=lr_start, lr_sigma=0.005,
                   tau_mem_s=tau_mem_s, dt_ms=DT_MS,
                   homeostasis=homeostasis, game=game,
-                  lr_schedule=lr_schedule, sampling_threads=nest_threads)
+                  lr_schedule=lr_schedule, sampling_threads=nest_threads,
+                  noise_config=noise_config)
 
     personalizer = Personalizer(
         registry=reg, cpg=cpg, rig=rig, agent=agent, target_driver=driver,
