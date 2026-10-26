@@ -17,7 +17,11 @@ from persona.partition import PlayerPartition
 def run_generation(partition: PlayerPartition, config: EvoConfig,
                    generation: int, seed: int) -> GenerationResult:
     """Run the normal game-on personalization with one partition."""
-    from bench_homeostasis import FAST_SIZES
+    from bench_homeostasis import (
+        FAST_SIZES,
+        inflation_metrics,
+        type_sign_violations,
+    )
     from personalize import build_personalizer
     from persona.game import GameConfig
 
@@ -33,6 +37,15 @@ def run_generation(partition: PlayerPartition, config: EvoConfig,
         **sizes,
     )
     agent = pers.agent
+    initial = {name: float(param.mean)
+               for name, param in agent.params.items()}
+    bounds = {name: (float(param.min), float(param.max))
+              for name, param in agent.params.items()}
+    ptypes = {}
+    if agent.game is not None:
+        for spec in agent.game.physical_map.specs:
+            for site in spec.param_names:
+                ptypes[site] = spec.ptype
     pers.verbose = False
     pers.log_every = 0
     pers.stdp_every = 0
@@ -69,6 +82,50 @@ def run_generation(partition: PlayerPartition, config: EvoConfig,
         "stack_entropy": float(game_history[-1].get("entropy_norm", 0.0)),
         "n_players": int(len(partition.groups)),
     }
+    metrics.update(inflation_metrics(agent.history["means"], initial, bounds,
+                                     eval_start=eval_start))
+    metrics["violations"] = int(len(type_sign_violations(
+        agent.history["means"], bounds, ptypes)))
+    try:
+        from loader.stats import LocomotionMetrics
+        from persona.phase_metrics import phase_gate_metrics
+        from personalize import acceptance_from_log
+
+        log_map = {name: getattr(log, name)
+                   for name in type(log)._NUMERIC + type(log)._STR}
+        phase = phase_gate_metrics(log_map, dt_ms=10.0)
+        metrics.update({
+            "phase_passed": bool(phase.passed),
+            "phase_failures": list(phase.failures),
+            "phase_cycles": phase.metrics.get("cycles"),
+            "phase_period_cv": phase.metrics.get("period_cv"),
+            "phase_ef": phase.metrics.get("ef_phase"),
+            "phase_lr_drift": phase.metrics.get("lr_drift"),
+            "phase_angle_corr": phase.metrics.get("angle_corr"),
+        })
+        acceptance = acceptance_from_log(log, None, margin=0.05,
+                                         coverage=0.70)
+        metrics.update({
+            "biological_acceptable": bool(acceptance["acceptable"]),
+            "angle_coverage": float(acceptance["angle_coverage"]),
+            "duty_factor_in_distribution": bool(
+                acceptance["duty_factor_in_distribution"]),
+        })
+        contact_L = np.asarray(
+            [1.0 if value == "stance" else 0.0 for value in log.phase_L])
+        contact_R = np.asarray(
+            [1.0 if value == "stance" else 0.0 for value in log.phase_R])
+        foot_L = np.column_stack([log.foot_x_m_L,
+                                  np.zeros(len(log.foot_x_m_L)),
+                                  log.foot_z_m_L])
+        foot_R = np.column_stack([log.foot_x_m_R,
+                                  np.zeros(len(log.foot_x_m_R)),
+                                  log.foot_z_m_R])
+        metrics.update(LocomotionMetrics.from_run(
+            log.ankle_model_L, log.ankle_model_R, contact_L, contact_R,
+            10.0, foot_pos_L=foot_L, foot_pos_R=foot_R))
+    except Exception as exc:  # diagnostic only; never hide the main result
+        metrics["phase_error"] = f"{type(exc).__name__}: {exc}"
     return GenerationResult(
         partition=partition,
         generation=int(generation),

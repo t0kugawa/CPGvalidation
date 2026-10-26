@@ -41,6 +41,17 @@
   functional players
 * PERSONA-Evo (typed covariance improves player redistribution). Redistributing orphaned segments via typed covariance — structural (from registry links) + functional (from Fisher/advantage), explicitly excluding global (shared hyperparameters/baseline) and noise (Poisson/PERSONA, via Noise Recorder) covariance — yields more stable Nash equilibria, better overlap with manual physiological segmentation, and fewer spurious captures than redistribution by raw covariance, with sensitivity analysis over thresholds. Design: `docs/superpowers/specs/2026-10-26-persona-evo-design.md`.
 
+Measured 2026-10-26 (fast CPG, 141 segments/273 sites, seed 0, 3 generations,
+400 steps): territory P=24 beats random on ARI (0.154 vs 0.0008), NMI (0.564
+vs 0.412) and purity (0.454 vs 0.270); final 21 players. P=137 territory/random
+ARI 0.054/0.038. Partition evaluation at 400 steps: evo-territory loss 0.148,
+reference 0.199, random 0.176, manual 141 0.263, no violations; phase gate
+fails for all arms and bio acceptance is false, so this is a partition result,
+not a bio-plausibility result. Global-drive hypothesis is not supported in this
+run: `pop_BS_E`/`pop_BS_F`/`pop_BASE_pg` land in players 0/3/3 and their
+projections span players 0-5 (`other`). Report:
+`docs/reports/persona_evo.md`.
+
 **Strategy history / noise findings (2026-10-26)**
 
 Synthetic `FisherMatrix` probe: rebuilding `F/Xbar/G` from exact per-step
