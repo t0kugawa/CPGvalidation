@@ -61,6 +61,47 @@ def save_run(path, log, agent, meta=None):
             v = hist.get(grp)
             if v is not None and len(v):
                 ag.create_dataset(grp, data=np.asarray(v, dtype=float))
+        trace = hist.get("strategy_trace")
+        if trace:
+            tg = ag.create_group("strategy_trace")
+            dtype = trace.get("dtype", "float64")
+            for key in ("dtheta", "sigma", "dlogsigma", "advantage",
+                        "noise_delta", "noise_scale"):
+                if key in trace:
+                    tg.create_dataset(
+                        key, data=np.asarray(trace[key], dtype=dtype))
+            for key in ("param_names", "noise_names"):
+                if key in trace:
+                    tg.attrs[key] = list(trace[key])
+            for key in ("beta", "lambda_reg", "warmup", "refresh_every",
+                        "lr_mu", "lr_sigma", "dt_s", "dtype"):
+                if key in trace and trace[key] is not None:
+                    tg.attrs[key] = trace[key]
+
+        checkpoints = hist.get("strategy_checkpoints") or []
+        if checkpoints:
+            cg = ag.create_group("strategy_checkpoints")
+            for index, snapshot in enumerate(checkpoints):
+                name = f"checkpoint_{index:04d}"
+                sg = cg.create_group(name)
+                sg.attrs["steps"] = int(snapshot.get("steps", index))
+                for key, value in snapshot.items():
+                    if key in ("steps", "param_names", "noise_names",
+                               "noise_scales", "homeostasis", "game"):
+                        continue
+                    if isinstance(value, np.ndarray):
+                        sg.create_dataset(key, data=value)
+                    elif isinstance(value, (int, float, bool, np.number)):
+                        sg.attrs[key] = value
+                for key in ("param_names", "noise_names"):
+                    if key in snapshot:
+                        sg.attrs[key] = list(snapshot[key])
+                if "noise_scales" in snapshot:
+                    sg.attrs["noise_scales"] = [
+                        float(v) for v in snapshot["noise_scales"].values()
+                    ] if isinstance(snapshot["noise_scales"], dict) else list(
+                        snapshot["noise_scales"])
+
         strategy = getattr(agent, "strategy", None)
         if strategy is not None:
             ag.attrs["param_names"] = list(getattr(strategy, "param_names", []))
@@ -113,4 +154,41 @@ def load_run(path):
             out["agent"]["noise_names"] = list(f["agent"].attrs.get("noise_names", []))
             out["agent"]["noise_scales"] = list(f["agent"].attrs.get("noise_scales", []))
             out["agent"]["all_names"] = list(f["agent"].attrs.get("all_names", []))
+            if "strategy_trace" in f["agent"]:
+                tg = f["agent"]["strategy_trace"]
+                trace = {}
+                for key in ("dtheta", "sigma", "dlogsigma", "advantage",
+                            "noise_delta", "noise_scale"):
+                    if key in tg:
+                        trace[key] = tg[key][()]
+                for key in ("beta", "lambda_reg", "warmup", "refresh_every",
+                            "lr_mu", "lr_sigma", "dt_s", "dtype"):
+                    if key in tg.attrs:
+                        trace[key] = _decode_attr(tg.attrs[key])
+                for key in ("param_names", "noise_names"):
+                    if key in tg.attrs:
+                        trace[key] = [_decode_attr(v)
+                                      for v in tg.attrs[key]]
+                out["agent"]["strategy_trace"] = trace
+            if "strategy_checkpoints" in f["agent"]:
+                checkpoints = []
+                for name in sorted(f["agent"]["strategy_checkpoints"]):
+                    sg = f["agent"]["strategy_checkpoints"][name]
+                    snapshot = {key: sg[key][()] for key in sg}
+                    for key in sg.attrs:
+                        snapshot[key] = _decode_attr(sg.attrs[key])
+                    for key in ("param_names", "noise_names"):
+                        if key in sg.attrs:
+                            snapshot[key] = [_decode_attr(v)
+                                             for v in sg.attrs[key]]
+                    checkpoints.append(snapshot)
+                out["agent"]["strategy_checkpoints"] = checkpoints
     return out, meta
+
+
+def _decode_attr(value):
+    if isinstance(value, bytes):
+        return value.decode()
+    if isinstance(value, np.bytes_):
+        return bytes(value).decode()
+    return value
