@@ -64,6 +64,14 @@ Add tests for all producer configurations (all/none/Poisson-only/STDP-only/
 per-relay), stale/duplicate/missing-scale deltas, and the fast-CPG A/B.
 Design: `docs/superpowers/specs/2026-10-26-persona-strategy-history-noise-design.md`.
 
+Measured 2026-10-26 (`bench_strategy_history.py`, 120 synthetic steps):
+A-trace rebuild 0; P-trace ~1.00; no-Xbar ~4.24; merge F/Xbar/G
+0.45/0.35/0.72. Fast-CPG 400 steps seed 0: configs all/none/poisson/stdp/
+one-relay give n_noise 16/0/10/6/1, G-noise rows 0, A-trace error 0; wall
+171-225 s per config. 100-step `all`: `noise_F_rel ≈ 5e-20` (absolute
+`noise_F_norm` is scale-dominated). Report:
+`docs/reports/strategy_history_noise.md`.
+
 **Low**
 
 * Variance reduction for advantage estimates
