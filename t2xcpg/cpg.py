@@ -1,4 +1,5 @@
 from typing import Dict, Any
+import os
 import nest
 
 from persona.registry import Registry
@@ -7,6 +8,13 @@ from persona.parameter import PersonaParam
 from model.adapter import CPGAdapter, CPGInput, CPGOutput
 from t2xcpg.bs import BrainStem, BaseDrive
 from t2xcpg.leg import Leg
+from t2xcpg.params import PARAMS
+
+# Drive-balance spec (2026-10-20): the chosen BS->RG base weight before the
+# leading-leg gain. Both legs use the same base; only leading_gain differs.
+W_BS2RG = PARAMS["w_con_bs_rg"]
+SCALE_BS = float(os.environ.get("CPG_SCALE_BS", str(PARAMS["scale_bs"])))
+SCALE_BASE = float(os.environ.get("CPG_SCALE_BASE", str(PARAMS["scale_base"])))
 
 
 class L2CPG(CPGAdapter):
@@ -20,10 +28,10 @@ class L2CPG(CPGAdapter):
                  registry: Registry,
                  bs: BrainStem,
                  legs: Dict[str, Leg],
-                 dt_ms: float = 10.0,
-                 p_comm: float = 0.40,
-                 leading_leg: str = "L",
-                 leading_gain: float = 1.5,
+                 dt_ms: float = PARAMS["dt_ms"],
+                 p_comm: float = PARAMS["p_comm"],
+                 leading_leg: str = PARAMS["leading_leg"],
+                 leading_gain: float = PARAMS["leading_gain"],
                  base: "BaseDrive | None" = None):
         self.registry = registry
         self.bs = bs
@@ -40,8 +48,15 @@ class L2CPG(CPGAdapter):
         self._build_commissural_connections(p_comm=p_comm)
         self.registry.finalize_connections()
 
-    def _param(self, name: str, mean: float, sigma: float = 0.1,
-               min_val: float = -100.0, max_val: float = 100.0) -> PersonaParam:
+    def set_bs_speed(self, speed_mps: float, ref_e: float | None = None,
+                     ref_f: float | None = None):
+        """Speed-scale the preserved BS drive without removing it."""
+        self.bs.set_speed(speed_mps, ref_e=ref_e, ref_f=ref_f)
+
+    def _param(self, name: str, mean: float,
+               sigma: float = PARAMS["l2_syn_weight_sigma_fraction"],
+               min_val: float = PARAMS["l2_syn_weight_min"],
+               max_val: float = PARAMS["l2_syn_weight_max"]) -> PersonaParam:
         return PersonaParam(
             mean=mean,
             sigma=sigma,
@@ -49,10 +64,13 @@ class L2CPG(CPGAdapter):
             max=max_val
         )
 
-    def _connect(self, src: str, tgt: str, weight: float, p: float = 0.40, delay: float = 3.0) -> Any:
-        w_param = self._param("weight", weight, abs(weight) * 0.1,
-                              min_val=-100.0 if weight < 0 else 0.0,
-                              max_val=0.0 if weight < 0 else 100.0)
+    def _connect(self, src: str, tgt: str, weight: float,
+                 p: float = PARAMS["l2_p_default"],
+                 delay: float = PARAMS["l2_delay_default"]) -> Any:
+        w_param = self._param("weight", weight,
+                              abs(weight) * PARAMS["l2_syn_weight_sigma_fraction"],
+                              min_val=PARAMS["l2_syn_weight_min"] if weight < 0 else 0.0,
+                              max_val=0.0 if weight < 0 else PARAMS["l2_syn_weight_max"])
         cfg = Connection(
             source=src,
             target=tgt,
@@ -75,9 +93,14 @@ class L2CPG(CPGAdapter):
         reference's measured band (85-229 Hz). PERSONA refines from here.
         """
         for leg_key, leg in self.legs.items():
-            gain = self.leading_gain if leg_key == self.leading_leg else 1.0
-            self._connect("BS_in_e", f"rg_e_{leg_key}", weight=4.0 * gain, p=0.45)
-            self._connect("BS_in_f", f"rg_f_{leg_key}", weight=4.0 * gain, p=0.45)
+            gain = (self.leading_gain if leg_key == self.leading_leg
+                    else PARAMS["leading_gain_other"])
+            self._connect("BS_in_e", f"rg_e_{leg_key}",
+                          weight=W_BS2RG * gain * SCALE_BS,
+                          p=PARAMS["p_con_bs_rg"])
+            self._connect("BS_in_f", f"rg_f_{leg_key}",
+                          weight=W_BS2RG * gain * SCALE_BS,
+                          p=PARAMS["p_con_bs_rg"])
 
     def _build_base_connections(self):
         """
@@ -88,10 +111,16 @@ class L2CPG(CPGAdapter):
         if self.base is None:
             return
         for leg_key in self.legs:
-            self._connect("BASE_in", f"rg_e_{leg_key}", weight=1.0, p=0.10, delay=1.0)
-            self._connect("BASE_in", f"rg_f_{leg_key}", weight=1.0, p=0.10, delay=1.0)
+            self._connect("BASE_in", f"rg_e_{leg_key}",
+                          weight=PARAMS["w_con_base_rg"] * SCALE_BASE,
+                          p=PARAMS["p_con_base_rg"],
+                          delay=PARAMS["delay_base_rg"])
+            self._connect("BASE_in", f"rg_f_{leg_key}",
+                          weight=PARAMS["w_con_base_rg"] * SCALE_BASE,
+                          p=PARAMS["p_con_base_rg"],
+                          delay=PARAMS["delay_base_rg"])
 
-    def _build_commissural_connections(self, p_comm: float = 0.40):
+    def _build_commissural_connections(self, p_comm: float = PARAMS["p_comm"]):
         """
         Commissural V-cell relay (NEURON `memcpg/leg.py` +
         `utils_cpg.py::add_external_connections`). Replaces the direct RG<->RG
@@ -108,13 +137,13 @@ class L2CPG(CPGAdapter):
         """
         if "L" not in self.legs or "R" not in self.legs:
             return
-        d = 3.0  # memcpg commissural delay
-        self._connect("v0v_L", "in1_R", weight=1.3, p=p_comm, delay=d)
-        self._connect("v0v_R", "in1_L", weight=1.3, p=p_comm, delay=d)
-        self._connect("v0d_L", "rg_f_R", weight=-1.3, p=p_comm, delay=d)
-        self._connect("v0d_R", "rg_f_L", weight=-1.3, p=p_comm, delay=d)
-        self._connect("v3f_L", "rg_f_R", weight=0.5, p=p_comm, delay=d)
-        self._connect("v3f_R", "rg_f_L", weight=0.5, p=p_comm, delay=d)
+        d = PARAMS["delay_comm"]  # memcpg commissural delay
+        self._connect("v0v_L", "in1_R", weight=PARAMS["w_con_v0v_in1"], p=p_comm, delay=d)
+        self._connect("v0v_R", "in1_L", weight=PARAMS["w_con_v0v_in1"], p=p_comm, delay=d)
+        self._connect("v0d_L", "rg_f_R", weight=PARAMS["w_con_v0d_rg_f"], p=p_comm, delay=d)
+        self._connect("v0d_R", "rg_f_L", weight=PARAMS["w_con_v0d_rg_f"], p=p_comm, delay=d)
+        self._connect("v3f_L", "rg_f_R", weight=PARAMS["w_con_v3f_rg_f"], p=p_comm, delay=d)
+        self._connect("v3f_R", "rg_f_L", weight=PARAMS["w_con_v3f_rg_f"], p=p_comm, delay=d)
 
     def update(self, cpg_in: CPGInput):
         """

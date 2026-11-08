@@ -330,13 +330,26 @@ class Personalizer:
         stage = "pose"
         pose_ok = 0
         pose_steps = 0
+        initial_weights = self.registry.snapshot_weights()
+        locomotion_initialized = False
+        last_actions = None
         # construction-time failures surface before the first apply clears them
         self._log_new_apply_errors()
 
         for step in range(self.max_steps):
+            speed_mps = 0.0
             if step >= self.belt_start_step and hasattr(self.rig, "set_treadmill_surfacevel"):
                 frac = min(1.0, (step - self.belt_start_step + 1) / self.belt_ramp_steps)
+                speed_mps = self.belt_mps * frac
                 self.rig.set_treadmill_surfacevel(self.belt_mps * frac)
+            if stage != "pose" and not locomotion_initialized:
+                # Restore every weight to its creation value at the start of
+                # locomotion, then pin the BS input so it cannot be learned
+                # away. Non-BS static weights remain PERSONA-tunable.
+                self.registry.restore_creation_params()
+                self.registry.restore_weights(initial_weights)
+                self.registry.pin_bs_input()
+                locomotion_initialized = True
             if stage == "pose":
                 # Hold the whole target (incl. the mocap hip base) at t=0.
                 rig_kwargs = self.target_driver.target(0.0)
@@ -349,9 +362,17 @@ class Personalizer:
                 actions = self.agent.sample_actions(t_ms=self.cpg.current_time_ms)
                 self.registry.apply_explored_parameters(actions)
                 self._log_new_apply_errors()
+                last_actions = actions
+
+            if hasattr(self.cpg, "set_bs_speed"):
+                ref_e = (last_actions or {}).get("pop_BS_E_rate")
+                ref_f = (last_actions or {}).get("pop_BS_F_rate")
+                self.cpg.set_bs_speed(speed_mps, ref_e=ref_e, ref_f=ref_f)
 
             self.cpg.update(cpg_in)
             cpg_out = self.cpg.step()
+            # STDP plastic weights accumulate through the run. They are
+            # restored only once, at the locomotion start above.
             cpg_in = self.rig.step(cpg_out, **rig_kwargs)
 
             res = self.agent.step(

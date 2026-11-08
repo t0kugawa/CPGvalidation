@@ -1,3 +1,11 @@
-DT_MS: float = 10.0
+from t2xcpg.params import PARAMS
 
-POPULATIONS_FINAL = {"n_rg": 100, "n_mn": 100, "n_int": 50, "n_aff": 100, "n_bs": 100}
+DT_MS: float = PARAMS["dt_ms"]
+
+POPULATIONS_FINAL = {
+    "n_rg": PARAMS["n_rg_final"],
+    "n_mn": PARAMS["n_mn_final"],
+    "n_int": PARAMS["n_int_final"],
+    "n_aff": PARAMS["n_aff_final"],
+    "n_bs": PARAMS["n_bs_final"],
+}

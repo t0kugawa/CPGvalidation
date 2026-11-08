@@ -8,17 +8,25 @@ from persona.population import Population
 from persona.connection import Connection
 from persona.registry import Registry
 from t2xcpg.cfg import POPULATIONS_FINAL
+from t2xcpg.params import PARAMS
 from t2xcpg.utils import (
     get_jitter_delay, create_stdp_synapse, STDP_POSTFIX, stdp_param_spec,
 )
 
 
-# Ib -> antagonist rhythm generator. Excitatory: the detailed scheme draws the
-# InIb-E/F -> RGF/RGE projection with an excitatory arrow (the "CPG
-# phase-switch signal"), and the 2026-10-15 spec calls it "contralateral-phase
-# RG exc". The earlier -18.0 came from W_IN2RG, a cpg_2legs_fast constant that
-# is defined but never connected; the sign was the error, the magnitude is kept.
-W_IB2RG = 18.0
+# Ib -> antagonist rhythm generator (initial value in params.py:
+# w_con_in_ib_e_rg_f / w_con_in_ib_f_rg_e). Excitatory: the detailed scheme
+# draws the InIb-E/F -> RGF/RGE projection with an excitatory arrow (the
+# "CPG phase-switch signal"), and the 2026-10-15 spec calls it
+# "contralateral-phase RG exc". The earlier -18.0 came from W_IN2RG, a
+# cpg_2legs_fast constant that is defined but never connected; the sign was
+# the error, the magnitude is kept.
+
+# Temporary CPG-only tuning scales (defaults preserve the current model).
+SCALE_IA = float(os.environ.get("CPG_SCALE_IA", str(PARAMS["scale_ia"])))
+SCALE_IB = float(os.environ.get("CPG_SCALE_IB", str(PARAMS["scale_ib"])))
+SCALE_CUT = float(os.environ.get("CPG_SCALE_CUT", str(PARAMS["scale_cut"])))
+SCALE_INHIB = float(os.environ.get("CPG_SCALE_INHIB", str(PARAMS["scale_inhib"])))
 
 # Renshaw recurrent inhibition is a structural stabiliser (scheme only, no
 # reference). PERSONA otherwise drove r_f -> m_f from -4 to about -20 and
@@ -26,19 +34,23 @@ W_IB2RG = 18.0
 # Renshaw weight's learned mean at its project value. Bounds and exploration
 # are unchanged. The env toggle is for A/B runs: CPG_RENSHAW_CLAMP=0 reproduces
 # the unconstrained baseline.
-RENSHAW_PROJECTIONS = (
-    ("m_e", "r_e", 3.0, 0.50),    # M-E -> R-E
-    ("r_e", "m_e", -4.0, 0.50),   # R-E -| M-E
-    ("r_e", "ia_e", -2.4, 0.40),  # R-E -| Ia-E
-    ("m_f", "r_f", 3.0, 0.50),    # M-F -> R-F
-    ("r_f", "m_f", -4.0, 0.50),   # R-F -| M-F
-    ("r_f", "ia_f", -2.4, 0.40),  # R-F -| Ia-F
+_RENSHAW_PAIRS = (
+    ("m_e", "r_e"),   # M-E -> R-E
+    ("r_e", "m_e"),   # R-E -l M-E
+    ("r_e", "ia_e"),  # R-E -l Ia-E
+    ("m_f", "r_f"),   # M-F -> R-F
+    ("r_f", "m_f"),   # R-F -l M-F
+    ("r_f", "ia_f"),  # R-F -l Ia-F
+)
+RENSHAW_PROJECTIONS = tuple(
+    (src, tgt, PARAMS[f"w_con_{src}_{tgt}"], PARAMS[f"p_con_{src}_{tgt}"])
+    for src, tgt in _RENSHAW_PAIRS
 )
 
 # The M-F Izhikevich parameters are frozen at the reference excitability. The
 # PERSONA homeostatic update otherwise drove a/b/d away from reference and
 # silenced the flexor pool (L musF 0.111 -> 0.008 over 20 s).
-M_F_IZH_REF = {"a": 0.02, "b": 0.2, "c": -65.0, "d": 8.0}
+M_F_IZH_REF = {name: PARAMS[f"izh_mf_{name}"] for name in ("a", "b", "c", "d")}
 
 # C1: the flexor motor pool's excitatory drive is seeded to compensate the
 # reduced source populations. The port reference is W_RG2MN=2.75 and the
@@ -50,8 +62,16 @@ M_F_IZH_REF = {"a": 0.02, "b": 0.2, "c": -65.0, "d": 8.0}
 # optimizable. At FINAL the scale is 1.0 (the reference values). Measured 20 s
 # at n_rg=10/n_aff=6 (4x): musF_L 0.093 (11.3% zero), musF_R 0.053 (19.1%
 # zero); the pre-fix run was 0.166 / 0.002 (93.9% zero).
-M_F_DRIVE_REF = {"rg_f": 2.75, "ia_f_in": 12.0}
-M_F_DRIVE_MAX_SCALE = 4.0
+M_F_DRIVE_REF = {
+    "rg_f": PARAMS["w_con_rg_f_m_f"],
+    "ia_f_in": PARAMS["w_con_ia_f_in_m_f"],
+}
+# CUT parameters from cpg_2legs_fast (single-site CUT model).
+W_CUT2RGE = PARAMS["w_stdp_cut_rge"]
+P_CUT2RGE = PARAMS["p_con_cut_rge"]
+W_CUT2INE = PARAMS["w_con_cut_in_e"]
+P_CUT2INE = PARAMS["p_con_cut_in_e"]
+M_F_DRIVE_MAX_SCALE = PARAMS["mf_drive_max_scale"]
 
 
 class Leg:
@@ -69,15 +89,15 @@ class Leg:
     def __init__(self,
                  leg_name: str,
                  registry: Registry,
-                 n_rg: int = 20,
-                 n_mn: int = 20,
-                 n_int: int = 15,
-                 n_aff: int = 20,
-                 p_scale: float = 1.0,
-                 w_scale: float = 1.0,
-                 ref_hz: float = 100.0,
-                 cut_multisite: bool = False,
-                 n_cut_sites: int = 8):
+                 n_rg: int = PARAMS["n_rg_default"],
+                 n_mn: int = PARAMS["n_mn_default"],
+                 n_int: int = PARAMS["n_int_default"],
+                 n_aff: int = PARAMS["n_aff_default"],
+                 p_scale: float = PARAMS["p_scale_default"],
+                 w_scale: float = PARAMS["w_scale_default"],
+                 ref_hz: float = PARAMS["ref_hz_default"],
+                 cut_multisite: bool = PARAMS["cut_multisite_default"],
+                 n_cut_sites: int = PARAMS["n_cut_sites_default"]):
         self.leg = leg_name
         self.registry = registry
         self.n_rg = n_rg
@@ -148,8 +168,10 @@ class Leg:
             keys = [f"pop_m_f_{self.leg}_{name}" for name in M_F_IZH_REF]
             self.registry.freeze(keys, attrs=("mean", "sigma"))
 
-    def _param(self, name: str, mean: float, sigma: float = 0.1,
-               min_val: float = -100.0, max_val: float = 100.0) -> PersonaParam:
+    def _param(self, name: str, mean: float,
+               sigma: float = PARAMS["syn_weight_sigma_fraction"],
+               min_val: float = PARAMS["syn_weight_min"],
+               max_val: float = PARAMS["syn_weight_max"]) -> PersonaParam:
         return PersonaParam(
             mean=mean,
             sigma=sigma,
@@ -158,12 +180,18 @@ class Leg:
         )
 
     _STDP_RANGES = {
-        "tau_plus": (1.0, 200.0),
-        "lambda": (1e-5, 0.1),
-        "alpha": (0.0, 1.0),
-        "mu_plus": (0.0, 1.0),
-        "mu_minus": (0.0, 1.0),
-        "Wmax": (1.0, 2000.0),
+        "tau_plus": (PARAMS["stdp_range_tau_plus_min"],
+                     PARAMS["stdp_range_tau_plus_max"]),
+        "lambda": (PARAMS["stdp_range_lambda_min"],
+                   PARAMS["stdp_range_lambda_max"]),
+        "alpha": (PARAMS["stdp_range_alpha_min"],
+                  PARAMS["stdp_range_alpha_max"]),
+        "mu_plus": (PARAMS["stdp_range_mu_plus_min"],
+                    PARAMS["stdp_range_mu_plus_max"]),
+        "mu_minus": (PARAMS["stdp_range_mu_minus_min"],
+                     PARAMS["stdp_range_mu_minus_max"]),
+        "Wmax": (PARAMS["stdp_range_wmax_min"],
+                 PARAMS["stdp_range_wmax_max"]),
     }
 
     def _stdp_params(self, syn_type: str, weight: float) -> dict:
@@ -177,33 +205,41 @@ class Leg:
             mean = float(mean)
             lo, hi = self._STDP_RANGES.get(name, (-1e6, 1e6))
             if name == "Wmax":
-                mean = max(mean, abs(weight) * 1.01)
+                mean = max(mean, abs(weight) * PARAMS["stdp_wmax_seed_factor"])
                 lo = max(lo, abs(weight))
             out[name] = self._param(
                 name, mean,
-                sigma=max(abs(mean) * 0.1, 1e-6),
+                sigma=max(abs(mean) * PARAMS["stdp_sigma_fraction"],
+                          PARAMS["stdp_sigma_floor"]),
                 min_val=lo, max_val=hi)
         return out
 
     def _izhi(self, a, b, c, d):
         return {
-            "a": self._param("a", a, 0.005, 0.001, 0.1),
-            "b": self._param("b", b, 0.04, 0.05, 0.5),
-            "c": self._param("c", c, 5.0, -80.0, -50.0),
-            "d": self._param("d", d, 2.0, 0.0, 20.0),
+            "a": self._param("a", a, PARAMS["izh_sigma_a"],
+                             PARAMS["izh_min_a"], PARAMS["izh_max_a"]),
+            "b": self._param("b", b, PARAMS["izh_sigma_b"],
+                             PARAMS["izh_min_b"], PARAMS["izh_max_b"]),
+            "c": self._param("c", c, PARAMS["izh_sigma_c"],
+                             PARAMS["izh_min_c"], PARAMS["izh_max_c"]),
+            "d": self._param("d", d, PARAMS["izh_sigma_d"],
+                             PARAMS["izh_min_d"], PARAMS["izh_max_d"]),
         }
 
     def _build_populations(self):
         # Izhikevich parameters from cpg_2legs_fast: regular-spiking excitatory,
         # fast-spiking inhibitory, and intrinsically-bursting flexor RG.
         def exc():
-            return self._izhi(0.02, 0.2, -65.0, 8.0)
+            return self._izhi(PARAMS["izh_exc_a"], PARAMS["izh_exc_b"],
+                              PARAMS["izh_exc_c"], PARAMS["izh_exc_d"])
 
         def inh():
-            return self._izhi(0.1, 0.2, -65.0, 2.0)
+            return self._izhi(PARAMS["izh_inh_a"], PARAMS["izh_inh_b"],
+                              PARAMS["izh_inh_c"], PARAMS["izh_inh_d"])
 
         def rgf():
-            return self._izhi(0.02, 0.2, -55.0, 4.0)
+            return self._izhi(PARAMS["izh_rgf_a"], PARAMS["izh_rgf_b"],
+                              PARAMS["izh_rgf_c"], PARAMS["izh_rgf_d"])
 
         # Rhythm Generators
         self.rg_e = self.registry.create_population(
@@ -297,37 +333,40 @@ class Leg:
         # afferent spike trains are the per-site relays below, and the tap keeps
         # the `cut_L/R` producer feature (the aggregate rate) without doubling
         # the CUT Poisson population.
-        cut_relay_n = 1 if self.cut_multisite else self.n_aff
+        cut_relay_n = (PARAMS["n_cut_noise_tap"] if self.cut_multisite
+                       else self.n_aff)
         self.cut_pg, self.cut_in = self.registry.create_relay(
             f"cut_pg_{self.leg}", f"cut_in_{self.leg}", cut_relay_n,
-            rate=0.0, noise_name=f"cut_{self.leg}", noise_scale=10.0)
+            rate=PARAMS["hz_cut_rest"], noise_name=f"cut_{self.leg}",
+            noise_scale=PARAMS["hz_cut_noise_scale"])
         if self.cut_multisite:
             for k in range(self.n_cut_sites):
                 pg_key = f"cut_pg_{self.leg}_s{k}"
                 in_key = f"cut_in_{self.leg}_s{k}"
                 self.registry.create_relay(
                     pg_key, in_key, self.n_aff_site,
-                    rate=0.0, noise_name=None)
+                    rate=PARAMS["hz_cut_site_rest"], noise_name=None)
                 self.cut_site_pg.append(pg_key)
                 self.cut_site_in.append(in_key)
 
         # 2. Ia Afferents (stretch length & velocity)
         self.ia_e_pg, self.ia_e_in = self.registry.create_relay(
             f"ia_e_pg_{self.leg}", f"ia_e_in_{self.leg}", self.n_aff,
-            rate=10.0, noise_name=f"ia_e_{self.leg}")
+            rate=PARAMS["hz_ia"], noise_name=f"ia_e_{self.leg}")
         self.ia_f_pg, self.ia_f_in = self.registry.create_relay(
             f"ia_f_pg_{self.leg}", f"ia_f_in_{self.leg}", self.n_aff,
-            rate=10.0, noise_name=f"ia_f_{self.leg}")
+            rate=PARAMS["hz_ia"], noise_name=f"ia_f_{self.leg}")
 
         # 3. Ib Afferents (strain force & activation)
         self.ib_e_pg, self.ib_e_in = self.registry.create_relay(
             f"ib_e_pg_{self.leg}", f"ib_e_in_{self.leg}", self.n_aff,
-            rate=5.0, noise_name=f"ib_e_{self.leg}")
+            rate=PARAMS["hz_ib"], noise_name=f"ib_e_{self.leg}")
         self.ib_f_pg, self.ib_f_in = self.registry.create_relay(
             f"ib_f_pg_{self.leg}", f"ib_f_in_{self.leg}", self.n_aff,
-            rate=5.0, noise_name=f"ib_f_{self.leg}")
+            rate=PARAMS["hz_ib"], noise_name=f"ib_f_{self.leg}")
 
-    def _connect(self, src: str, tgt: str, weight: float, p: float = 0.5,
+    def _connect(self, src: str, tgt: str, weight: float,
+                 p: float = PARAMS["leg_p_default"],
                  is_stdp: bool = False, delay: float | None = None,
                  key: str | None = None) -> Any:
         d = get_jitter_delay() if delay is None else delay
@@ -347,9 +386,10 @@ class Leg:
             extra = {"delay": float(d), "weight": float(weight)}
         else:
             parameters = {"weight": self._param(
-                "weight", weight, abs(weight) * 0.1,
-                min_val=-150.0 if weight < 0 else 0.0,
-                max_val=0.0 if weight < 0 else 150.0)}
+                "weight", weight,
+                abs(weight) * PARAMS["syn_weight_sigma_fraction"],
+                min_val=PARAMS["syn_weight_min"] if weight < 0 else 0.0,
+                max_val=0.0 if weight < 0 else PARAMS["syn_weight_max"])}
             extra = {"delay": float(d)}
 
         cfg = Connection(
@@ -386,38 +426,85 @@ class Leg:
 
         # --- Rhythm-generator half-centre THROUGH the InE/InF relays
         #     (cpg_2legs_fast): RGE->InE (exc), InE-|RGF, RGF->InF (exc), InF-|RGE.
-        self._connect(f"rg_e_{leg}", f"in_e_{leg}", weight=12.0, p=0.15)   # W_RG2INE, P_RG_RECIP_E
-        self._connect(f"in_e_{leg}", f"rg_f_{leg}", weight=-8.0, p=0.15)   # W_INE2RGF, P_RG_RECIP_E
-        self._connect(f"rg_f_{leg}", f"in_f_{leg}", weight=18.0, p=0.30)   # W_RG2INF, P_RG_RECIP_F
-        self._connect(f"in_f_{leg}", f"rg_e_{leg}", weight=-48.0, p=0.30)  # W_INF2RGE
+        self._connect(f"rg_e_{leg}", f"in_e_{leg}",
+                      weight=PARAMS["w_con_rg_e_in_e"],
+                      p=PARAMS["p_con_rg_e_in_e"])
+        self._connect(f"in_e_{leg}", f"rg_f_{leg}",
+                      weight=PARAMS["w_con_in_e_rg_f"] * SCALE_INHIB,
+                      p=PARAMS["p_con_in_e_rg_f"])
+        self._connect(f"rg_f_{leg}", f"in_f_{leg}",
+                      weight=PARAMS["w_con_rg_f_in_f"],
+                      p=PARAMS["p_con_rg_f_in_f"])
+        self._connect(f"in_f_{leg}", f"rg_e_{leg}",
+                      weight=PARAMS["w_con_in_f_rg_e"] * SCALE_INHIB,
+                      p=PARAMS["p_con_in_f_rg_e"])
+        # The same half-centre interneurons also inhibit the antagonist motor
+        # pool. Without this, RGE/RGF reciprocal inhibition never reaches the
+        # M-E/M-F output and both muscles co-contract.
+        self._connect(f"in_e_{leg}", f"m_f_{leg}",
+                      weight=PARAMS["w_con_in_e_m_f"] * SCALE_INHIB,
+                      p=PARAMS["p_con_in_e_m_f"])
+        self._connect(f"in_f_{leg}", f"m_e_{leg}",
+                      weight=PARAMS["w_con_in_f_m_e"] * SCALE_INHIB,
+                      p=PARAMS["p_con_in_f_m_e"])
 
         # --- RG self-recurrence ---
-        self._connect(f"rg_e_{leg}", f"rg_e_{leg}", weight=4.0, p=0.12)    # W_RG_REC_E, P_RG_REC
-        self._connect(f"rg_f_{leg}", f"rg_f_{leg}", weight=5.5, p=0.12)    # W_RG_REC_F
+        self._connect(f"rg_e_{leg}", f"rg_e_{leg}",
+                      weight=PARAMS["w_con_rg_e_rg_e"],
+                      p=PARAMS["p_con_rg_e_rg_e"])
+        self._connect(f"rg_f_{leg}", f"rg_f_{leg}",
+                      weight=PARAMS["w_con_rg_f_rg_f"],
+                      p=PARAMS["p_con_rg_f_rg_f"])
 
         # --- Motor output: RG -> MN direct; MN -> muscle ---
-        self._connect(f"rg_e_{leg}", f"m_e_{leg}", weight=2.75, p=0.50)    # W_RG2MN
+        self._connect(f"rg_e_{leg}", f"m_e_{leg}",
+                      weight=PARAMS["w_con_rg_e_m_e"],
+                      p=PARAMS["p_con_rg_e_m_e"])
         self._connect(f"rg_f_{leg}", f"m_f_{leg}",
-                      weight=self.mf_drive_seed["rg_f"], p=0.50)  # C1 seed
-        self._connect(f"m_e_{leg}", f"mus_e_{leg}", weight=1.0, p=0.80)    # W_M2MUS, P_M2MUS
-        self._connect(f"m_f_{leg}", f"mus_f_{leg}", weight=1.0, p=0.80)
+                      weight=self.mf_drive_seed["rg_f"],
+                      p=PARAMS["p_con_rg_f_m_f"])  # C1 seed
+        self._connect(f"m_e_{leg}", f"mus_e_{leg}",
+                      weight=PARAMS["w_con_m_e_mus_e"],
+                      p=PARAMS["p_con_m_e_mus_e"])
+        self._connect(f"m_f_{leg}", f"mus_f_{leg}",
+                      weight=PARAMS["w_con_m_f_mus_f"],
+                      p=PARAMS["p_con_m_f_mus_f"])
 
         # --- Ia (spindle): monosynaptic to homonymous MN/RG + Ia inhibitory IN ---
-        self._connect(f"ia_e_in_{leg}", f"m_e_{leg}", weight=12.0, p=0.40)  # Ia(top) -> M-E (exc)
+        self._connect(f"ia_e_in_{leg}", f"m_e_{leg}",
+                      weight=PARAMS["w_con_ia_e_in_m_e"] * SCALE_IA,
+                      p=PARAMS["p_con_ia_e_in_m_e"])  # Ia(top) -> M-E (exc)
         self._connect(f"ia_f_in_{leg}", f"m_f_{leg}",
-                      weight=self.mf_drive_seed["ia_f_in"], p=0.40)  # Ia(bottom) -> M-F (exc), C1 seed
+                      weight=self.mf_drive_seed["ia_f_in"] * SCALE_IA,
+                      p=PARAMS["p_con_ia_f_in_m_f"])  # Ia(bottom) -> M-F (exc), C1 seed
         # MOD_IA_RG_STDP: homonymous Ia->RG is plastic (spec D12) — Ia-E potentiates
         # onto RG-E, Ia-F onto RG-F; muscle afferents become a learning drive.
-        self._connect(f"ia_e_in_{leg}", f"rg_e_{leg}", weight=12.0, p=0.40,
+        self._connect(f"ia_e_in_{leg}", f"rg_e_{leg}",
+                      weight=PARAMS["w_stdp_ia_e_in_rg_e"] * SCALE_IA,
+                      p=PARAMS["p_con_ia_e_in_rg_e"],
                       is_stdp=True, key=f"ia_rge_{leg}")
-        self._connect(f"ia_f_in_{leg}", f"rg_f_{leg}", weight=12.0, p=0.40,
+        self._connect(f"ia_f_in_{leg}", f"rg_f_{leg}",
+                      weight=PARAMS["w_stdp_ia_f_in_rg_f"] * SCALE_IA,
+                      p=PARAMS["p_con_ia_f_in_rg_f"],
                       is_stdp=True, key=f"ia_rgf_{leg}")
-        self._connect(f"ia_e_in_{leg}", f"ia_e_{leg}", weight=6.0, p=0.40)   # W_IA_IN2INT
-        self._connect(f"ia_f_in_{leg}", f"ia_f_{leg}", weight=6.0, p=0.40)
-        self._connect(f"ia_e_{leg}", f"m_f_{leg}", weight=-10.0, p=0.40)     # W_IA_INT2ANT
-        self._connect(f"ia_f_{leg}", f"m_e_{leg}", weight=-10.0, p=0.40)
-        self._connect(f"ia_e_in_{leg}", f"in_e_{leg}", weight=6.0, p=0.25)   # W_IA2IN, P_IA2IN
-        self._connect(f"ia_f_in_{leg}", f"in_f_{leg}", weight=6.0, p=0.25)
+        self._connect(f"ia_e_in_{leg}", f"ia_e_{leg}",
+                      weight=PARAMS["w_con_ia_e_in_ia_e"],
+                      p=PARAMS["p_con_ia_e_in_ia_e"])  # W_IA_IN2INT
+        self._connect(f"ia_f_in_{leg}", f"ia_f_{leg}",
+                      weight=PARAMS["w_con_ia_f_in_ia_f"],
+                      p=PARAMS["p_con_ia_f_in_ia_f"])
+        self._connect(f"ia_e_{leg}", f"m_f_{leg}",
+                      weight=PARAMS["w_con_ia_e_m_f"],
+                      p=PARAMS["p_con_ia_e_m_f"])  # W_IA_INT2ANT
+        self._connect(f"ia_f_{leg}", f"m_e_{leg}",
+                      weight=PARAMS["w_con_ia_f_m_e"],
+                      p=PARAMS["p_con_ia_f_m_e"])
+        self._connect(f"ia_e_in_{leg}", f"in_e_{leg}",
+                      weight=PARAMS["w_con_ia_e_in_in_e"],
+                      p=PARAMS["p_con_ia_e_in_in_e"])  # W_IA2IN, P_IA2IN
+        self._connect(f"ia_f_in_{leg}", f"in_f_{leg}",
+                      weight=PARAMS["w_con_ia_f_in_in_f"],
+                      p=PARAMS["p_con_ia_f_in_in_f"])
 
         # --- Recurrent (Renshaw) inhibition (project values) ---
         # Renshaw recurrent inhibition, attenuated to 0.2x. This loop is net
@@ -433,19 +520,39 @@ class Leg:
 
         # --- Ib Golgi tendon organ, disynaptic via Ib interneurons (project values) ---
         # Extensor Ib: GTO -> InIb-E -> {M-E inh, M-F exc, RGF inh}
-        self._connect(f"ib_e_in_{leg}", f"in_ib_e_{leg}", weight=16.0, p=0.40)   # GTO -> InIb-E
-        self._connect(f"in_ib_e_{leg}", f"m_e_{leg}", weight=-18.0, p=0.40)      # autogenic inhibition
-        self._connect(f"in_ib_e_{leg}", f"m_f_{leg}", weight=12.0, p=0.35)       # disinhibit flexor
-        self._connect(f"in_ib_e_{leg}", f"rg_f_{leg}", weight=W_IB2RG, p=0.35)  # Ib-E excites RG-F (phase switch)
+        self._connect(f"ib_e_in_{leg}", f"in_ib_e_{leg}",
+                      weight=PARAMS["w_con_ib_e_in_in_ib_e"],
+                      p=PARAMS["p_con_ib_e_in_in_ib_e"])  # GTO -> InIb-E
+        self._connect(f"in_ib_e_{leg}", f"m_e_{leg}",
+                      weight=PARAMS["w_con_in_ib_e_m_e"],
+                      p=PARAMS["p_con_in_ib_e_m_e"])  # autogenic inhibition
+        self._connect(f"in_ib_e_{leg}", f"m_f_{leg}",
+                      weight=PARAMS["w_con_in_ib_e_m_f"] * SCALE_IB,
+                      p=PARAMS["p_con_in_ib_e_m_f"])  # disinhibit flexor
+        self._connect(f"in_ib_e_{leg}", f"rg_f_{leg}",
+                      weight=PARAMS["w_con_in_ib_e_rg_f"] * SCALE_IB,
+                      p=PARAMS["p_con_in_ib_e_rg_f"])  # Ib-E excites RG-F (phase switch)
         # Flexor Ib: GTO -> InIb-F -> {M-F inh, M-E exc, RGE inh}
-        self._connect(f"ib_f_in_{leg}", f"in_ib_f_{leg}", weight=16.0, p=0.40)   # GTO -> InIb-F
-        self._connect(f"in_ib_f_{leg}", f"m_f_{leg}", weight=-18.0, p=0.40)      # autogenic inhibition
-        self._connect(f"in_ib_f_{leg}", f"m_e_{leg}", weight=12.0, p=0.35)       # disinhibit extensor
-        self._connect(f"in_ib_f_{leg}", f"rg_e_{leg}", weight=W_IB2RG, p=0.35)  # Ib-F excites RG-E (phase switch)
+        self._connect(f"ib_f_in_{leg}", f"in_ib_f_{leg}",
+                      weight=PARAMS["w_con_ib_f_in_in_ib_f"],
+                      p=PARAMS["p_con_ib_f_in_in_ib_f"])  # GTO -> InIb-F
+        self._connect(f"in_ib_f_{leg}", f"m_f_{leg}",
+                      weight=PARAMS["w_con_in_ib_f_m_f"],
+                      p=PARAMS["p_con_in_ib_f_m_f"])  # autogenic inhibition
+        self._connect(f"in_ib_f_{leg}", f"m_e_{leg}",
+                      weight=PARAMS["w_con_in_ib_f_m_e"] * SCALE_IB,
+                      p=PARAMS["p_con_in_ib_f_m_e"])  # disinhibit extensor
+        self._connect(f"in_ib_f_{leg}", f"rg_e_{leg}",
+                      weight=PARAMS["w_con_in_ib_f_rg_e"] * SCALE_IB,
+                      p=PARAMS["p_con_in_ib_f_rg_e"])  # Ib-F excites RG-E (phase switch)
 
         # --- Ib interneuron convergence (spindle, CPG) ---
-        self._connect(f"ia_e_in_{leg}", f"in_ib_e_{leg}", weight=8.0, p=0.30)    # Ia -> InIb-E
-        self._connect(f"ia_f_in_{leg}", f"in_ib_f_{leg}", weight=8.0, p=0.30)    # Ia -> InIb-F
+        self._connect(f"ia_e_in_{leg}", f"in_ib_e_{leg}",
+                      weight=PARAMS["w_con_ia_e_in_in_ib_e"],
+                      p=PARAMS["p_con_ia_e_in_in_ib_e"])  # Ia -> InIb-E
+        self._connect(f"ia_f_in_{leg}", f"in_ib_f_{leg}",
+                      weight=PARAMS["w_con_ia_f_in_in_ib_f"],
+                      p=PARAMS["p_con_ia_f_in_in_ib_f"])  # Ia -> InIb-F
 
         # --- Cutaneous (CUT) stance reinforcement ---
         if self.cut_multisite:
@@ -455,24 +562,36 @@ class Leg:
             # is ~n_aff, so p and the seed weights are unchanged.
             for k in range(self.n_cut_sites):
                 src = f"cut_in_{leg}_s{k}"
-                self._connect(src, f"rg_e_{leg}", weight=14.0, p=0.35,
+                self._connect(src, f"rg_e_{leg}", weight=W_CUT2RGE * SCALE_CUT,
+                              p=P_CUT2RGE,
                               is_stdp=True, key=f"cut_rge_{leg}_s{k}")
-                self._connect(src, f"in_e_{leg}", weight=6.0, p=0.30)
+                self._connect(src, f"in_e_{leg}", weight=W_CUT2INE, p=P_CUT2INE)
         else:
-            self._connect(f"cut_in_{leg}", f"rg_e_{leg}", weight=14.0, p=0.35,
+            self._connect(f"cut_in_{leg}", f"rg_e_{leg}", weight=W_CUT2RGE * SCALE_CUT, p=P_CUT2RGE,
                           is_stdp=True, key=f"cut_rge_{leg}")   # W_CUT2RGE, P_CUT2RGE_STATIC
-            self._connect(f"cut_in_{leg}", f"in_e_{leg}", weight=6.0, p=0.30)   # W_CUT2INE, P_CUT2INE
+            self._connect(f"cut_in_{leg}", f"in_e_{leg}", weight=W_CUT2INE, p=P_CUT2INE)   # W_CUT2INE, P_CUT2INE
 
         # --- Commissural V-cell relay, ipsilateral half (NEURON memcpg/leg.py) ---
         # RG_F drives the three V-cell classes; V2a feeds V0v, whose
         # contralateral projection is built in L2CPG. In1 is the inhibitory
         # relay onto the ipsilateral RG_F. Weights and delays are memcpg's; p is
         # the port's int->int density.
-        self._connect(f"rg_f_{leg}", f"v2a_{leg}", weight=0.75, p=0.50, delay=3.0)
-        self._connect(f"rg_f_{leg}", f"v0d_{leg}", weight=0.75, p=0.50, delay=3.0)
-        self._connect(f"rg_f_{leg}", f"v3f_{leg}", weight=1.5, p=0.50, delay=3.0)
-        self._connect(f"v2a_{leg}", f"v0v_{leg}", weight=1.2, p=0.50, delay=3.0)
-        self._connect(f"in1_{leg}", f"rg_f_{leg}", weight=-0.5, p=0.50, delay=1.0)
+        self._connect(f"rg_f_{leg}", f"v2a_{leg}",
+                      weight=PARAMS["w_con_rg_f_v2a"],
+                      p=PARAMS["p_con_rg_f_v2a"], delay=PARAMS["delay_vcell"])
+        self._connect(f"rg_f_{leg}", f"v0d_{leg}",
+                      weight=PARAMS["w_con_rg_f_v0d"],
+                      p=PARAMS["p_con_rg_f_v0d"], delay=PARAMS["delay_vcell"])
+        self._connect(f"rg_f_{leg}", f"v3f_{leg}",
+                      weight=PARAMS["w_con_rg_f_v3f"],
+                      p=PARAMS["p_con_rg_f_v3f"], delay=PARAMS["delay_vcell"])
+        self._connect(f"v2a_{leg}", f"v0v_{leg}",
+                      weight=PARAMS["w_con_v2a_v0v"],
+                      p=PARAMS["p_con_v2a_v0v"], delay=PARAMS["delay_vcell"])
+        self._connect(f"in1_{leg}", f"rg_f_{leg}",
+                      weight=PARAMS["w_con_in1_rg_f"],
+                      p=PARAMS["p_con_in1_rg_f"],
+                      delay=PARAMS["delay_in1_rg_f"])
 
     def update_sensory_feedback(self, cut_hz: float,
                                 ia_e_hz: float, ia_f_hz: float,
@@ -529,7 +648,7 @@ class Leg:
         return drive_e, drive_f
 
     def _drive(self, spikes: int, dt_ms: float, n: int | None = None) -> float:
-        ref_hz = getattr(self, "ref_hz", 100.0)
+        ref_hz = getattr(self, "ref_hz", PARAMS["ref_hz_default"])
         count = self.n_mn if n is None else int(n)
         max_spikes = max(1.0, count * ref_hz * (dt_ms / 1000.0))
         return float(np.clip(spikes / max_spikes, 0.0, 1.0))

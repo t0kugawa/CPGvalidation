@@ -1,5 +1,6 @@
 from model.adapter import CPGAdapter, CPGInput, CPGOutput
 from model.leg import Leg
+from model.params import PARAMS
 
 
 class Model:
@@ -10,8 +11,8 @@ class Model:
     def __init__(self,
                  cpg: CPGAdapter,
                  mujoco_cfg: str = "dual_rat_hindlimb.xml",
-                 render_fps: int = 40,
-                 dt_ms: float = 10.0):
+                 render_fps: int = PARAMS["render_fps"],
+                 dt_ms: float = PARAMS["model_dt_ms"]):
         self.cpg = cpg
         self.dt_ms = dt_ms
         self.leg = Leg(mujoco_cfg=mujoco_cfg, render_fps=render_fps, dt_ms=dt_ms)

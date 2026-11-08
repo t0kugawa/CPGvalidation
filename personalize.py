@@ -140,10 +140,22 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
     # same range. Do not widen the stop from the raw mocap min/max: a single
     # marker glitch used to open the joint into an inverted pose.
 
+    seg_thigh = {}
+    seg_shank = {}
+    seg_foot = {}
     for s in ("L", "R"):
-        thigh = float(np.mean(angles[f"seg_thigh_{s}"])) / 1000.0
-        shank = float(np.mean(angles[f"seg_shank_{s}"])) / 1000.0
-        foot = float(np.mean(angles[f"seg_foot_{s}"])) / 1000.0
+        seg_thigh[s] = float(np.mean(angles[f"seg_thigh_{s}"])) / 1000.0
+        seg_shank[s] = float(np.mean(angles[f"seg_shank_{s}"])) / 1000.0
+        seg_foot[s] = float(np.mean(angles[f"seg_foot_{s}"])) / 1000.0
+    # One symmetric hindlimb geometry. The mocap trial's per-side segment
+    # means differ (the right leg is ~5 mm longer); applying each side's own
+    # lengths makes the right foot drag. Use the two-side mean for both
+    # controlled and target limbs; the only intended L/R inequality is the
+    # CPG leading-leg gain.
+    thigh = float(np.mean(list(seg_thigh.values())))
+    shank = float(np.mean(list(seg_shank.values())))
+    foot = float(np.mean(list(seg_foot.values())))
+    for s in ("L", "R"):
         rig.set_limb_lengths("m", s, thigh, shank, foot)
         rig.set_limb_lengths("ref", s, thigh, shank, foot)
     # Approach A: the target limb is driven straight from the dataset points —

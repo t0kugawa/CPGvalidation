@@ -99,6 +99,7 @@ acceptance fail for every arm; sole-up is not measured. Report:
 **Low**
 
 * Variance reduction for advantage estimates
+* Try OpenSim model as a separate mode
 
 **Cosmetics**
 

@@ -80,31 +80,20 @@ def test_cut_afferent_area_and_density_scale_rate():
     assert max(r2, r3) <= 120.0
 
 
-def test_phase_default_debounce_is_50ms():
-    # The 4 s probe showed 20 ms still chattered at 5-7 transitions/s; 50 ms
-    # is the smallest setting that brought both legs into the 2-4/s band
-    # without changing the stance fraction.
+def test_phase_uses_force_hysteresis_without_timer():
+    # No debounce/timer: force thresholds alone decide the state.
     ph = ContactPhase(initial="stance")
-    for _ in range(4):
-        assert ph.update(0.004, 10.0) == "stance"
     assert ph.update(0.004, 10.0) == "swing"
-
-
-def test_phase_debounces_contact_and_uses_hysteresis():
-    ph = ContactPhase(on_n=0.010, off_n=0.005, debounce_ms=20.0,
-                      initial="stance")
-    # 10 ms of no contact is not enough to leave stance.
-    assert ph.update(0.004, 10.0) == "stance"
-    assert ph.update(0.004, 10.0) == "swing"
-    # Between thresholds while swinging: stay swinging.
     assert ph.update(0.006, 10.0) == "swing"
-    assert ph.update(0.006, 10.0) == "swing"
-    # A contact pulse shorter than the debounce must not switch.
-    assert ph.update(0.015, 10.0) == "swing"
     assert ph.update(0.015, 10.0) == "stance"
-    # A short loss of contact does not immediately leave stance.
-    assert ph.update(0.004, 10.0) == "stance"
+
+
+def test_phase_transitions_are_immediate_not_debounced():
+    ph = ContactPhase(on_n=0.010, off_n=0.005, initial="stance")
+    assert ph.update(0.015, 10.0) == "stance"
     assert ph.update(0.004, 10.0) == "swing"
+    assert ph.update(0.006, 10.0) == "swing"
+    assert ph.update(0.015, 10.0) == "stance"
 
 
 def test_cpg_input_carries_per_site_rates_and_active_list():

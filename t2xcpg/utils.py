@@ -2,22 +2,24 @@ from typing import Any
 import nest
 import numpy as np
 
+from t2xcpg.params import PARAMS
+
 try:
     from t2xcpg.cfg import DT_MS
 except ImportError:
-    DT_MS = 10.0
+    DT_MS = PARAMS["dt_ms"]
 
 
 INIT_IZHI_PARAMS = {
-    "a": 0.02,
-    "b": 0.2,
-    "c": -65.0,
-    "d": 8.0,
-    "V_th": 30.0,
-    "V_min": -120.0,
+    "a": PARAMS["izh_init_a"],
+    "b": PARAMS["izh_init_b"],
+    "c": PARAMS["izh_init_c"],
+    "d": PARAMS["izh_init_d"],
+    "V_th": PARAMS["izh_init_v_th"],
+    "V_min": PARAMS["izh_init_v_min"],
 }
 
-DELAY_SCALE: float = 1.0
+DELAY_SCALE: float = PARAMS["delay_scale"]
 
 
 def clamp(x: float, lo: float, hi: float) -> float:
@@ -32,30 +34,30 @@ def copy_syn_model(name: str, params: dict, wr=None):
 
 
 STDP_DEFAULT = {
-    "tau_plus": 20.0,
-    "lambda": 0.001,
-    "alpha": 0.95,
-    "mu_plus": 0.4,
-    "mu_minus": 0.4,
-    "Wmax": 120.0,
+    "tau_plus": PARAMS["stdp_default_tau_plus"],
+    "lambda": PARAMS["stdp_default_lambda"],
+    "alpha": PARAMS["stdp_default_alpha"],
+    "mu_plus": PARAMS["stdp_default_mu_plus"],
+    "mu_minus": PARAMS["stdp_default_mu_minus"],
+    "Wmax": PARAMS["stdp_default_wmax"],
 }
 
 STDP_IA = {
-    "tau_plus": 20.0,
-    "lambda": 0.001,
-    "alpha": 0.95,
-    "mu_plus": 0.4,
-    "mu_minus": 0.4,
-    "Wmax": 10.0,
+    "tau_plus": PARAMS["stdp_ia_tau_plus"],
+    "lambda": PARAMS["stdp_ia_lambda"],
+    "alpha": PARAMS["stdp_ia_alpha"],
+    "mu_plus": PARAMS["stdp_ia_mu_plus"],
+    "mu_minus": PARAMS["stdp_ia_mu_minus"],
+    "Wmax": PARAMS["stdp_ia_wmax"],
 }
 
 STDP_BS = {
-    "tau_plus": 20.0,
-    "lambda": 0.001,
-    "alpha": 0.95,
-    "mu_plus": 0.4,
-    "mu_minus": 0.4,
-    "Wmax": 30.0,
+    "tau_plus": PARAMS["stdp_bs_tau_plus"],
+    "lambda": PARAMS["stdp_bs_lambda"],
+    "alpha": PARAMS["stdp_bs_alpha"],
+    "mu_plus": PARAMS["stdp_bs_mu_plus"],
+    "mu_minus": PARAMS["stdp_bs_mu_minus"],
+    "Wmax": PARAMS["stdp_bs_wmax"],
 }
 
 
@@ -86,9 +88,9 @@ def create_stdp_synapse(registry, syn_type: str, postfix: str) -> tuple[str, Any
     return name, wr
 
 
-SYN_MS: float = 1.0
-LENGTH_M: float = 0.005
-VELOCITY_MPS: float = 5.45
+SYN_MS: float = PARAMS["syn_ms"]
+LENGTH_M: float = PARAMS["length_m"]
+VELOCITY_MPS: float = PARAMS["velocity_mps"]
 
 
 # STDP is used on the sensory input pathways (spec D12): CUT -> RGE and Ia -> RG.
@@ -96,7 +98,8 @@ VELOCITY_MPS: float = 5.45
 STDP_POSTFIX = {"cut_rge": "default", "ia_rg": "ia", "ia_rge": "ia", "ia_rgf": "ia"}
 
 
-def get_jitter_delay(jitter_ms: float = 0.2) -> float:
+def get_jitter_delay(jitter_ms: float | None = None) -> float:
+    jitter_ms = PARAMS["delay_jitter_ms"] if jitter_ms is None else jitter_ms
     delay = SYN_MS + (LENGTH_M / VELOCITY_MPS) * 1000.0
     if jitter_ms > 0.0:
         delay += float(np.random.normal(0.0, jitter_ms))

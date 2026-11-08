@@ -17,7 +17,9 @@ def test_halfcentre_is_via_in(nest_kernel):
     assert "rg_e_L_in_e_L" in reg.connection_cfgs
     assert "in_e_L_rg_f_L" in reg.connection_cfgs
     assert "rg_e_L_rg_f_L" not in reg.connection_cfgs      # no direct half-centre
-    assert "in_e_L_m_e_L" not in reg.connection_cfgs       # InE does not drive MN
+    assert "in_e_L_m_e_L" not in reg.connection_cfgs       # InE does not drive its own MN
+    assert "in_e_L_m_f_L" in reg.connection_cfgs           # reciprocal at motor pool
+    assert "in_f_L_m_e_L" in reg.connection_cfgs
 
 
 def test_rg_to_mn_direct(nest_kernel):
@@ -32,6 +34,18 @@ def test_reference_values(nest_kernel):
     assert np.isclose(w("in_e_L_rg_f_L"), -8.0)
     assert np.isclose(w("rg_f_L_in_f_L"), 18.0)
     assert np.isclose(w("in_f_L_rg_e_L"), -48.0)
+    assert np.isclose(w("in_e_L_m_f_L"), -8.0)
+    assert np.isclose(w("in_f_L_m_e_L"), -48.0)
+
+
+def test_cut_reference_values(nest_kernel):
+    reg, leg = _leg()
+    cfg = reg.connection_cfgs["cut_rge_L"]
+    assert np.isclose(cfg.extra_syn_spec["weight"], 14.0)
+    assert cfg.p == 0.35
+    ine = reg.connection_cfgs["cut_in_L_in_e_L"]
+    assert np.isclose(ine.parameters["weight"].mean, 6.0)
+    assert ine.p == 0.30
 
 
 def test_interneurons_are_fast_spiking(nest_kernel):
@@ -73,5 +87,5 @@ def test_bs_drive_seed_weight(nest_kernel):
                 if c.source.startswith("BS_in_")}
     assert bs_conns
     for key, cfg in bs_conns.items():
-        expected = 6.0 if key.endswith("_L") else 4.0
+        expected = 3.0 if key.endswith("_L") else 2.0
         assert np.isclose(cfg.parameters["weight"].mean, expected), key

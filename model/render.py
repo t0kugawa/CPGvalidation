@@ -1,6 +1,8 @@
 import numpy as np
 import mujoco
 
+from model.params import PARAMS
+
 try:
     from PIL import Image, ImageDraw
     _HAS_PIL = True
@@ -13,7 +15,9 @@ class LegRenderer:
     Offscreen MuJoCo renderer with a text HUD overlay.
     Use MUJOCO_GL=osmesa for headless rendering.
     """
-    def __init__(self, model, data, width: int = 1920, height: int = 1080):
+    def __init__(self, model, data,
+                 width: int = PARAMS["render_width_px"],
+                 height: int = PARAMS["render_height_px"]):
         self.model = model
         self.data = data
         self.width = int(width)

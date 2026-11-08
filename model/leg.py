@@ -3,28 +3,11 @@ import numpy as np
 import mujoco
 
 from model.adapter import CPGOutput, CPGInput
-from model.cut import ContactPhase, IaAfferent, IbAfferent, PlantarCut
+from model.cut import IaAfferent, IbAfferent, PlantarCut
 from model.model_cfg import TREADMILL_PENETRATION_M
-from model.phase_clock import PhaseClock, wrap_pi
+from model.params import PARAMS
 
 SIDES = ("L", "R")
-
-
-def reciprocal_drives(e: float, f: float, phase: str) -> tuple[float, float]:
-    """Phase-gated reciprocal muscle drive.
-
-    The E (extensor) command is allowed in stance; the F (flexor) command in
-    swing. The raw CPG can co-contract, so this is the explicit reciprocal
-    gate. The phase comes from the debounced contact state (the model phase);
-    the reference phase remains a PERSONA baseline concern.
-    """
-    e = float(np.clip(e, 0.0, 1.0))
-    f = float(np.clip(f, 0.0, 1.0))
-    if phase == "stance":
-        return e, 0.0
-    if phase == "swing":
-        return 0.0, f
-    return e, f
 
 
 class Leg:
@@ -41,8 +24,8 @@ class Leg:
     """
     def __init__(self,
                  mujoco_cfg: str = "dual_rat_hindlimb.xml",
-                 render_fps: int = 40,
-                 dt_ms: float = 2.0):
+                 render_fps: int = PARAMS["render_fps"],
+                 dt_ms: float = PARAMS["leg_dt_ms"]):
         self.time_ms = 0.0
         self.frame = 0
         self.xml_path = mujoco_cfg
@@ -142,34 +125,48 @@ class Leg:
         # v1 priors: equal tributary area and receptor density. `rho_s` is the
         # hook for a fitted nonlinear rat CUT distribution; it is not claimed
         # to be fitted yet.
-        self.cut_site_areas = {s: np.ones(len(self.cut_site_ids[s]))
-                               for s in SIDES}
-        self.cut_site_density = {s: np.ones(len(self.cut_site_ids[s]))
-                                 for s in SIDES}
+        self.cut_site_areas = {
+            s: np.full(len(self.cut_site_ids[s]), PARAMS["cut_site_area"])
+            for s in SIDES}
+        self.cut_site_density = {
+            s: np.full(len(self.cut_site_ids[s]), PARAMS["cut_site_density"])
+            for s in SIDES}
         self.cut_plantar = {
             s: PlantarCut(self.cut_site_names[s], dt_ms=dt_ms,
                           areas=self.cut_site_areas[s],
                           density=self.cut_site_density[s])
             for s in SIDES
         }
-        self.cut_phase = {s: ContactPhase(initial="stance") for s in SIDES}
         self._applied_muscles = {s: (0.0, 0.0) for s in SIDES}
-        self.phase_clock = {s: PhaseClock(dt_ms=self.dt_ms) for s in SIDES}
-        self._phase_offset_target = None
-        self._seen_swing = {s: False for s in SIDES}
         # Back-compatible name: per-site afferents are a list now.
         self.cut_afferent = {s: self.cut_plantar[s].afferents for s in SIDES}
         # Reference lengths are placeholders: `calibrate_spindles` overwrites
         # them with the tendon length at a zero ankle angle, so the stretch term
         # stays alive whatever scale the limb bones are built at.
-        self.ia_sol = {s: IaAfferent(l_0=0.0142, k_l=2000.0, k_v=120.0,
-                                     k_force=6.0, r_base_hz=10.0, r_max_hz=250.0)
+        self.ia_sol = {s: IaAfferent(l_0=PARAMS["leg_ia_sol_l0_m"],
+                                     k_l=PARAMS["leg_ia_k_l"],
+                                     k_v=PARAMS["leg_ia_k_v"],
+                                     k_force=PARAMS["leg_ia_k_force"],
+                                     r_base_hz=PARAMS["leg_ia_base_hz"],
+                                     r_max_hz=PARAMS["leg_ia_max_hz"])
                        for s in SIDES}
-        self.ia_ta = {s: IaAfferent(l_0=0.0072, k_l=2000.0, k_v=120.0,
-                                    k_force=6.0, r_base_hz=10.0, r_max_hz=250.0)
+        self.ia_ta = {s: IaAfferent(l_0=PARAMS["leg_ia_ta_l0_m"],
+                                    k_l=PARAMS["leg_ia_k_l"],
+                                    k_v=PARAMS["leg_ia_k_v"],
+                                    k_force=PARAMS["leg_ia_k_force"],
+                                    r_base_hz=PARAMS["leg_ia_base_hz"],
+                                    r_max_hz=PARAMS["leg_ia_max_hz"])
                       for s in SIDES}
-        self.ib_sol = {s: IbAfferent(k_force=15.0, k_act=40.0, r_base_hz=2.0, r_max_hz=200.0) for s in SIDES}
-        self.ib_ta = {s: IbAfferent(k_force=15.0, k_act=40.0, r_base_hz=2.0, r_max_hz=200.0) for s in SIDES}
+        self.ib_sol = {s: IbAfferent(k_force=PARAMS["leg_ib_k_force"],
+                                     k_act=PARAMS["leg_ib_k_act"],
+                                     r_base_hz=PARAMS["leg_ib_base_hz"],
+                                     r_max_hz=PARAMS["leg_ib_max_hz"])
+                       for s in SIDES}
+        self.ib_ta = {s: IbAfferent(k_force=PARAMS["leg_ib_k_force"],
+                                    k_act=PARAMS["leg_ib_k_act"],
+                                    r_base_hz=PARAMS["leg_ib_base_hz"],
+                                    r_max_hz=PARAMS["leg_ib_max_hz"])
+                      for s in SIDES}
 
         self.calibrate_spindles()
         self.reset()
@@ -306,10 +303,12 @@ class Leg:
         mujoco.mj_resetData(self.model, self.data)
         self.time_ms = 0.0
         if pose is None:
-            pose = {s: {"hip": -0.2, "knee": 0.6, "ankle": 0.3} for s in SIDES}
+            pose = {s: {"hip": PARAMS["default_pose_hip_rad"],
+                        "knee": PARAMS["default_pose_knee_rad"],
+                        "ankle": PARAMS["default_pose_ankle_rad"]}
+                    for s in SIDES}
         for s in SIDES:
             self.cut_plantar[s].reset()
-            self.cut_phase[s].reset()
             p = pose[s]
             for jid, val in (
                 (self.j_hip_m[s], p["hip"]),
@@ -401,7 +400,7 @@ class Leg:
         return self.belt_z
 
     def target_foot_lowest_percentile(self, hip_x, hip_z, hip, knee, ankle,
-                                      percentile: float = 5.0) -> float:
+                                      percentile: float = PARAMS["target_foot_percentile"]) -> float:
         """
         Sweeps the target limb through the trial's hip/joint trajectory using
         forward kinematics only (no dynamics, no contact) and returns the given
@@ -488,18 +487,24 @@ class Leg:
         walking at ~1.5 Hz. `phase_offset` shifts the cycle for the right leg so
         the two reference limbs are not identical.
         """
-        freq = 1.5
+        freq = PARAMS["reference_freq_hz"]
         phase = 2.0 * np.pi * freq * t_s + phase_offset
-        hip_ref = -0.25 + 0.35 * np.cos(phase)
-        knee_ref = 0.65 + 0.30 * np.sin(phase)
-        ankle_ref = 0.40 + 0.45 * np.sin(phase - 0.5)
+        hip_ref = PARAMS["reference_hip_offset_rad"] + PARAMS["reference_hip_amp_rad"] * np.cos(phase)
+        knee_ref = PARAMS["reference_knee_offset_rad"] + PARAMS["reference_knee_amp_rad"] * np.sin(phase)
+        ankle_ref = (PARAMS["reference_ankle_offset_rad"]
+                     + PARAMS["reference_ankle_amp_rad"]
+                     * np.sin(phase + PARAMS["reference_ankle_phase_rad"]))
         return hip_ref, knee_ref, ankle_ref
 
     def contract_muscles(self, cpg_output: CPGOutput):
+        # The CPG network owns E/F reciprocity; the plant applies its output.
         for s, e_key, f_key in (("L", "mus_E_L", "mus_F_L"), ("R", "mus_E_R", "mus_F_R")):
-            phase = "stance" if self.phase_clock[s].stance else "swing"
-            e, f = reciprocal_drives(getattr(cpg_output, e_key),
-                                     getattr(cpg_output, f_key), phase)
+            e = float(np.clip(getattr(cpg_output, e_key),
+                              PARAMS["muscle_drive_min"],
+                              PARAMS["muscle_drive_max"]))
+            f = float(np.clip(getattr(cpg_output, f_key),
+                              PARAMS["muscle_drive_min"],
+                              PARAMS["muscle_drive_max"]))
             self.data.ctrl[self.act_sol_m[s]] = e
             self.data.ctrl[self.act_ta_m[s]] = f
             self.data.ctrl[self.act_toe_m[s]] = 0.0
@@ -524,11 +529,17 @@ class Leg:
         base tracks the dataset GT position (approach A).
         """
         self.contract_muscles(cpg_output)
+        cp_phase = {
+            s: ("stance" if getattr(cpg_output, f"mus_E_{s}")
+                >= getattr(cpg_output, f"mus_F_{s}") else "swing")
+            for s in SIDES
+        }
 
         t_s = self.time_ms / 1000.0
         # Distinct left/right reference trajectories (R is phase-shifted).
-        ref = {s: self.get_reference_kinematics(t_s, 0.0 if s == "L" else np.pi)
-               for s in SIDES}
+        ref = {s: self.get_reference_kinematics(
+            t_s, 0.0 if s == "L" else PARAMS["reference_right_phase_rad"])
+            for s in SIDES}
         target_hip = {"L": target_hip_L, "R": target_hip_R}
         target_knee = {"L": target_knee_L, "R": target_knee_R}
         target_ankle = {"L": target_ankle_L, "R": target_ankle_R}
@@ -568,7 +579,7 @@ class Leg:
             site_pos = self.data.site_xpos[list(self.cut_site_ids[s])]
             cut = self.cut_plantar[s].update(contact_pos, contact_force, site_pos)
             cut_hz = cut["aggregate_hz"]
-            phase = self.cut_phase[s].update(total_contact_force, self.dt_ms)
+            phase = cp_phase[s]
 
             foot_x_m, foot_z_m = self._foot_lowest(self.model_foot_geoms[s])
             foot_z_ref = self._foot_lowest_z(self.ref_foot_geoms[s])
@@ -615,36 +626,6 @@ class Leg:
                 q_knee_ref=q_knee_ref, q_hip_ref=q_hip_ref,
             )
 
-        # Advance first-class phase clocks from the debounced contacts. The
-        # clocks provide the muscle E/F gate and the bilateral offset lock;
-        # they are not reference-tracked.
-        contact_stance = {s: sensory[s]["phase"] == "stance" for s in SIDES}
-        for s in SIDES:
-            if not contact_stance[s]:
-                self._seen_swing[s] = True
-        if (self._phase_offset_target is None
-                and all(contact_stance.values())
-                and all(self._seen_swing.values())):
-            self._phase_offset_target = float(wrap_pi(
-                self.phase_clock["R"].phase - self.phase_clock["L"].phase))
-        for s in SIDES:
-            offset = (self._phase_offset_target
-                      if s == "R" and self._phase_offset_target is not None
-                      else 0.0)
-            bilateral = 0.0
-            if s == "R" and self._phase_offset_target is not None:
-                target = float(wrap_pi(
-                    self.phase_clock["L"].phase + self._phase_offset_target))
-                bilateral = float(wrap_pi(self.phase_clock["R"].phase - target))
-            self.phase_clock[s].update(
-                contact_stance[s], offset=offset or 0.0,
-                bilateral_error=bilateral)
-            sensory[s]["phase"] = ("stance" if self.phase_clock[s].stance
-                                   else "swing")
-            sensory[s]["phase_period"] = self.phase_clock[s].period_s
-            sensory[s]["phase_confidence"] = self.phase_clock[s].confidence
-            sensory[s]["phase_error"] = self.phase_clock[s].error
-
         L, R = sensory["L"], sensory["R"]
         return CPGInput(
             cut_L=L["cut"], cut_R=R["cut"],
@@ -679,12 +660,4 @@ class Leg:
             applied_mus_F_L=self._applied_muscles["L"][1],
             applied_mus_E_R=self._applied_muscles["R"][0],
             applied_mus_F_R=self._applied_muscles["R"][1],
-            phase_period_L=self.phase_clock["L"].period_s,
-            phase_period_R=self.phase_clock["R"].period_s,
-            phase_confidence_L=self.phase_clock["L"].confidence,
-            phase_confidence_R=self.phase_clock["R"].confidence,
-            phase_error_L=self.phase_clock["L"].error,
-            phase_error_R=self.phase_clock["R"].error,
-            phase_clock_L=self.phase_clock["L"].phase,
-            phase_clock_R=self.phase_clock["R"].phase,
         )

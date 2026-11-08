@@ -634,6 +634,69 @@ class NestAdapter(Adapter):
                 out[key] = w
         return out
 
+    def snapshot_weights(self) -> Dict[str, np.ndarray]:
+        """Snapshot every projection's exact current synapse weights."""
+        out: Dict[str, np.ndarray] = {}
+        for key in self.connection_cfgs:
+            try:
+                w = np.asarray(self.synapses(key).get("weight"), dtype=np.float64)
+            except Exception:
+                continue
+            if w.size:
+                out[key] = w.copy()
+        return out
+
+    def restore_weights(self, snapshot: Dict[str, np.ndarray],
+                        plastic_only: bool = False) -> None:
+        """Restore exact synapse weights from a snapshot."""
+        for key, w in snapshot.items():
+            cfg = self.connection_cfgs.get(key)
+            if cfg is None:
+                continue
+            if plastic_only and cfg.weight_recorder is None:
+                continue
+            try:
+                self.synapses(key).set({"weight": np.asarray(w).tolist()})
+            except Exception as exc:
+                self.last_apply_errors.append((f"conn_{key}", str(exc)))
+
+    def restore_creation_params(self, keys=None) -> None:
+        """Reset PersonaParam values to their creation-time defaults."""
+        params = self.get_all_optimizable_params()
+        resolved = tuple(params) if keys is None else self._resolve_site_keys(keys)
+        for key in resolved:
+            d = self._defaults.get(key)
+            param = params.get(key)
+            if d is None or param is None:
+                continue
+            for attr in ("mean", "sigma", "min", "max",
+                         "sigma_min", "sigma_max"):
+                setattr(param, attr, d[attr])
+
+    def pin(self, keys) -> tuple[str, ...]:
+        """Hard-pin a parameter at its creation value (no exploration)."""
+        resolved = self._resolve_site_keys(keys)
+        params = self.get_all_optimizable_params()
+        for key in resolved:
+            d = self._defaults.get(key)
+            param = params.get(key)
+            if d is None or param is None:
+                continue
+            param.mean = float(d["mean"])
+            param.sigma = 0.0
+            param.sigma_min = 0.0
+            param.sigma_max = 0.0
+            param.min = param.mean
+            param.max = param.mean
+            self._frozen.setdefault(key, set()).update(("mean", "sigma"))
+        return resolved
+
+    def pin_bs_input(self) -> tuple[str, ...]:
+        """Preserve every BS->RG projection weight for the whole run."""
+        keys = [k for k in self.get_all_optimizable_params()
+                if k.startswith("conn_BS_in_") and k.endswith("_weight")]
+        return self.pin(keys)
+
     def get(self, name: str) -> nest.NodeCollection:
         if name not in self.population_nodes:
             raise KeyError(f"Population '{name}' not found in registry")
@@ -701,6 +764,8 @@ class NestAdapter(Adapter):
             update_dict = {}
             for p_name, param_obj in pop.params.items():
                 full_key = f"pop_{pop_name}_{p_name}"
+                if self.is_frozen(full_key, "mean"):
+                    continue
                 if full_key in sampled_values:
                     val = sampled_values[full_key]
                     update_dict[p_name] = param_obj.sample_population(pop.n, center=val)
@@ -725,6 +790,8 @@ class NestAdapter(Adapter):
             zero_syn: list[str] = []
             for p_name, param_obj in conn.parameters.items():
                 full_key = f"conn_{conn_key}_{p_name}"
+                if self.is_frozen(full_key, "mean"):
+                    continue
                 if full_key not in sampled_values:
                     continue
                 val = float(sampled_values[full_key])

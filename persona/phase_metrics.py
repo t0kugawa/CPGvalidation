@@ -383,7 +383,9 @@ def phase_gate_metrics(
     lr_offsets = []
     clk_l = arr("phase_clock_L")
     clk_r = arr("phase_clock_R")
-    if clk_l.size and clk_l.size == clk_r.size:
+    have_clock = (clk_l.size and clk_l.size == clk_r.size
+                  and np.ptp(clk_l) > 1e-9 and np.ptp(clk_r) > 1e-9)
+    if have_clock:
         t = np.arange(clk_l.size, dtype=float) * dt_s
         start = 0.0
         for s in "LR":
@@ -420,14 +422,17 @@ def phase_gate_metrics(
                 f"L/R offset spread {hi - lo:.3f} rad > "
                 f"{2.0 * lr_drift_max:.3f}")
 
-    # Joint-angle periodicity. Reuse each side's contact onsets.
+    # Joint-angle periodicity over the measured CPG stance cycles.
     corrs = []
     for s in "LR":
-        per = arr(f"phase_period_{s}")
-        p = float(per[-1]) if per.size else period_s
+        on = cycles[s]
+        if on.size > 1:
+            p = float(np.mean(np.diff(on)[-min_cycles:]))
+        else:
+            p = period_s
         for joint in ("hip", "knee", "ankle"):
             trace = arr(f"{joint}_model_{s}")
-            if trace.size:
+            if trace.size and np.isfinite(p):
                 c = _period_autocorr(trace, p, dt_s)
                 if np.isfinite(c):
                     corrs.append(c)
