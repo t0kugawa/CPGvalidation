@@ -4,12 +4,7 @@ from t2xcpg.params import PARAMS
 
 
 class BrainStem:
-    """
-    Reticulospinal brainstem projection providing tonic drives to the spinal CPG:
-    - BS to E: projects bilaterally to RGE.
-    - BS to F: projects bilaterally to RGF.
-    Integrated through the PERSONA registry so drive rates are optimizable.
-    """
+    """Tonic reticulospinal drive to the spinal CPG (BS -> RGE and RGF)."""
     def __init__(self,
                  registry: Registry,
                  n_bs: int = PARAMS["n_bs_default"],
@@ -19,6 +14,8 @@ class BrainStem:
                  bs_base_hz: float | None = None,
                  speed_ref_mps: float = PARAMS["bs_speed_ref_mps"]):
         self.registry = registry
+        self.registry.ensure_delay_range(
+            PARAMS["delay_min_ms"], PARAMS["delay_max_ms"])
         self.n_bs = n_bs
         self.prefix = prefix
         self.bs_base_hz = (PARAMS["bs_base_fraction"] * float(bs_e_hz)
@@ -64,15 +61,13 @@ class BrainStem:
 
 
 class BaseDrive:
-    """
-    Tonic reticulospinal base drive from `cpg_2legs_fast` (`base_pg -> base_in`
-    projecting bilaterally onto RGE and RGF). The Poisson rate is a PERSONA
-    parameter; the projection weights are ordinary static synapses.
-    """
+    """Tonic base drive (base_pg -> base_in) projecting bilaterally onto RGE/RGF."""
     def __init__(self, registry: Registry,
                  n_bs: int = PARAMS["n_bs_default"],
                  base_hz: float = PARAMS["base_hz"], prefix: str = "BASE"):
         self.registry = registry
+        self.registry.ensure_delay_range(
+            PARAMS["delay_min_ms"], PARAMS["delay_max_ms"])
         self.n_bs = n_bs
         self.prefix = prefix
 

@@ -16,7 +16,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-import run_validation
+import run
 from persona.phase_metrics import phase_gate_metrics
 from model.model_cfg import ANKLE_RANGE_RAD
 
@@ -29,7 +29,7 @@ pytestmark = pytest.mark.phase_gate
 @pytest.fixture(scope="module")
 def gate_run():
     OUT.mkdir(parents=True, exist_ok=True)
-    return run_validation.run(
+    return run.run(
         duration_s=8.0,
         view="oblique_view",
         width=320,
@@ -37,7 +37,7 @@ def gate_run():
         fps=20,
         out_dir=str(OUT),
         w_scale=1.0,
-        ref_hz=run_validation.DEFAULT_REF_HZ,
+        ref_hz=run.DEFAULT_REF_HZ,
         belt_mps=0.2,
         belt_start_s=0.5,
         belt_ramp_s=0.5,
@@ -52,7 +52,7 @@ def gate_run():
         belt_mode="dataset",
         snapshot_s=0,
         realize_every_k=1,
-        resolution_ms=run_validation.DEFAULT_RESOLUTION_MS,
+        resolution_ms=run.DEFAULT_RESOLUTION_MS,
         cut_multisite=False,
         game=None,
         seed=0,

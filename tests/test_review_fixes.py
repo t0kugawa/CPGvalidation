@@ -49,24 +49,29 @@ def test_synaptic_parameters_reach_the_right_projection(nest_kernel):
     explored = {n: p.sample_exploration() for n, p in params.items()}
     reg.apply_explored_parameters(explored)
     for key, cfg in reg.connection_cfgs.items():
-        col = reg.synapses(key)
-        w = np.asarray(col.get("weight"), dtype=float)
-        if cfg.model == "static_synapse":
-            want = float(explored[f"conn_{key}_weight"])
-            sigma = cfg.parameters["weight"].sigma
-            # per-synapse realization around the explored sample (spec §5.2)
-            assert abs(w.mean() - want) < 5.0 * sigma / np.sqrt(w.size) + 1e-9, \
-                f"{key}: explored weight not realized around the sample"
-            if cfg.parameters["weight"].min < cfg.parameters["weight"].max:
-                # Frozen means keep their bounds and still receive per-synapse
-                # dispersion; only the learned mean is held by Agent.step.
-                assert w.std() > 0.0, f"{key}: no per-synapse dispersion"
-            # recorded = applied: the recorder holds exactly the applied sample
-            assert reg.site_recorder(f"conn_{key}_weight").latest_sample()[0] == want
-        else:
+        if cfg.model != "static_synapse":
             seed = round(float(cfg.extra_syn_spec["weight"]), 6)
+            col = reg.synapses(key)
+            w = np.asarray(col.get("weight"), dtype=float)
             got = {round(float(x), 6) for x in w}
             assert got == {seed}, f"{key}: STDP weight must not be overwritten"
+            continue
+        if reg.is_frozen(f"conn_{key}_weight", "mean"):
+            # Structural freezes hold the learned mean and skip realization.
+            continue
+        col = reg.synapses(key)
+        w = np.asarray(col.get("weight"), dtype=float)
+        want = float(explored[f"conn_{key}_weight"])
+        sigma = cfg.parameters["weight"].sigma
+        # per-synapse realization around the explored sample (spec §5.2)
+        assert abs(w.mean() - want) < 5.0 * sigma / np.sqrt(w.size) + 1e-9, \
+            f"{key}: explored weight not realized around the sample"
+        if w.size > 1 and cfg.parameters["weight"].min < cfg.parameters["weight"].max:
+            # Frozen means keep their bounds and still receive per-synapse
+            # dispersion; only the learned mean is held by Agent.step.
+            assert w.std() > 0.0, f"{key}: no per-synapse dispersion"
+        # recorded = applied: the recorder holds exactly the applied sample
+        assert reg.site_recorder(f"conn_{key}_weight").latest_sample()[0] == want
 
 
 def test_base_drive_projections(nest_kernel):

@@ -38,8 +38,8 @@ def _flexor_drive(resolution_ms, steps=40):
 
 
 def test_production_resolution_is_the_reference_default():
-    import run_validation
-    assert run_validation.DEFAULT_RESOLUTION_MS == 0.2
+    import run
+    assert run.DEFAULT_RESOLUTION_MS == 0.2
 
 
 def test_flexor_drive_stays_graded_at_0_2_ms(nest_kernel):

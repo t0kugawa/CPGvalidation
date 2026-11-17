@@ -56,6 +56,26 @@ class NestAdapter(Adapter):
         # apply_explored_parameters); cleared on every apply, never swallowed.
         self.last_apply_errors: List[tuple[str, str]] = []
 
+    def ensure_delay_range(self, min_ms: float = 1.0,
+                           max_ms: float = 20.0) -> None:
+        """Reserves a kernel delay range before the first ``Simulate``.
+
+        NEST cannot grow ``min_delay``/``max_delay`` after simulation starts,
+        so optimizable delays need the full range declared up front.
+        """
+        try:
+            status = nest.GetKernelStatus()
+            if float(status.get("biological_time", 0.0)) > 0.0:
+                return
+            lo = max(float(min_ms), float(status.get("resolution", 0.1)))
+            hi = float(max_ms)
+            if (float(status.get("min_delay", 0.0)) <= lo
+                    and float(status.get("max_delay", 0.0)) >= hi):
+                return
+            nest.SetKernelStatus({"min_delay": lo, "max_delay": hi})
+        except Exception as exc:
+            self.last_apply_errors.append(("delay_range", str(exc)))
+
     def register_noise_recorder(self, recorder: NoiseRecorder):
         self.noise_recorders[recorder.name] = recorder
 

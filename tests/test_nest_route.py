@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 SCANNED = (list((ROOT / "persona").glob("*.py"))
            + list((ROOT / "t2xcpg").glob("*.py"))
-           + [ROOT / "personalize.py", ROOT / "run_validation.py"])
+           + [ROOT / "personalize.py", ROOT / "run.py"])
 
 SKIP_NAMES = {"registry.py", "nest_adapter.py", "conftest.py"}
 

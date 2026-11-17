@@ -49,6 +49,8 @@ def test_variants_are_game_off_by_default():
 
 
 def test_cmaes_finds_quadratic_minimum():
+    import pytest
+    pytest.importorskip("optuna")
     from benchmarks.compare.cmaes_arm import run_cmaes
 
     bounds = {"x": (-2.0, 2.0), "y": (-2.0, 2.0)}

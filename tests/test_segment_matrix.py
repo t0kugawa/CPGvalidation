@@ -98,8 +98,8 @@ def test_nest_inventory_and_relay_drive(nest_kernel):
     assert set(matrix.segment_of_site) == set(
         registry.get_all_optimizable_params())
     names = {segment.name for segment in matrix.segments}
-    assert "con_in_e_L_m_f_L" in names
-    assert "con_in_f_L_m_e_L" in names
+    assert "con_in_e_L_rg_f_L" in names
+    assert "con_in_f_L_rg_e_L" in names
 
     by_name = {segment.name: segment.id for segment in matrix.segments}
     for rate_name, efferents in (

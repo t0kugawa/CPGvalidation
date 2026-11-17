@@ -29,6 +29,8 @@ run_output/
 h5out/
 test_results/
 archive/
+.agentbridge/
+runs/
 
 # README is under review; keep local edits out of version control.
 README.md

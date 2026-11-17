@@ -41,6 +41,10 @@ PARAMS = {
     "velocity_mps": 5.45,                       # [mps] conduction velocity
     "delay_scale": 1.0,                          # [scale] global delay scale
     "delay_jitter_ms": 0.2,                     # [sigma] delay jitter sd
+    "delay_sigma_fraction": 0.10,                # [fraction] delay PERSONA sigma
+    "delay_sigma_floor_ms": 0.01,                # [sigma] min delay sigma
+    "delay_min_ms": 1.0,                         # [bound] delay lower
+    "delay_max_ms": 20.0,                        # [bound] delay upper
 
     # ── Population sizes ────────────────────────────────────────────────────
     "n_rg_final": 100,                          # [n_neurons] RG per leg, FINAL
@@ -169,13 +173,13 @@ PARAMS = {
     # ── L2CPG / brainstem projections ───────────────────────────────────────
     "scale_bs": 1.0,                            # [scale] BS->RG weight scale
     "scale_base": 1.0,                          # [scale] BASE->RG weight scale
-    "w_con_bs_rg": 2.0,                         # [w_con] BS -> RG_E/RG_F
+    "w_con_bs_rg": 8.0,                         # [w_con] BS -> RG_E/RG_F (tuned baseline)
     "p_con_bs_rg": 0.45,                        # [p_con] BS -> RG_E/RG_F
-    "w_con_base_rg": 1.0,                       # [w_con] BASE -> RG_E/RG_F
+    "w_con_base_rg": 2.0,                       # [w_con] BASE -> RG_E/RG_F (doubled from 1.0)
     "p_con_base_rg": 0.10,                      # [p_con] BASE -> RG_E/RG_F
     "delay_base_rg": 1.0,                       # [delay] BASE -> RG_E/RG_F
     "leading_leg": "L",                         # [choice] first-stepping leg
-    "leading_gain": 1.5,                        # [gain] leading-leg BS gain
+    "leading_gain": 1.2,                        # [gain] leading-leg BS gain (optimal L-R balance)
     "leading_gain_other": 1.0,                  # [gain] non-leading-leg BS gain
     "p_comm": 0.40,                             # [p_con] commissural density
     "delay_comm": 3.0,                          # [delay] commissural delay
@@ -184,21 +188,17 @@ PARAMS = {
     "w_con_v3f_rg_f": 0.5,                      # [w_con] V3-F -> RG_F
 
     # ── Leg half-centre, recurrence, motor output ───────────────────────────
-    "w_con_rg_e_in_e": 12.0,                    # [w_con] RG_E -> InE
+    "w_con_rg_e_in_e": 15.0,                    # [w_con] RG_E -> InE (boosted from 12.0)
     "p_con_rg_e_in_e": 0.15,                    # [p_con] RG_E -> InE
-    "w_con_in_e_rg_f": -8.0,                    # [w_con] InE -l RG_F
-    "p_con_in_e_rg_f": 0.15,                    # [p_con] InE -l RG_F
-    "w_con_rg_f_in_f": 18.0,                    # [w_con] RG_F -> InF
+    "w_con_in_e_rg_f": -20.0,                   # [w_con] InE -l RG_F (reduced from -24.0, baseline)
+    "p_con_in_e_rg_f": 0.25,                    # [p_con] InE -l RG_F
+    "w_con_rg_f_in_f": 15.0,                    # [w_con] RG_F -> InF (matched to RG-E)
     "p_con_rg_f_in_f": 0.30,                    # [p_con] RG_F -> InF
-    "w_con_in_f_rg_e": -48.0,                   # [w_con] InF -l RG_E
-    "p_con_in_f_rg_e": 0.30,                    # [p_con] InF -l RG_E
-    "w_con_in_e_m_f": -8.0,                     # [w_con] InE -l M-F
-    "p_con_in_e_m_f": 0.15,                     # [p_con] InE -l M-F
-    "w_con_in_f_m_e": -48.0,                    # [w_con] InF -l M-E
-    "p_con_in_f_m_e": 0.30,                     # [p_con] InF -l M-E
-    "w_con_rg_e_rg_e": 4.0,                     # [w_con] RG_E -> RG_E
+    "w_con_in_f_rg_e": -20.0,                   # [w_con] InF -l RG_E (symmetric with InE, baseline)
+    "p_con_in_f_rg_e": 0.25,                    # [p_con] InF -l RG_E
+    "w_con_rg_e_rg_e": 6.5,                     # [w_con] RG_E -> RG_E (boosted for extensor bias)
     "p_con_rg_e_rg_e": 0.12,                    # [p_con] RG_E -> RG_E
-    "w_con_rg_f_rg_f": 5.5,                     # [w_con] RG_F -> RG_F
+    "w_con_rg_f_rg_f": 4.0,                     # [w_con] RG_F -> RG_F (reduced to prevent F dominance)
     "p_con_rg_f_rg_f": 0.12,                    # [p_con] RG_F -> RG_F
     "w_con_rg_e_m_e": 2.75,                     # [w_con] RG_E -> M-E
     "p_con_rg_e_m_e": 0.50,                     # [p_con] RG_E -> M-E
@@ -227,10 +227,6 @@ PARAMS = {
     "p_con_ia_e_m_f": 0.40,                     # [p_con] Ia-IN-E -l M-F
     "w_con_ia_f_m_e": -10.0,                    # [w_con] Ia-IN-F -l M-E
     "p_con_ia_f_m_e": 0.40,                     # [p_con] Ia-IN-F -l M-E
-    "w_con_ia_e_in_in_e": 6.0,                  # [w_con] Ia-E -> InE
-    "p_con_ia_e_in_in_e": 0.25,                 # [p_con] Ia-E -> InE
-    "w_con_ia_f_in_in_f": 6.0,                  # [w_con] Ia-F -> InF
-    "p_con_ia_f_in_in_f": 0.25,                 # [p_con] Ia-F -> InF
 
     # ── Renshaw recurrent inhibition ────────────────────────────────────────
     "w_con_m_e_r_e": 3.0,                       # [w_con] M-E -> R-E
@@ -264,10 +260,6 @@ PARAMS = {
     "p_con_in_ib_f_m_e": 0.35,                  # [p_con] InIb-F -> M-E
     "w_con_in_ib_f_rg_e": 18.0,                 # [w_con] InIb-F -> RG_E
     "p_con_in_ib_f_rg_e": 0.35,                 # [p_con] InIb-F -> RG_E
-    "w_con_ia_e_in_in_ib_e": 8.0,               # [w_con] Ia-E -> InIb-E
-    "p_con_ia_e_in_in_ib_e": 0.30,              # [p_con] Ia-E -> InIb-E
-    "w_con_ia_f_in_in_ib_f": 8.0,               # [w_con] Ia-F -> InIb-F
-    "p_con_ia_f_in_in_ib_f": 0.30,              # [p_con] Ia-F -> InIb-F
 
     # ── CUT (cutaneous) stance reinforcement ────────────────────────────────
     "scale_cut": 1.0,                           # [scale] CUT weight scale

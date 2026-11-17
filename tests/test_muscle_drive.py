@@ -43,14 +43,14 @@ def test_drive_is_linear_in_the_pool_spike_count(nest_kernel):
 def test_muscle_drive_reads_the_motor_pool_and_stays_graded(nest_kernel):
     leg = CPG_Leg("L", Registry(), n_rg=8, n_mn=10, n_int=6, n_aff=6, ref_hz=100.0)
     # 4 motor spikes out of 10 neurons is a 40 Hz pool: a graded 0.4 drive.
-    leg.rec_mne = _FakeRecorder(4)
-    leg.rec_mnf = _FakeRecorder(0)
-    leg.rec_muse = _FakeRecorder(10)   # parrots would have said 1.0
-    leg.rec_musf = _FakeRecorder(10)
+    leg.recorders["m_e_L"] = _FakeRecorder(4)
+    leg.recorders["m_f_L"] = _FakeRecorder(0)
+    leg.recorders["mus_e_L"] = _FakeRecorder(10)   # parrots would have said 1.0
+    leg.recorders["mus_f_L"] = _FakeRecorder(10)
     drive_e, drive_f = leg.get_muscle_drives(10.0)
     assert np.isclose(drive_e, 0.4), "drive must be the motor rate, not the relay count"
     assert np.isclose(drive_f, 0.0)
-    assert leg.rec_mne.cleared and leg.rec_mnf.cleared
+    assert leg.recorders["m_e_L"].cleared and leg.recorders["m_f_L"].cleared
 
 
 def test_motor_to_muscle_relay_really_inflates_the_spike_count(nest_kernel):

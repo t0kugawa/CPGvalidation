@@ -1,6 +1,7 @@
 from typing import Dict, Any
 import os
 import nest
+import numpy as np
 
 from persona.registry import Registry
 from persona.connection import Connection
@@ -9,6 +10,7 @@ from model.adapter import CPGAdapter, CPGInput, CPGOutput
 from t2xcpg.bs import BrainStem, BaseDrive
 from t2xcpg.leg import Leg
 from t2xcpg.params import PARAMS
+from t2xcpg.utils import delay_param
 
 # Drive-balance spec (2026-10-20): the chosen BS->RG base weight before the
 # leading-leg gain. Both legs use the same base; only leading_gain differs.
@@ -18,12 +20,8 @@ SCALE_BASE = float(os.environ.get("CPG_SCALE_BASE", str(PARAMS["scale_base"])))
 
 
 class L2CPG(CPGAdapter):
-    """
-    Two-limb spinal CPG network (Left and Right hindlimbs) with full commissural
-    pathways matching Diagram 2, driven by Brainstem projections and modulated by
-    sensory afferent feedback (CUT, Ia, Ib).
-    Implements CPGAdapter to seamlessly interface with the MuJoCo biomechanical model.
-    """
+    """Bilateral spinal CPG: two limbs, commissural pathways, brainstem and
+    sensory drive, implementing the ``CPGAdapter`` interface for MuJoCo."""
     def __init__(self,
                  registry: Registry,
                  bs: BrainStem,
@@ -34,6 +32,8 @@ class L2CPG(CPGAdapter):
                  leading_gain: float = PARAMS["leading_gain"],
                  base: "BaseDrive | None" = None):
         self.registry = registry
+        self.registry.ensure_delay_range(
+            PARAMS["delay_min_ms"], PARAMS["delay_max_ms"])
         self.bs = bs
         self.legs = legs
         self.dt_ms = dt_ms
@@ -46,6 +46,14 @@ class L2CPG(CPGAdapter):
         self._build_bs_connections()
         self._build_base_connections()
         self._build_commissural_connections(p_comm=p_comm)
+        self.recorders = {}
+        self.rec_ids = {}
+        for name in ("BS_in_e", "BS_in_f", "BASE_in"):
+            if name not in self.registry.population_nodes:
+                continue
+            nodes = self.registry.get(name)
+            self.recorders[name] = self.registry.create_spike_recorder(nodes)
+            self.rec_ids[name] = np.asarray(nodes.tolist(), dtype=np.int64)
         self.registry.finalize_connections()
 
     def set_bs_speed(self, speed_mps: float, ref_e: float | None = None,
@@ -75,10 +83,9 @@ class L2CPG(CPGAdapter):
             source=src,
             target=tgt,
             model="static_synapse",
-            parameters={"weight": w_param},
+            parameters={"weight": w_param, "delay": delay_param(float(delay))},
             rule="pairwise_bernoulli",
             p=float(p),
-            extra_syn_spec={"delay": float(delay)}
         )
         return self.registry.create_connection(cfg)
 
@@ -185,19 +192,30 @@ class L2CPG(CPGAdapter):
         d_e_R, d_f_R = 0.0, 0.0
         plastic: Dict[str, Dict[str, float]] = {"delta": {}, "n": {}}
         rg: Dict[str, float] = {}
+        activity: Dict[str, float] = {}
+        spike_events: Dict[str, Dict[str, Any]] = {}
 
-        if "L" in self.legs:
-            plastic["delta"].update(self.legs["L"].update_plastic_weights(t_before, self.current_time_ms))
-            plastic["n"].update(self.legs["L"].plastic_counts)
-            d_e_L, d_f_L = self.legs["L"].get_muscle_drives(self.dt_ms, self.current_time_ms)
-            rg_e, rg_f = self.legs["L"].get_rg_rates(self.dt_ms, self.current_time_ms)
-            rg.update({"rg_e_L": rg_e, "rg_f_L": rg_f})
-        if "R" in self.legs:
-            plastic["delta"].update(self.legs["R"].update_plastic_weights(t_before, self.current_time_ms))
-            plastic["n"].update(self.legs["R"].plastic_counts)
-            d_e_R, d_f_R = self.legs["R"].get_muscle_drives(self.dt_ms, self.current_time_ms)
-            rg_e, rg_f = self.legs["R"].get_rg_rates(self.dt_ms, self.current_time_ms)
-            rg.update({"rg_e_R": rg_e, "rg_f_R": rg_f})
+        for side in ("L", "R"):
+            if side not in self.legs:
+                continue
+            leg = self.legs[side]
+            plastic["delta"].update(
+                leg.update_plastic_weights(t_before, self.current_time_ms))
+            plastic["n"].update(leg.plastic_counts)
+            rates, _counts, events = leg.drain_activity(self.dt_ms)
+            activity.update(rates)
+            spike_events.update(events)
+            d_e, d_f = leg.get_muscle_drives(self.dt_ms, self.current_time_ms)
+            rg_e, rg_f = leg.get_rg_rates(self.dt_ms, self.current_time_ms)
+            rg.update({f"rg_e_{side}": rg_e, f"rg_f_{side}": rg_f})
+            if side == "L":
+                d_e_L, d_f_L = d_e, d_f
+            else:
+                d_e_R, d_f_R = d_e, d_f
+
+        bs_rates, bs_events = self._drain_bs()
+        activity.update(bs_rates)
+        spike_events.update(bs_events)
 
         return CPGOutput(
             mus_E_L=d_e_L,
@@ -205,8 +223,27 @@ class L2CPG(CPGAdapter):
             mus_E_R=d_e_R,
             mus_F_R=d_f_R,
             t_ms=self.current_time_ms,
-            extra={"plastic": plastic, "rg": rg},
+            extra={"plastic": plastic, "rg": rg, "activity": activity,
+                   "spike_events": spike_events},
         )
+
+    def _drain_bs(self):
+        rates, events = {}, {}
+        for name, rec in self.recorders.items():
+            ev = rec.get("events")
+            times = np.asarray(ev.get("times", []), dtype=np.float64)
+            senders = np.asarray(ev.get("senders", []), dtype=np.int64)
+            n = int(times.size)
+            ids = self.rec_ids[name]
+            rates[name] = (1000.0 * n / max(1, len(ids)) / self.dt_ms
+                           if self.dt_ms > 0.0 else 0.0)
+            if n:
+                events[name] = {
+                    "times": times,
+                    "senders": np.searchsorted(ids, senders),
+                }
+            rec.set({"n_events": 0})
+        return rates, events
 
     def step(self) -> CPGOutput:
         """

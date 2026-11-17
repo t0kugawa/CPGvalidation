@@ -115,6 +115,12 @@ class RunLog:
     rg_e_R: List[float] = field(default_factory=list)
     rg_f_R: List[float] = field(default_factory=list)
 
+    # Per-population firing rates (Hz), h5-only
+    activity: Dict[str, Any] = field(default_factory=dict)
+    # Raw spikes per population, h5-only
+    spikes: Dict[str, Any] = field(default_factory=dict)
+    stop_reason: str = ""
+
     # Cutaneous afferents (Hz)
     cut_L: List[float] = field(default_factory=list)
     cut_R: List[float] = field(default_factory=list)
@@ -152,6 +158,37 @@ class RunLog:
     hip_model_R: List[float] = field(default_factory=list)
     knee_model_L: List[float] = field(default_factory=list)
     knee_model_R: List[float] = field(default_factory=list)
+    # Joint angular velocity (rad/s)
+    ankle_vel_m_L: List[float] = field(default_factory=list)
+    ankle_vel_m_R: List[float] = field(default_factory=list)
+    knee_vel_m_L: List[float] = field(default_factory=list)
+    knee_vel_m_R: List[float] = field(default_factory=list)
+    hip_vel_m_L: List[float] = field(default_factory=list)
+    hip_vel_m_R: List[float] = field(default_factory=list)
+    # Muscle length (m) and velocity (m/s)
+    mus_len_E_L: List[float] = field(default_factory=list)
+    mus_len_F_L: List[float] = field(default_factory=list)
+    mus_len_E_R: List[float] = field(default_factory=list)
+    mus_len_F_R: List[float] = field(default_factory=list)
+    mus_vel_E_L: List[float] = field(default_factory=list)
+    mus_vel_F_L: List[float] = field(default_factory=list)
+    mus_vel_E_R: List[float] = field(default_factory=list)
+    mus_vel_F_R: List[float] = field(default_factory=list)
+    # Ground reaction force (N) and left/right load share
+    ground_force_L: List[float] = field(default_factory=list)
+    ground_force_R: List[float] = field(default_factory=list)
+    load_share_L: List[float] = field(default_factory=list)
+    load_share_R: List[float] = field(default_factory=list)
+    # Rectified, low-passed muscle activation (EMG proxy)
+    emg_E_L: List[float] = field(default_factory=list)
+    emg_F_L: List[float] = field(default_factory=list)
+    emg_E_R: List[float] = field(default_factory=list)
+    emg_F_R: List[float] = field(default_factory=list)
+    # Motor-pool firing rates (Hz)
+    mn_rate_E_L: List[float] = field(default_factory=list)
+    mn_rate_F_L: List[float] = field(default_factory=list)
+    mn_rate_E_R: List[float] = field(default_factory=list)
+    mn_rate_F_R: List[float] = field(default_factory=list)
     hip_ref_L: List[float] = field(default_factory=list)
     hip_ref_R: List[float] = field(default_factory=list)
     knee_ref_L: List[float] = field(default_factory=list)
@@ -194,6 +231,14 @@ class RunLog:
                 "ib_act_E_R", "ib_force_E_R", "ib_rate_E_R",
                 "ib_act_F_R", "ib_force_F_R", "ib_rate_F_R",
                 "hip_model_L", "hip_model_R", "knee_model_L", "knee_model_R",
+                "ankle_vel_m_L", "ankle_vel_m_R", "knee_vel_m_L", "knee_vel_m_R",
+                "hip_vel_m_L", "hip_vel_m_R",
+                "mus_len_E_L", "mus_len_F_L", "mus_len_E_R", "mus_len_F_R",
+                "mus_vel_E_L", "mus_vel_F_L", "mus_vel_E_R", "mus_vel_F_R",
+                "ground_force_L", "ground_force_R",
+                "load_share_L", "load_share_R",
+                "emg_E_L", "emg_F_L", "emg_E_R", "emg_F_R",
+                "mn_rate_E_L", "mn_rate_F_L", "mn_rate_E_R", "mn_rate_F_R",
                 "hip_ref_L", "hip_ref_R", "knee_ref_L", "knee_ref_R",
                 "ankle_ref_L", "ankle_ref_R",
                 "contact_m_L", "contact_m_R", "contact_ref_L", "contact_ref_R",
@@ -204,6 +249,18 @@ class RunLog:
     def finalize(self) -> "RunLog":
         for name in self._NUMERIC:
             setattr(self, name, np.asarray(getattr(self, name), dtype=np.float64))
+        self.activity = {
+            key: np.asarray(value, dtype=np.float64)
+            for key, value in self.activity.items()
+        }
+        self.spikes = {
+            key: {
+                part: np.concatenate(value[part]) if value[part]
+                else np.empty(0, dtype=np.float64 if part == "times" else np.int64)
+                for part in ("times", "senders")
+            }
+            for key, value in self.spikes.items()
+        }
         return self
 
     def to_csv(self, path: str) -> None:
@@ -217,14 +274,11 @@ class RunLog:
 
 
 class Personalizer:
-    """
-    Two-stage online personalization:
-      Stage 1 ("pose")  — hold the target at its initial pose until the model's
-                          two ankle errors stay below `eps_pose` for
-                          `pose_hold_steps` consecutive steps.
-      Stage 2 ("track") — follow the mocap target, optimizing until the
-                          windowed-mean loss drops below `loss_stop`.
-    Every step is an ordinary PERSONA update (sample -> apply -> simulate -> step).
+    """Two-stage online personalization (pose, then track).
+
+    Every step is an ordinary PERSONA update (sample -> apply -> simulate ->
+    step). The run stops on loss convergence, biological acceptance, or the
+    step cap, and records the reason in ``RunLog.stop_reason``.
     """
     def __init__(self,
                  registry: Registry,
@@ -243,7 +297,12 @@ class Personalizer:
                  verbose: bool = True,
                  belt_mps: float = 0.2,
                  belt_start_step: int = 20,
-                 belt_ramp_steps: int = 50):
+                 belt_ramp_steps: int = 50,
+                 accept_stop: bool = False,
+                 accept_margin: float = 0.05,
+                 accept_coverage: float = 0.70,
+                 accept_window: int = 50,
+                 record_spikes: bool = True):
         self.registry = registry
         self.cpg = cpg
         self.rig = rig
@@ -261,6 +320,11 @@ class Personalizer:
         self.belt_mps = float(belt_mps)
         self.belt_start_step = int(belt_start_step)
         self.belt_ramp_steps = max(1, int(belt_ramp_steps))
+        self.accept_stop = bool(accept_stop)
+        self.accept_margin = float(accept_margin)
+        self.accept_coverage = float(accept_coverage)
+        self.accept_window = int(accept_window)
+        self.record_spikes = bool(record_spikes)
         self._seen_apply_errors: set[tuple[str, str]] = set()
 
     def _log_new_apply_errors(self):
@@ -333,6 +397,8 @@ class Personalizer:
         initial_weights = self.registry.snapshot_weights()
         locomotion_initialized = False
         last_actions = None
+        stop_reason = None
+        track_errors: list[float] = []
         # construction-time failures surface before the first apply clears them
         self._log_new_apply_errors()
 
@@ -414,11 +480,24 @@ class Personalizer:
             log.phase_error_R.append(cpg_in.phase_error_R)
             log.phase_clock_L.append(cpg_in.phase_clock_L)
             log.phase_clock_R.append(cpg_in.phase_clock_R)
-            rg = (getattr(cpg_out, "extra", None) or {}).get("rg") or {}
+            extra = getattr(cpg_out, "extra", None) or {}
+            rg = extra.get("rg") or {}
             log.rg_e_L.append(float(rg.get("rg_e_L", 0.0)))
             log.rg_f_L.append(float(rg.get("rg_f_L", 0.0)))
             log.rg_e_R.append(float(rg.get("rg_e_R", 0.0)))
             log.rg_f_R.append(float(rg.get("rg_f_R", 0.0)))
+            activity = extra.get("activity") or {}
+            for key in set(log.activity) | set(activity):
+                log.activity.setdefault(key, []).append(
+                    float(activity.get(key, 0.0)))
+            if self.record_spikes:
+                for key, events in (extra.get("spike_events") or {}).items():
+                    bucket = log.spikes.setdefault(
+                        key, {"times": [], "senders": []})
+                    bucket["times"].append(
+                        np.asarray(events["times"], dtype=np.float64))
+                    bucket["senders"].append(
+                        np.asarray(events["senders"], dtype=np.int64))
             log.cut_L.append(cpg_in.cut_L)
             log.cut_R.append(cpg_in.cut_R)
             log.ia_len_E_L.append(cpg_in.ia_len_E_L)
@@ -449,6 +528,35 @@ class Personalizer:
             log.hip_model_R.append(cpg_in.hip_angle_m_R)
             log.knee_model_L.append(cpg_in.knee_angle_m_L)
             log.knee_model_R.append(cpg_in.knee_angle_m_R)
+            log.ankle_vel_m_L.append(cpg_in.ankle_vel_m_L)
+            log.ankle_vel_m_R.append(cpg_in.ankle_vel_m_R)
+            log.knee_vel_m_L.append(cpg_in.knee_vel_m_L)
+            log.knee_vel_m_R.append(cpg_in.knee_vel_m_R)
+            log.hip_vel_m_L.append(cpg_in.hip_vel_m_L)
+            log.hip_vel_m_R.append(cpg_in.hip_vel_m_R)
+            log.mus_len_E_L.append(cpg_in.ia_len_E_L)
+            log.mus_len_F_L.append(cpg_in.ia_len_F_L)
+            log.mus_len_E_R.append(cpg_in.ia_len_E_R)
+            log.mus_len_F_R.append(cpg_in.ia_len_F_R)
+            log.mus_vel_E_L.append(cpg_in.ia_vel_E_L)
+            log.mus_vel_F_L.append(cpg_in.ia_vel_F_L)
+            log.mus_vel_E_R.append(cpg_in.ia_vel_E_R)
+            log.mus_vel_F_R.append(cpg_in.ia_vel_F_R)
+            log.ground_force_L.append(cpg_in.contact_m_L)
+            log.ground_force_R.append(cpg_in.contact_m_R)
+            total_force = float(cpg_in.contact_m_L) + float(cpg_in.contact_m_R)
+            share = (float(cpg_in.contact_m_L) / total_force
+                     if total_force > 0.0 else 0.5)
+            log.load_share_L.append(share)
+            log.load_share_R.append(1.0 - share)
+            log.emg_E_L.append(cpg_in.emg_E_L)
+            log.emg_F_L.append(cpg_in.emg_F_L)
+            log.emg_E_R.append(cpg_in.emg_E_R)
+            log.emg_F_R.append(cpg_in.emg_F_R)
+            log.mn_rate_E_L.append(float(activity.get("m_e_L", 0.0)))
+            log.mn_rate_F_L.append(float(activity.get("m_f_L", 0.0)))
+            log.mn_rate_E_R.append(float(activity.get("m_e_R", 0.0)))
+            log.mn_rate_F_R.append(float(activity.get("m_f_R", 0.0)))
             log.hip_ref_L.append(cpg_in.hip_angle_ref_L)
             log.hip_ref_R.append(cpg_in.hip_angle_ref_R)
             log.knee_ref_L.append(cpg_in.knee_angle_ref_L)
@@ -475,22 +583,35 @@ class Personalizer:
                                        or len(log.stage) == 1):
                 self._log_progress(log, stage)
 
+            err = max(abs(cpg_in.ankle_angle_m_L - tgt_L),
+                      abs(cpg_in.ankle_angle_m_R - tgt_R))
             if stage == "pose":
-                err = max(abs(cpg_in.ankle_angle_m_L - tgt_L),
-                          abs(cpg_in.ankle_angle_m_R - tgt_R))
                 pose_ok = pose_ok + 1 if err < self.eps_pose else 0
                 pose_steps += 1
                 if pose_ok >= self.pose_hold_steps or \
                         (pose_max_steps and pose_steps >= pose_max_steps):
                     stage = "track"
             else:
+                track_errors.append(float(err))
                 if len(log.loss) >= self.loss_window and \
                         float(np.mean(log.loss[-self.loss_window:])) < self.loss_stop:
+                    stop_reason = "personalized"
                     break
+                if self.accept_stop and len(track_errors) >= self.accept_window:
+                    recent = np.asarray(
+                        track_errors[-self.accept_window:], dtype=np.float64)
+                    covered = float(np.mean(recent <= self.accept_margin))
+                    if covered >= self.accept_coverage:
+                        stop_reason = "accepted"
+                        break
 
             if wall_clock_s is not None and time.monotonic() - t_start >= wall_clock_s:
+                stop_reason = "budget"
                 break
 
+        if stop_reason is None:
+            stop_reason = "max_steps"
+        log.stop_reason = stop_reason
         if log.stdp:
             log.stdp["time_ms"] = np.asarray(log.time_ms, dtype=np.float64)
             log.stdp["sample_time_ms"] = np.asarray(log.stdp["sample_time_ms"], dtype=np.float64)

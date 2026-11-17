@@ -1,5 +1,12 @@
 **High**
 
+* **KNOWN FAIL (2026-11-17):** `tests/test_phase_gate.py` fails on the current
+  working tree (`cycles=0`, angle corr `0.156`; still `0` cycles with delay
+  jitter disabled or delays frozen). This is **not** caused by the new
+  optimizable delays: the lite gate passed at `e0f9e05`, and the working tree
+  removed the InE/InF -> antagonist-MN reciprocal inhibition and retuned
+  `w_con_bs_rg`/`w_con_in_*_rg_*`. Restore/test that tuning separately; the
+  delay feature is verified by the smoke run and the rest of the suite.
 * Ankle inversion/stuck gate: upper stop lowered from `1.76` to `1.10`
   (sole-up fixed; observed safe minimum 1.125); controlled ankle tone added
   (`stiffness=0.05`, `springref=1.0`); reciprocal phase-gated E/F and
@@ -28,12 +35,10 @@
 
 **Medium**
 
-* Production run modes: `full`, `1/2`, `1/5` as first-class modes across
-  `run_2min.py`, `run_validation.py`, and `personalize.py`; orthogonal to
-  `--persona/--no-persona`, `--game`, seed, `realize_every_k`, and render;
-  central size/provenance config. Current gaps: `run_2min` hardcodes full,
-  `run_validation` has `--debug-small`, `personalize` has small/normal, and
-  the phase gate has its own LITE 1/5. Return later.
+* Production run modes: `full`, `half`, `fifth`, and `fast` as presets in the
+  single `run.py` entry point; orthogonal to `--set` PARAMS overrides, `--game`,
+  seed, `realize_every_k`, and render. `personalize.py` remains the library;
+  `run.py` owns the run loop. Return later.
 * Full conceptual model test (**with NoiseRecorders/without**, Game/no game...)
 * Longer multi-seed, multi-reference game validation; per-player resource
   distributions, not just active counts

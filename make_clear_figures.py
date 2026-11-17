@@ -1,20 +1,27 @@
 """
 Clear figures for a PERSONA / CPG / MuJoCo validation run.
 
-Reads run.h5 and writes five figures into ./figures.  All time-series panels
-are drawn over an expanded 60-70 s window (the full run is 120 s) so the
-~5 Hz locomotor structure is actually visible instead of being compressed
-into a solid band.
+Reads run.h5 and writes five figures into <run-dir>/figures.  Time-series
+panels are drawn over a 10 s window so the ~5 Hz locomotor structure is
+visible instead of being compressed into a solid band.  The window is the
+last 10 s of the run, or 60-70 s for runs long enough to reach it, and can
+be overridden on the command line.
 
     1_activity_MUS_CUT_IA_IB.png
     2_stdp_weights.png
     3_persona_advantage_loss_distributions.png
     4_angles_target_controlled.png
     5_fisher_strategy_heatmap.png
+
+Usage:
+    python make_clear_figures.py
+    python make_clear_figures.py --run-dir test_results/final_90s
+    python make_clear_figures.py --run-dir test_results/final_90s --window 40 50
 """
 
 from __future__ import annotations
 
+import argparse
 import os
 import re
 import time
@@ -57,7 +64,23 @@ BROWN = "#8c564b"
 GREY = "#555555"
 
 OUT = "figures"
-T0, T1 = 60.0, 70.0          # expanded time window shown in every timeline
+T0, T1 = 60.0, 70.0          # analysis window shown in every timeline
+RUN_DURATION = 0.0           # last logged time, seconds
+
+
+def choose_window(t):
+    """Return the 10 s detail window, adapted to how long the run lasted."""
+    t_start = float(np.min(t))
+    t_end = float(np.max(t))
+    if t_end >= 70.0:
+        return 60.0, 70.0
+    t1 = float(np.floor(t_end))
+    t0 = max(t_start, t1 - 10.0)
+    return t0, t1
+
+
+def window_note(prefix="window"):
+    return f"{prefix} {T0:.0f}–{T1:.0f} s of the {RUN_DURATION:.1f} s run"
 
 
 # ----------------------------------------------------------------------------
@@ -117,6 +140,10 @@ def load_all(h5_path="run.h5"):
                 stdp[grp] = {k: f["stdp"][grp][k][()] for k in f["stdp"][grp]}
             else:
                 stdp[grp] = f["stdp"][grp][()]
+    # Some runs store only the sampled weight times; the per-step STDP
+    # trace shares the main log clock, so use that for delta / update counts.
+    if "time_ms" not in stdp and "time_ms" in log:
+        stdp["time_ms"] = log["time_ms"]
     return log, agent, stdp
 
 
@@ -186,7 +213,7 @@ def figure_activity(log):
         ax.tick_params(axis="x", which="minor", length=2)
 
     fig.suptitle("MUS / CUT / Ia / Ib activity", fontsize=18, y=0.972)
-    fig.text(0.5, 0.012, "all panels: 60–70 s of the 120 s run", ha="center",
+    fig.text(0.5, 0.012, f"all panels: {window_note()}", ha="center",
              fontsize=10, color=GREY)
     save(fig, "1_activity_MUS_CUT_IA_IB.png")
 
@@ -199,7 +226,7 @@ def figure_stdp(stdp):
     t = np.asarray(stdp["time_ms"], float) / 1000.0
     # The plastic weights move most during the first 20 s; show that window
     # so the STDP transients are legible (the final distributions show the end).
-    s0, s1 = 0.0, 20.0
+    s0, s1 = 0.0, min(20.0, float(np.max(t)))
     m = (ts >= s0) & (ts <= s1)
     mt = (t >= s0) & (t <= s1)
     keys = list(stdp["weight_mean"].keys())
@@ -246,26 +273,41 @@ def figure_stdp(stdp):
 
     # final distributions ----------------------------------------------------
     ax = fig.add_subplot(gs[1, 0])
-    data = [np.asarray(stdp["final_weights"][k], float) for k in keys]
-    parts = ax.violinplot(data, positions=np.arange(len(keys)),
-                          widths=0.85, showextrema=False, showmedians=False)
-    for body, k in zip(parts["bodies"], keys):
-        body.set_facecolor(colors[k])
-        body.set_edgecolor(colors[k])
-        body.set_alpha(0.6)
-    for i, vals in enumerate(data):
-        q1, med, q3 = np.percentile(vals, [25, 50, 75])
-        ax.vlines(i, q1, q3, color="k", lw=3.0, alpha=0.75)
-        ax.plot(i, med, "o", color="white", mec="k", ms=5, zorder=5)
-        ax.text(i, med * 1.18, f"{med:.1f}", ha="center", va="bottom",
-                fontsize=8.5)
+    have_final = "final_weights" in stdp
+    if have_final:
+        data = [np.asarray(stdp["final_weights"][k], float) for k in keys]
+        parts = ax.violinplot(data, positions=np.arange(len(keys)),
+                              widths=0.85, showextrema=False, showmedians=False)
+        for body, k in zip(parts["bodies"], keys):
+            body.set_facecolor(colors[k])
+            body.set_edgecolor(colors[k])
+            body.set_alpha(0.6)
+        for i, vals in enumerate(data):
+            q1, med, q3 = np.percentile(vals, [25, 50, 75])
+            ax.vlines(i, q1, q3, color="k", lw=3.0, alpha=0.75)
+            ax.plot(i, med, "o", color="white", mec="k", ms=5, zorder=5)
+            ax.text(i, med * 1.18, f"{med:.1f}", ha="center", va="bottom",
+                    fontsize=8.5)
+        title = "Final distributions"
+    else:
+        # Older / interrupted runs do not store the final weight vectors;
+        # fall back to the last live weight sample and its recorded range.
+        for i, k in enumerate(keys):
+            med = float(np.asarray(stdp["weight_mean"][k], float)[-1])
+            lo = float(np.asarray(stdp["weight_min"][k], float)[-1])
+            hi = float(np.asarray(stdp["weight_max"][k], float)[-1])
+            ax.vlines(i, lo, hi, color="k", lw=3.0, alpha=0.75)
+            ax.plot(i, med, "o", color=colors[k], mec="k", ms=6, zorder=5)
+            ax.text(i, med * 1.18, f"{med:.1f}", ha="center", va="bottom",
+                    fontsize=8.5)
+        title = "Final mean (min–max)"
     ax.set_yscale("log")
     ax.set_ylim(2, 220)
     ax.set_xticks(np.arange(len(keys)))
     ax.set_xticklabels([short_name(k, 18) for k in keys], rotation=25,
                        ha="right", fontsize=9)
     ax.set_ylabel("final weight (log)")
-    ax.set_title("Final distributions", loc="left")
+    ax.set_title(title, loc="left")
 
     # drift ------------------------------------------------------------------
     ax = fig.add_subplot(gs[1, 1])
@@ -290,8 +332,8 @@ def figure_stdp(stdp):
     ax.legend(loc="upper right", ncol=6, framealpha=0.9, fontsize=8)
 
     fig.suptitle("STDP weights", fontsize=18, y=0.972)
-    fig.text(0.5, 0.012, "window 0–20 s of the 120 s run", ha="center",
-             fontsize=10, color=GREY)
+    fig.text(0.5, 0.012, f"trace window 0–{s1:.0f} s of the "
+             f"{RUN_DURATION:.1f} s run", ha="center", fontsize=10, color=GREY)
     save(fig, "2_stdp_weights.png")
 
 
@@ -368,8 +410,8 @@ def figure_persona(log, agent):
             ax.legend(loc="center", fontsize=8, framealpha=0.9)
 
     fig.suptitle("PERSONA", fontsize=18, y=0.965)
-    fig.text(0.5, 0.012, "learning signals: 60–70 s window   ·   distributions: "
-             "old (initial) vs new (final) policy", ha="center",
+    fig.text(0.5, 0.012, f"learning signals: {window_note()}   ·   "
+             "distributions: old (initial) vs new (final) policy", ha="center",
              fontsize=10, color=GREY)
     save(fig, "3_persona_advantage_loss_distributions.png")
 
@@ -401,9 +443,9 @@ def figure_angles(log):
                     label="target")
             ax.plot(tw, ctrl[m], color=color, lw=1.2, label="controlled")
             if joint == "ankle":
-                presc = np.asarray(log[f"ankle_target_{leg}"], float)
+                presc = np.asarray(log[f"ankle_ref_{leg}"], float)
                 ax.plot(tw, presc[m], color=GREEN, ls=":", lw=1.1,
-                        label="prescribed")
+                        label="CPG ref")
             rmse = float(np.sqrt(np.mean((ctrl[m] - target[m]) ** 2)))
             ax.set_title(f"{leg} {joint} · RMSE {rmse:.3f} rad",
                          loc="left", fontsize=11.5)
@@ -422,8 +464,7 @@ def figure_angles(log):
 
     fig.suptitle("Joint angles", fontsize=18, y=0.972)
     fig.text(0.5, 0.012, "target (dashed) vs controlled (solid)   ·   "
-             "window 60–70 s of the 120 s run", ha="center", fontsize=10,
-             color=GREY)
+             + window_note(), ha="center", fontsize=10, color=GREY)
     save(fig, "4_angles_target_controlled.png")
 
 
@@ -441,6 +482,28 @@ def figure_fisher(agent):
     C = F / np.sqrt(np.outer(d, d) + 1e-300)
     C = np.clip(C, -1.0, 1.0)
 
+    # Channel layout is [means | sigmas | noise].  The number of calibrated
+    # parameters depends on the topology, so derive the split instead of
+    # assuming the 269/269/16 layout of older runs.
+    n_mu = len(agent["param_names"]) or n // 2
+    n_sigma = len(agent["sigmas"]) or n_mu
+    if n_mu + n_sigma > n:
+        n_sigma = max(0, n - n_mu)
+    n_noise = n - n_mu - n_sigma
+    k_mu = n_mu
+    k_sigma = n_mu + n_sigma
+    bounds = [n_mu - 0.5, k_sigma - 0.5]
+    ticks, tick_labels = [], []
+    if n_mu:
+        ticks.append((n_mu - 1) / 2)
+        tick_labels.append("μ")
+    if n_sigma:
+        ticks.append(n_mu + (n_sigma - 1) / 2)
+        tick_labels.append("σ")
+    if n_noise:
+        ticks.append(k_sigma + (n_noise - 1) / 2)
+        tick_labels.append("noise")
+
     fig = plt.figure(figsize=(26, 15))
     gs = GridSpec(2, 2, figure=fig, height_ratios=[1.0, 4.4],
                   width_ratios=[1.0, 2.15],
@@ -452,13 +515,20 @@ def figure_fisher(agent):
 
     # diagonal activity ------------------------------------------------------
     x = np.arange(n)
-    axd.semilogy(x[:269], d[:269], ".", ms=3.2, color=BLUE, label="μ")
-    axd.semilogy(x[269:538], d[269:538], ".", ms=3.2, color=ORANGE, label="σ")
-    axd.semilogy(x[538:], d[538:], ".", ms=4.0, color=GREEN, label="noise")
-    for bound in (269, 538):
+    axd.semilogy(x[:k_mu], d[:k_mu], ".", ms=3.2, color=BLUE, label="μ")
+    axd.semilogy(x[k_mu:k_sigma], d[k_mu:k_sigma], ".", ms=3.2,
+                 color=ORANGE, label="σ")
+    axd.semilogy(x[k_sigma:], d[k_sigma:], ".", ms=4.0, color=GREEN,
+                 label="noise")
+    for bound in bounds:
         axd.axvline(bound, color="k", lw=1.0, ls="--", alpha=0.7)
     axd.set_xlim(-5, n + 5)
-    axd.set_ylim(1e-10, 1e10)
+    positive = d[d > 0]
+    if positive.size:
+        axd.set_ylim(10 ** np.floor(np.log10(positive.min())) / 10.0,
+                     10 ** np.ceil(np.log10(positive.max())) * 10.0)
+    else:
+        axd.set_ylim(1e-10, 1e10)
     axd.set_ylabel("F$_{ii}$")
     axd.set_xlabel("channel  [μ | σ | noise]")
     axd.set_title("Fisher diagonal", loc="left")
@@ -469,7 +539,7 @@ def figure_fisher(agent):
                      textcoords="offset points", fontsize=8, color=RED)
         handles.append(Line2D([], [], color=RED, marker="o", lw=0,
                               mfc="none", label=f"{rank + 1}  {short_name(names[i], 26)}"))
-    numbered = axd.legend(handles=handles, loc="lower right", ncol=2,
+    numbered = axd.legend(handles=handles, loc="upper right", ncol=2,
                           fontsize=7.2, framealpha=0.95,
                           handletextpad=0.3, columnspacing=1.0)
     axd.add_artist(numbered)
@@ -478,14 +548,14 @@ def figure_fisher(agent):
     v = 0.15
     im = axf.imshow(C, cmap="RdBu_r", vmin=-v, vmax=v, interpolation="nearest",
                     aspect="equal")
-    for bound in (268.5, 537.5):
+    for bound in bounds:
         axf.axhline(bound, color="k", lw=0.9, ls="--", alpha=0.7)
         axf.axvline(bound, color="k", lw=0.9, ls="--", alpha=0.7)
-    axf.set_xticks([134, 403, 546])
-    axf.set_xticklabels(["μ", "σ", "noise"], fontsize=9)
-    axf.set_yticks([134, 403, 546])
-    axf.set_yticklabels(["μ", "σ", "noise"], fontsize=9)
-    axf.set_title("Full 554 × 554", loc="left")
+    axf.set_xticks(ticks)
+    axf.set_xticklabels(tick_labels, fontsize=9)
+    axf.set_yticks(ticks)
+    axf.set_yticklabels(tick_labels, fontsize=9)
+    axf.set_title(f"Full {n} × {n}", loc="left")
 
     top = order[:60]
     sub = C[np.ix_(top, top)]
@@ -506,7 +576,29 @@ def figure_fisher(agent):
 
 # ----------------------------------------------------------------------------
 def main():
-    log, agent, stdp = load_all("run.h5")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--run-dir", default=".",
+                        help="directory containing run.h5 (default: .)")
+    parser.add_argument("--window", nargs=2, type=float, metavar=("T0", "T1"),
+                        help="override the 10 s detail window, in seconds")
+    args = parser.parse_args()
+
+    global OUT, T0, T1, RUN_DURATION
+    run_dir = os.path.abspath(args.run_dir)
+    h5_path = os.path.join(run_dir, "run.h5")
+    if not os.path.isfile(h5_path):
+        raise SystemExit(f"run.h5 not found in {run_dir}")
+    OUT = os.path.join(run_dir, "figures")
+
+    log, agent, stdp = load_all(h5_path)
+    t = np.asarray(log["time_ms"], float) / 1000.0
+    RUN_DURATION = float(np.max(t))
+    T0, T1 = (tuple(map(float, args.window)) if args.window
+              else choose_window(t))
+    print(f"run {run_dir}")
+    print(f"  data {t[0]:.2f}-{RUN_DURATION:.2f} s, "
+          f"detail window {T0:.0f}-{T1:.0f} s")
+
     figure_activity(log)
     figure_stdp(stdp)
     figure_persona(log, agent)

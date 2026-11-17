@@ -138,6 +138,7 @@ class Leg:
             for s in SIDES
         }
         self._applied_muscles = {s: (0.0, 0.0) for s in SIDES}
+        self._emg = {s: [0.0, 0.0] for s in SIDES}
         # Back-compatible name: per-site afferents are a list now.
         self.cut_afferent = {s: self.cut_plantar[s].afferents for s in SIDES}
         # Reference lengths are placeholders: `calibrate_spindles` overwrites
@@ -170,6 +171,11 @@ class Leg:
 
         self.calibrate_spindles()
         self.reset()
+        
+        # Phase state tracking with hysteresis to prevent rapid switching
+        self._phase_state = {s: "stance" for s in SIDES}  # Current phase
+        self._phase_count = {s: 0 for s in SIDES}  # Steps in current phase
+        self._phase_min_steps = 20  # Minimum steps before allowing phase change (200ms at 10ms dt, ~2.5Hz max)
 
     def _jid(self, name: str) -> int:
         i = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name)
@@ -302,6 +308,9 @@ class Leg:
         """
         mujoco.mj_resetData(self.model, self.data)
         self.time_ms = 0.0
+        # Reset phase tracking
+        self._phase_state = {s: "stance" for s in SIDES}
+        self._phase_count = {s: 0 for s in SIDES}
         if pose is None:
             pose = {s: {"hip": PARAMS["default_pose_hip_rad"],
                         "knee": PARAMS["default_pose_knee_rad"],
@@ -529,11 +538,30 @@ class Leg:
         base tracks the dataset GT position (approach A).
         """
         self.contract_muscles(cpg_output)
-        cp_phase = {
+        
+        # Phase detection with hysteresis to prevent rapid switching
+        # Simple comparison triggers phase change intent
+        cp_phase_intent = {
             s: ("stance" if getattr(cpg_output, f"mus_E_{s}")
                 >= getattr(cpg_output, f"mus_F_{s}") else "swing")
             for s in SIDES
         }
+        
+        # Apply hysteresis: require minimum duration in current phase
+        cp_phase = {}
+        for s in SIDES:
+            intent = cp_phase_intent[s]
+            current = self._phase_state[s]
+            self._phase_count[s] += 1
+            
+            # Allow phase change only if:
+            # 1. Intent differs from current state
+            # 2. Minimum duration has elapsed
+            if intent != current and self._phase_count[s] >= self._phase_min_steps:
+                self._phase_state[s] = intent
+                self._phase_count[s] = 0
+            
+            cp_phase[s] = self._phase_state[s]
 
         t_s = self.time_ms / 1000.0
         # Distinct left/right reference trajectories (R is phase-shifted).
@@ -597,6 +625,11 @@ class Leg:
             ta_force = float(abs(self.data.actuator_force[self.act_ta_m[s]]))
             sol_act = self._activation(self.act_sol_m[s])
             ta_act = self._activation(self.act_ta_m[s])
+            alpha = 1.0 - np.exp(-self.dt_ms / PARAMS["emg_tau_ms"])
+            self._emg[s][0] += alpha * (sol_act - self._emg[s][0])
+            self._emg[s][1] += alpha * (ta_act - self._emg[s][1])
+            emg_e = PARAMS["emg_gain"] * self._emg[s][0]
+            emg_f = PARAMS["emg_gain"] * self._emg[s][1]
 
             ia_rate_e = self.ia_sol[s].get_ia_hz(sol_len, sol_vel, sol_force)
             ia_rate_f = self.ia_ta[s].get_ia_hz(ta_len, ta_vel, ta_force)
@@ -609,6 +642,9 @@ class Leg:
             q_hip_m = float(self.data.qpos[self.model.jnt_qposadr[self.j_hip_m[s]]])
             q_knee_ref = float(self.data.qpos[self.model.jnt_qposadr[self.j_knee_ref[s]]])
             q_hip_ref = float(self.data.qpos[self.model.jnt_qposadr[self.j_hip_ref[s]]])
+            v_ankle_m = float(self.data.qvel[self.model.jnt_dofadr[self.j_ankle_m[s]]])
+            v_knee_m = float(self.data.qvel[self.model.jnt_dofadr[self.j_knee_m[s]]])
+            v_hip_m = float(self.data.qvel[self.model.jnt_dofadr[self.j_hip_m[s]]])
 
             sensory[s] = dict(
                 cut=cut_hz, cut_sites=cut["rates"],
@@ -621,9 +657,11 @@ class Leg:
                 sol_force=sol_force, ta_force=ta_force,
                 sol_act=sol_act, ta_act=ta_act,
                 ib_rate_e=ib_rate_e, ib_rate_f=ib_rate_f,
+                emg_e=emg_e, emg_f=emg_f,
                 q_ankle_m=q_ankle_m, q_ankle_ref=q_ankle_ref,
                 q_knee_m=q_knee_m, q_hip_m=q_hip_m,
                 q_knee_ref=q_knee_ref, q_hip_ref=q_hip_ref,
+                v_ankle_m=v_ankle_m, v_knee_m=v_knee_m, v_hip_m=v_hip_m,
             )
 
         L, R = sensory["L"], sensory["R"]
@@ -643,6 +681,8 @@ class Leg:
             ib_act_F_L=L["ta_act"], ib_force_F_L=L["ta_force"], ib_rate_F_L=L["ib_rate_f"],
             ib_act_E_R=R["sol_act"], ib_force_E_R=R["sol_force"], ib_rate_E_R=R["ib_rate_e"],
             ib_act_F_R=R["ta_act"], ib_force_F_R=R["ta_force"], ib_rate_F_R=R["ib_rate_f"],
+            emg_E_L=L["emg_e"], emg_F_L=L["emg_f"],
+            emg_E_R=R["emg_e"], emg_F_R=R["emg_f"],
             phase_L=L["phase"], phase_R=R["phase"],
             phase_ref_L=L["phase_ref"], phase_ref_R=R["phase_ref"],
             contact_m_L=L["contact"], contact_m_R=R["contact"],
@@ -656,6 +696,10 @@ class Leg:
             knee_angle_m_R=R["q_knee_m"], hip_angle_m_R=R["q_hip_m"],
             knee_angle_ref_L=L["q_knee_ref"], hip_angle_ref_L=L["q_hip_ref"],
             knee_angle_ref_R=R["q_knee_ref"], hip_angle_ref_R=R["q_hip_ref"],
+            ankle_vel_m_L=L["v_ankle_m"], knee_vel_m_L=L["v_knee_m"],
+            hip_vel_m_L=L["v_hip_m"],
+            ankle_vel_m_R=R["v_ankle_m"], knee_vel_m_R=R["v_knee_m"],
+            hip_vel_m_R=R["v_hip_m"],
             applied_mus_E_L=self._applied_muscles["L"][0],
             applied_mus_F_L=self._applied_muscles["L"][1],
             applied_mus_E_R=self._applied_muscles["R"][0],

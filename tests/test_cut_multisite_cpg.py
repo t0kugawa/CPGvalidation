@@ -87,7 +87,7 @@ def test_multisite_cut_parameter_dimension(nest_kernel):
     stdp = [k for k in params if k.startswith("conn_cut_rge_L_s")]
     static = [k for k in params
               if k.startswith("conn_cut_in_L_s") and k.endswith("_weight")]
-    assert len(stdp) == N_SITES * 6          # six STDP hyper-parameters/site
+    assert len(stdp) == N_SITES * 7          # six STDP hyper-parameters + delay/site
     assert len(static) == N_SITES            # one static CUT->InE weight/site
     assert "conn_cut_rge_L_tau_plus" not in params
 

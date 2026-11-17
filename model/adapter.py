@@ -59,6 +59,12 @@ class CPGInput:
     ib_force_F_R: float = 0.0
     ib_rate_F_R: float = 0.0
 
+    # Rectified, low-passed muscle activation (EMG proxy), left/right.
+    emg_E_L: float = 0.0
+    emg_F_L: float = 0.0
+    emg_E_R: float = 0.0
+    emg_F_R: float = 0.0
+
     # Locomotion phase ("stance" or "swing")
     phase_L: str = "stance"
     phase_R: str = "swing"
@@ -108,6 +114,14 @@ class CPGInput:
     hip_angle_ref_L: float = 0.0
     knee_angle_ref_R: float = 0.0
     hip_angle_ref_R: float = 0.0
+
+    # Joint angular velocity (rad/s), controlled limbs.
+    ankle_vel_m_L: float = 0.0
+    knee_vel_m_L: float = 0.0
+    hip_vel_m_L: float = 0.0
+    ankle_vel_m_R: float = 0.0
+    knee_vel_m_R: float = 0.0
+    hip_vel_m_R: float = 0.0
 
 
 @dataclass

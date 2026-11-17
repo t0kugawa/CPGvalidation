@@ -1,13 +1,13 @@
 """HDF5 persistence for a personalisation/validation run.
 
-One file holds everything a reader needs to reproduce the figures and evaluate
-the run:
-  * log/    — per-step arrays (angles, muscle drives, CUT/Ia/Ib afferents,
-              phases, contacts, foot positions, loss and advantage),
-  * stdp/   — the STDP weight-recorder trace (per-step mean delta and update
-              count, sampled live weight distribution, final weight vectors),
-  * agent/  — the parameter mean/spread histories, the per-step influence, the
-              advantage/error vectors and the final Fisher metric matrix.
+One file holds everything a reader needs:
+  * log/      — per-step arrays (angles, velocities, muscle state, EMG, ground
+                force, afferent rates, phases, contacts, loss, advantage),
+  * activity/ — per-step population firing rates (Hz),
+  * spikes/   — raw spike times and senders for every recorded population,
+  * stdp/     — STDP weight-recorder traces,
+  * agent/    — parameter mean/spread histories, influence, advantage/error
+                vectors and the final Fisher metric.
 """
 import numpy as np
 import h5py
@@ -24,6 +24,9 @@ def save_run(path, log, agent, meta=None):
         for k, v in (meta or {}).items():
             f.attrs[k] = v
 
+        if getattr(log, "stop_reason", ""):
+            f.attrs["stop_reason"] = str(log.stop_reason)
+
         g = f.create_group("log")
         for k in numeric:
             v = getattr(log, k, None)
@@ -33,6 +36,31 @@ def save_run(path, log, agent, meta=None):
             v = getattr(log, k, None)
             if v is not None and len(v):
                 g.create_dataset(k, data=np.asarray(v, dtype=h5py.string_dtype()))
+
+        activity = getattr(log, "activity", None) or {}
+        if activity:
+            ag = f.create_group("activity")
+            for key, value in activity.items():
+                ag.create_dataset(key, data=np.asarray(value, dtype=float))
+        spikes = getattr(log, "spikes", None) or {}
+        if spikes:
+            sg = f.create_group("spikes")
+            for key, value in spikes.items():
+                kg = sg.create_group(key)
+                n_events = 0
+                for part, arr in value.items():
+                    if isinstance(arr, list):
+                        arr = (np.concatenate(arr) if arr
+                               else np.empty(0, dtype=float))
+                    kg.create_dataset(part, data=np.asarray(arr),
+                                      compression="gzip")
+                    if part == "times":
+                        n_events = int(np.asarray(arr).size)
+                if n_events:
+                    kg.create_dataset(
+                        "population",
+                        data=np.full(n_events, key,
+                                     dtype=h5py.string_dtype()))
 
         stdp = getattr(log, "stdp", None) or {}
         sg = f.create_group("stdp")
@@ -141,6 +169,13 @@ def load_run(path):
                 if getattr(arr, "dtype", None) is not None and arr.dtype.kind in ("S", "O"):
                     arr = np.array([x.decode() if isinstance(x, bytes) else x for x in arr])
                 out[top][k] = arr
+        if "activity" in f:
+            out["activity"] = {k: v[()] for k, v in f["activity"].items()}
+        if "spikes" in f:
+            out["spikes"] = {}
+            for key, group in f["spikes"].items():
+                out["spikes"][key] = {part: group[part][()]
+                                      for part in group}
         if "agent" in f:
             for grp in ("means", "sigmas"):
                 if grp in f["agent"]:

@@ -11,6 +11,8 @@ def test_initial_vector_varies_by_seed():
 
 
 def test_toy_smoke_writes_files(tmp_path):
+    import pytest
+    pytest.importorskip("optuna")
     from bench_persona_compare import run_toy
 
     result = run_toy(

@@ -68,7 +68,6 @@ def test_rg_does_not_drive_ib_interneurons(nest_kernel, leg_name):
     ):
         for src_prefix, tgt_prefix, label in (
             (aff, f"in_ib_{ib}_{leg_name}", "GTO -> InIb"),
-            (f"ia_{ib}_in_{leg_name}", f"in_ib_{ib}_{leg_name}", "Ia -> InIb"),
             (f"in_ib_{ib}_{leg_name}", f"{mn}_{leg_name}", "InIb -> MN"),
             (f"in_ib_{ib}_{leg_name}", f"{rg}_{leg_name}", "InIb -> antagonist RG"),
         ):

@@ -10,7 +10,8 @@ from persona.registry import Registry
 from t2xcpg.cfg import POPULATIONS_FINAL
 from t2xcpg.params import PARAMS
 from t2xcpg.utils import (
-    get_jitter_delay, create_stdp_synapse, STDP_POSTFIX, stdp_param_spec,
+    delay_param, get_jitter_delay, create_stdp_synapse, STDP_POSTFIX,
+    stdp_param_spec,
 )
 
 
@@ -75,16 +76,11 @@ M_F_DRIVE_MAX_SCALE = PARAMS["mf_drive_max_scale"]
 
 
 class Leg:
-    """
-    CPG Leg network matching Diagram 2.
-    Implements:
-    - Rhythm generators (RGE, RGF) with reciprocal inhibition (InE, InF).
-    - Motor neurons (M-E, M-F) and Muscle outputs (mE, mF).
-    - Renshaw cells (R-E, R-F) mediating recurrent and Ia-inhibitory feedback.
-    - Ia afferent stretch pathways (Ia-E, Ia-F) exciting homonymous MN/RG and reciprocal interneurons.
-    - Ib afferent tension pathways inhibiting homonymous MNs against excessive strain.
-    - Cutaneous (CUT) afferents reinforcing stance phase.
-    All neuronal and synaptic parameters are registered via PERSONA Registry.
+    """One hindlimb CPG: rhythm generators, half-centre interneurons, motor
+    pools, Renshaw cells and Ia/Ib/CUT afferent pathways.
+
+    Every neuronal and synaptic parameter is registered with the PERSONA
+    Registry so the agent can personalize it.
     """
     def __init__(self,
                  leg_name: str,
@@ -100,6 +96,8 @@ class Leg:
                  n_cut_sites: int = PARAMS["n_cut_sites_default"]):
         self.leg = leg_name
         self.registry = registry
+        self.registry.ensure_delay_range(
+            PARAMS["delay_min_ms"], PARAMS["delay_max_ms"])
         self.n_rg = n_rg
         self.n_mn = n_mn
         self.n_int = n_int
@@ -126,6 +124,7 @@ class Leg:
         self.n_aff_site = max(1, self.n_aff // self.n_cut_sites)
         self.cut_site_pg: list[str] = []
         self.cut_site_in: list[str] = []
+        self.cut_site_nodes: list[Any] = []
         self.plastic_projections: list[str] = []
         self.plastic_counts: dict[str, int] = {}
 
@@ -135,27 +134,46 @@ class Leg:
         # 2. Build Synaptic Connections
         self._build_connections()
 
-        # 3. Readout Recorders
-        # Muscle drives are read from the MOTOR pool: the muscle parrots are a
-        # convergent relay (each motor spike lands on ~n_mn*P_M2MUS of them), and
-        # NEST collapses coincident relay input into one spike per neuron per ms,
-        # so the relay count saturates at n_mn as soon as the pool fires - a
-        # fan-in correction cannot recover a rate from it. Driving the plants from
-        # that count produced a bang-bang command (measured: drive in {0.8, 1.0}
-        # at n_mn=100) instead of the motor rate.
-        self.rec_mne = self.registry.create_spike_recorder(self.m_e)
-        self.rec_mnf = self.registry.create_spike_recorder(self.m_f)
-        self.rec_muse = self.registry.create_spike_recorder(self.mus_e)
-        self.rec_musf = self.registry.create_spike_recorder(self.mus_f)
-        self.rec_rge = self.registry.create_spike_recorder(self.rg_e)
-        self.rec_rgf = self.registry.create_spike_recorder(self.rg_f)
+        # 3. Spike recorders for every population this leg owns.
+        self.recorders = {}
+        self.rec_ids = {}
+        pools = (
+            ("rg_e", self.rg_e), ("rg_f", self.rg_f),
+            ("m_e", self.m_e), ("m_f", self.m_f),
+            ("r_e", self.r_e), ("r_f", self.r_f),
+            ("ia_e", self.ia_e), ("ia_f", self.ia_f),
+            ("in_ib_e", self.in_ib_e), ("in_ib_f", self.in_ib_f),
+            ("in_e", self.in_e), ("in_f", self.in_f),
+            ("v2a", self.v2a), ("v0v", self.v0v), ("v3f", self.v3f),
+            ("v0d", self.v0d), ("in1", self.in1),
+            ("mus_e", self.mus_e), ("mus_f", self.mus_f),
+            ("cut_in", self.cut_in),
+            ("ia_e_in", self.ia_e_in), ("ia_f_in", self.ia_f_in),
+            ("ib_e_in", self.ib_e_in), ("ib_f_in", self.ib_f_in),
+        )
+        for base, nodes in pools:
+            name = f"{base}_{self.leg}"
+            self.recorders[name] = self.registry.create_spike_recorder(nodes)
+            self.rec_ids[name] = np.asarray(nodes.tolist(), dtype=np.int64)
+        for k, nodes in enumerate(self.cut_site_nodes):
+            name = f"cut_in_{self.leg}_s{k}"
+            self.recorders[name] = self.registry.create_spike_recorder(nodes)
+            self.rec_ids[name] = np.asarray(nodes.tolist(), dtype=np.int64)
+        self.rec_mne = self.recorders[f"m_e_{self.leg}"]
+        self.rec_mnf = self.recorders[f"m_f_{self.leg}"]
+        self.rec_muse = self.recorders[f"mus_e_{self.leg}"]
+        self.rec_musf = self.recorders[f"mus_f_{self.leg}"]
+        self.rec_rge = self.recorders[f"rg_e_{self.leg}"]
+        self.rec_rgf = self.recorders[f"rg_f_{self.leg}"]
+        self._last_counts = {}
+        self._last_rates = {}
+        self._last_events = {}
 
         self.registry.finalize_connections()
 
-        # C2: the structural freezes go through the native PERSONA registry
-        # (mean/sigma pins), not the old min=max/sigma=0 clamp. Freezing here,
-        # after finalize_connections, anchors to the effective values captured
-        # at the end of construction (including the M-F mutation above).
+        # C2: structural freezes use the native PERSONA registry pins. Freezing
+        # after finalize_connections anchors the effective construction values
+        # (including the M-F mutation above).
         self._freeze_structural_params()
 
     def _freeze_structural_params(self):
@@ -343,11 +361,12 @@ class Leg:
             for k in range(self.n_cut_sites):
                 pg_key = f"cut_pg_{self.leg}_s{k}"
                 in_key = f"cut_in_{self.leg}_s{k}"
-                self.registry.create_relay(
+                _pg, in_nodes = self.registry.create_relay(
                     pg_key, in_key, self.n_aff_site,
                     rate=PARAMS["hz_cut_site_rest"], noise_name=None)
                 self.cut_site_pg.append(pg_key)
                 self.cut_site_in.append(in_key)
+                self.cut_site_nodes.append(in_nodes)
 
         # 2. Ia Afferents (stretch length & velocity)
         self.ia_e_pg, self.ia_e_in = self.registry.create_relay(
@@ -372,6 +391,7 @@ class Leg:
         d = get_jitter_delay() if delay is None else delay
         p = p * self.p_scale
         weight = weight * self.w_scale
+        delay_parameter = {"delay": delay_param(float(d))}
 
         model = "static_synapse"
         wr = None
@@ -379,18 +399,16 @@ class Leg:
             syn_base = key.rsplit("_", 1)[0] if key else "default"
             syn_type = STDP_POSTFIX.get(syn_base, "default")
             model, wr = create_stdp_synapse(self.registry, syn_type, f"{src}_{tgt}")
-            # STDP owns the synaptic weight; PERSONA optimizes only the STDP
-            # hyper-parameters (tau_plus/lambda/alpha/mu/Wmax). The seed weight
-            # is written once via the syn_spec and never overwritten afterwards.
-            parameters = self._stdp_params(syn_type, weight)
-            extra = {"delay": float(d), "weight": float(weight)}
+            parameters = {**self._stdp_params(syn_type, weight), **delay_parameter}
+            extra = {"weight": float(weight)}
         else:
             parameters = {"weight": self._param(
                 "weight", weight,
                 abs(weight) * PARAMS["syn_weight_sigma_fraction"],
                 min_val=PARAMS["syn_weight_min"] if weight < 0 else 0.0,
-                max_val=0.0 if weight < 0 else PARAMS["syn_weight_max"])}
-            extra = {"delay": float(d)}
+                max_val=0.0 if weight < 0 else PARAMS["syn_weight_max"]),
+                **delay_parameter}
+            extra = {}
 
         cfg = Connection(
             source=src,
@@ -438,15 +456,6 @@ class Leg:
         self._connect(f"in_f_{leg}", f"rg_e_{leg}",
                       weight=PARAMS["w_con_in_f_rg_e"] * SCALE_INHIB,
                       p=PARAMS["p_con_in_f_rg_e"])
-        # The same half-centre interneurons also inhibit the antagonist motor
-        # pool. Without this, RGE/RGF reciprocal inhibition never reaches the
-        # M-E/M-F output and both muscles co-contract.
-        self._connect(f"in_e_{leg}", f"m_f_{leg}",
-                      weight=PARAMS["w_con_in_e_m_f"] * SCALE_INHIB,
-                      p=PARAMS["p_con_in_e_m_f"])
-        self._connect(f"in_f_{leg}", f"m_e_{leg}",
-                      weight=PARAMS["w_con_in_f_m_e"] * SCALE_INHIB,
-                      p=PARAMS["p_con_in_f_m_e"])
 
         # --- RG self-recurrence ---
         self._connect(f"rg_e_{leg}", f"rg_e_{leg}",
@@ -499,12 +508,6 @@ class Leg:
         self._connect(f"ia_f_{leg}", f"m_e_{leg}",
                       weight=PARAMS["w_con_ia_f_m_e"],
                       p=PARAMS["p_con_ia_f_m_e"])
-        self._connect(f"ia_e_in_{leg}", f"in_e_{leg}",
-                      weight=PARAMS["w_con_ia_e_in_in_e"],
-                      p=PARAMS["p_con_ia_e_in_in_e"])  # W_IA2IN, P_IA2IN
-        self._connect(f"ia_f_in_{leg}", f"in_f_{leg}",
-                      weight=PARAMS["w_con_ia_f_in_in_f"],
-                      p=PARAMS["p_con_ia_f_in_in_f"])
 
         # --- Recurrent (Renshaw) inhibition (project values) ---
         # Renshaw recurrent inhibition, attenuated to 0.2x. This loop is net
@@ -545,14 +548,6 @@ class Leg:
         self._connect(f"in_ib_f_{leg}", f"rg_e_{leg}",
                       weight=PARAMS["w_con_in_ib_f_rg_e"] * SCALE_IB,
                       p=PARAMS["p_con_in_ib_f_rg_e"])  # Ib-F excites RG-E (phase switch)
-
-        # --- Ib interneuron convergence (spindle, CPG) ---
-        self._connect(f"ia_e_in_{leg}", f"in_ib_e_{leg}",
-                      weight=PARAMS["w_con_ia_e_in_in_ib_e"],
-                      p=PARAMS["p_con_ia_e_in_in_ib_e"])  # Ia -> InIb-E
-        self._connect(f"ia_f_in_{leg}", f"in_ib_f_{leg}",
-                      weight=PARAMS["w_con_ia_f_in_in_ib_f"],
-                      p=PARAMS["p_con_ia_f_in_in_ib_f"])  # Ia -> InIb-F
 
         # --- Cutaneous (CUT) stance reinforcement ---
         if self.cut_multisite:
@@ -631,21 +626,37 @@ class Leg:
                                         cut_active):
                 self.registry.set_relay_rate(pg, float(rate) if active else 0.0)
 
-    def get_muscle_drives(self, dt_ms: float, current_time_ms: float = 0.0) -> Tuple[float, float]:
-        """
-        Normalized muscle activation in [0, 1] from the motor pool's spikes this
-        step. A pool at `ref_hz` per neuron (default 100 Hz) maps to full drive, so
-        the drive tracks population rate and stays graded over its whole range.
-        Muscle drives are readouts/logs, not noise channels.
-        """
-        n_e = len(self.rec_mne.get("events")["times"])
-        n_f = len(self.rec_mnf.get("events")["times"])
-        self.rec_mne.set({"n_events": 0})
-        self.rec_mnf.set({"n_events": 0})
+    def drain_activity(self, dt_ms: float):
+        """Reads and clears every recorder, returning per-step rates and spikes."""
+        rates, counts, events = {}, {}, {}
+        for name, rec in self.recorders.items():
+            ev = rec.get("events")
+            times = np.asarray(ev.get("times", []), dtype=np.float64)
+            senders = np.asarray(ev.get("senders", []), dtype=np.int64)
+            n = int(times.size)
+            ids = self.rec_ids[name]
+            counts[name] = n
+            rates[name] = (1000.0 * n / max(1, len(ids)) / dt_ms
+                           if dt_ms > 0.0 else 0.0)
+            if n:
+                events[name] = {
+                    "times": times,
+                    "senders": np.searchsorted(ids, senders),
+                }
+            rec.set({"n_events": 0})
+        self._last_rates = rates
+        self._last_counts = counts
+        self._last_events = events
+        return rates, counts, events
 
-        drive_e = self._drive(n_e, dt_ms)
-        drive_f = self._drive(n_f, dt_ms)
-        return drive_e, drive_f
+    def get_muscle_drives(self, dt_ms: float,
+                          current_time_ms: float = 0.0) -> Tuple[float, float]:
+        """Normalized motor-pool drive in [0, 1] from this step's spikes."""
+        if not self._last_counts:
+            self.drain_activity(dt_ms)
+        n_e = self._last_counts.get(f"m_e_{self.leg}", 0)
+        n_f = self._last_counts.get(f"m_f_{self.leg}", 0)
+        return self._drive(n_e, dt_ms), self._drive(n_f, dt_ms)
 
     def _drive(self, spikes: int, dt_ms: float, n: int | None = None) -> float:
         ref_hz = getattr(self, "ref_hz", PARAMS["ref_hz_default"])
@@ -655,15 +666,10 @@ class Leg:
 
     def get_rg_rates(self, dt_ms: float,
                      current_time_ms: float = 0.0) -> Tuple[float, float]:
-        """
-        Normalized RGE/RGF population activity in [0, 1] from the spikes the
-        rhythm-generator recorders saw this step. The recorders are read then
-        cleared (`cpg_2legs_fast`'s constant-cost pattern), so both the cost and
-        the memory stay bounded over a long run.
-        """
-        n_e = len(self.rec_rge.get("events")["times"])
-        n_f = len(self.rec_rgf.get("events")["times"])
-        self.rec_rge.set({"n_events": 0})
-        self.rec_rgf.set({"n_events": 0})
+        """Normalized RG population activity in [0, 1] from this step's spikes."""
+        if not self._last_counts:
+            self.drain_activity(dt_ms)
+        n_e = self._last_counts.get(f"rg_e_{self.leg}", 0)
+        n_f = self._last_counts.get(f"rg_f_{self.leg}", 0)
         return (self._drive(n_e, dt_ms, self.n_rg),
                 self._drive(n_f, dt_ms, self.n_rg))

@@ -19,6 +19,7 @@ from persona.homeostasis import HomeostaticConfig
 from persona.personalization import MocapTargetDriver, Personalizer
 from persona.validation import ValidationReport
 from t2xcpg.bs import BrainStem, BaseDrive
+from t2xcpg.params import PARAMS
 from t2xcpg.leg import Leg as CPG_Leg
 from t2xcpg.cpg import L2CPG
 from model.leg import Leg as MuJoCo_Leg
@@ -116,6 +117,7 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
         pass
 
     reg = Registry()
+    reg.ensure_delay_range(PARAMS["delay_min_ms"], PARAMS["delay_max_ms"])
     bs = BrainStem(registry=reg, n_bs=n_bs, bs_e_hz=40.0, bs_f_hz=40.0)
     base = BaseDrive(registry=reg, n_bs=n_bs, base_hz=2.0)
     leg_l = CPG_Leg("L", reg, n_rg=n_rg, n_mn=n_mn, n_int=n_int, n_aff=n_aff,

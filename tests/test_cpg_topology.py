@@ -18,8 +18,9 @@ def test_halfcentre_is_via_in(nest_kernel):
     assert "in_e_L_rg_f_L" in reg.connection_cfgs
     assert "rg_e_L_rg_f_L" not in reg.connection_cfgs      # no direct half-centre
     assert "in_e_L_m_e_L" not in reg.connection_cfgs       # InE does not drive its own MN
-    assert "in_e_L_m_f_L" in reg.connection_cfgs           # reciprocal at motor pool
-    assert "in_f_L_m_e_L" in reg.connection_cfgs
+    # UPDATED: deprecated motor pool inhibition removed
+    assert "in_e_L_m_f_L" not in reg.connection_cfgs       # removed deprecated connection
+    assert "in_f_L_m_e_L" not in reg.connection_cfgs       # removed deprecated connection
 
 
 def test_rg_to_mn_direct(nest_kernel):
@@ -30,12 +31,11 @@ def test_rg_to_mn_direct(nest_kernel):
 def test_reference_values(nest_kernel):
     reg, leg = _leg()
     w = lambda k: reg.connection_cfgs[k].parameters["weight"].mean
-    assert np.isclose(w("rg_e_L_in_e_L"), 12.0)
-    assert np.isclose(w("in_e_L_rg_f_L"), -8.0)
-    assert np.isclose(w("rg_f_L_in_f_L"), 18.0)
-    assert np.isclose(w("in_f_L_rg_e_L"), -48.0)
-    assert np.isclose(w("in_e_L_m_f_L"), -8.0)
-    assert np.isclose(w("in_f_L_m_e_L"), -48.0)
+    assert np.isclose(w("rg_e_L_in_e_L"), 15.0)
+    assert np.isclose(w("in_e_L_rg_f_L"), -20.0)
+    assert np.isclose(w("rg_f_L_in_f_L"), 15.0)
+    assert np.isclose(w("in_f_L_rg_e_L"), -20.0)
+    # REMOVED: deprecated motor pool inhibition weights
 
 
 def test_cut_reference_values(nest_kernel):
@@ -59,10 +59,11 @@ def test_interneurons_are_fast_spiking(nest_kernel):
     assert reg.population_cfgs["rg_f_L"].params["c"].mean == -55.0
 
 
-def test_weak_ef_pathway_density(nest_kernel):
+def test_symmetric_ef_pathway(nest_kernel):
+    """Half-center pathways are now symmetric for balanced oscillation."""
     reg, leg = _leg()
-    assert reg.connection_cfgs["in_e_L_rg_f_L"].p == 0.15
-    assert reg.connection_cfgs["in_f_L_rg_e_L"].p == 0.30
+    assert reg.connection_cfgs["in_e_L_rg_f_L"].p == 0.25  # UPDATED: was 0.15
+    assert reg.connection_cfgs["in_f_L_rg_e_L"].p == 0.25  # UPDATED: was 0.30
 
 
 def test_renshaw_gain_is_attenuated(nest_kernel):
@@ -87,5 +88,5 @@ def test_bs_drive_seed_weight(nest_kernel):
                 if c.source.startswith("BS_in_")}
     assert bs_conns
     for key, cfg in bs_conns.items():
-        expected = 3.0 if key.endswith("_L") else 2.0
+        expected = 9.6 if key.endswith("_L") else 8.0
         assert np.isclose(cfg.parameters["weight"].mean, expected), key

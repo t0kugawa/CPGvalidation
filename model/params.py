@@ -41,6 +41,8 @@ PARAMS = {
     "default_pose_ankle_rad": 0.3,              # [rad] reset ankle angle
     "muscle_drive_min": 0.0,                    # [fraction] drive lower clip
     "muscle_drive_max": 1.0,                    # [fraction] drive upper clip
+    "emg_tau_ms": 30.0,                         # [ms] EMG envelope low-pass
+    "emg_gain": 1.0,                            # [gain] EMG envelope scale
 
     # ── Reference gait kinematics ───────────────────────────────────────────
     "reference_freq_hz": 1.5,                   # [hz] reference cycle rate
