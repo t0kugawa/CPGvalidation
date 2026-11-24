@@ -404,7 +404,7 @@ def _build_parser():
     ap.add_argument("--accept-coverage", type=float, default=0.70)
     ap.add_argument("--accept-window", type=int, default=50)
     ap.add_argument("--spikes", choices=("full", "rates", "none"),
-                    default="full")
+                    default="rates")
     ap.add_argument("--params-snapshot", dest="params_snapshot",
                     action="store_true", default=True)
     ap.add_argument("--no-params-snapshot", dest="params_snapshot",
