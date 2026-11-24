@@ -416,6 +416,8 @@ class Personalizer:
                 self.registry.restore_weights(initial_weights)
                 self.registry.pin_bs_input()
                 locomotion_initialized = True
+                if hasattr(self.cpg, "start_locomotion"):
+                    self.cpg.start_locomotion()
             if stage == "pose":
                 # Hold the whole target (incl. the mocap hip base) at t=0.
                 rig_kwargs = self.target_driver.target(0.0)

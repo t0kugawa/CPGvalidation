@@ -72,7 +72,7 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
                        seed: int = 0,
                        w_scale: float = 1.0,
                        ref_hz: float = 100.0,
-                       belt_mode: str = "dataset",
+                       belt_mode: str = "model",
                        loop: bool = True,
                        tau_mem_s: float = 2.0,
                        resolution_ms: float = 0.2,
@@ -127,7 +127,8 @@ def build_personalizer(reference_path: str = DEFAULT_REFERENCE,
                     w_scale=w_scale, ref_hz=ref_hz,
                     cut_multisite=cut_multisite)
     cpg = L2CPG(registry=reg, bs=bs, legs={"L": leg_l, "R": leg_r}, dt_ms=DT_MS,
-                leading_leg="L", leading_gain=1.5, base=base)
+                leading_leg=PARAMS["leading_leg"],
+                leading_gain=PARAMS["leading_gain"], base=base)
 
     rig = MuJoCo_Leg(mujoco_cfg=os.path.join(BASE_DIR, "dual_rat_hindlimb.xml"),
                      dt_ms=DT_MS)
@@ -242,7 +243,7 @@ def run_personalization(reference_path: str = DEFAULT_REFERENCE,
                         loss_window: int = 30,
                         verbose: bool = True,
                         log_every: int = 20,
-                        belt_mode: str = "dataset",
+                        belt_mode: str = "model",
                         tau_mem_s: float = 2.0,
                         realize_every_k: int = 1,
                         cut_multisite: bool = False,

@@ -20,7 +20,7 @@ def copy_syn_model(name: str, params: dict, wr=None):
 
 
 def stdp_param_spec(syn_type: str) -> dict:
-    prefix = {"ia": "stdp_ia_", "bs": "stdp_bs_"}.get(syn_type, "stdp_default_")
+    prefix = {"ia": "stdp_ia_", "bs": "stdp_bs_", "cut": "stdp_cut_"}.get(syn_type, "stdp_default_")
     return {
         "tau_plus": float(PARAMS[f"{prefix}tau_plus"]),
         "lambda": float(PARAMS[f"{prefix}lambda"]),
@@ -39,7 +39,7 @@ def create_stdp_synapse(registry, syn_type: str, postfix: str) -> tuple[str, Any
     return name, wr
 
 
-STDP_POSTFIX = {"cut_rge": "default", "ia_rg": "ia", "ia_rge": "ia", "ia_rgf": "ia"}
+STDP_POSTFIX = {"cut_rge": "cut", "ia_rg": "ia", "ia_rge": "ia", "ia_rgf": "ia"}
 
 
 def get_jitter_delay(jitter_ms: float | None = None) -> float:

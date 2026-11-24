@@ -41,6 +41,9 @@ class L2CPG(CPGAdapter):
         self.leading_leg = leading_leg
         self.leading_gain = float(leading_gain)
         self.base = base
+        self.priming_duration_ms = float(PARAMS.get("bs_priming_ms", 150.0))
+        self.locomotion_start_ms = None
+        self._bs_symmetric = False
 
         # Build Brainstem drives and Commissural Cross-Connections
         self._build_bs_connections()
@@ -60,6 +63,39 @@ class L2CPG(CPGAdapter):
                      ref_f: float | None = None):
         """Speed-scale the preserved BS drive without removing it."""
         self.bs.set_speed(speed_mps, ref_e=ref_e, ref_f=ref_f)
+
+    def start_locomotion(self):
+        """Called at locomotion onset to anchor the transient BS priming window."""
+        self.locomotion_start_ms = float(self.current_time_ms)
+        self._bs_symmetric = False
+
+    def fade_bs_to_symmetric(self):
+        """
+        Transition BS->RG drive from asymmetric leading_gain to symmetric (1.0).
+        Option 1A: Breaks initial symmetry for step initiation, then lets spinal
+        V-cells and reciprocal commissural dynamics govern bilateral phase balance.
+        """
+        if self._bs_symmetric:
+            return
+        target_gain = float(PARAMS.get("leading_gain_other", 1.0))
+        ratio = target_gain / max(1e-6, self.leading_gain)
+        if abs(ratio - 1.0) < 1e-4:
+            self._bs_symmetric = True
+            return
+
+        for src in ("BS_in_e", "BS_in_f"):
+            for tgt_type in ("rg_e_", "rg_f_"):
+                conn_key = f"{src}_{tgt_type}{self.leading_leg}"
+                try:
+                    syns = self.registry.synapses(conn_key)
+                    if len(syns) > 0:
+                        weights = np.asarray(syns.get("weight"), dtype=np.float64)
+                        new_weights = (weights * ratio).tolist()
+                        syns.set({"weight": new_weights})
+                except Exception:
+                    pass
+        self._bs_symmetric = True
+        self.leading_gain = target_gain
 
     def _param(self, name: str, mean: float,
                sigma: float = PARAMS["l2_syn_weight_sigma_fraction"],
@@ -156,6 +192,11 @@ class L2CPG(CPGAdapter):
         """
         Routes live sensory inputs from MuJoCo (CUT, Ia, Ib) to the CPG generators.
         """
+        # Transient brainstem priming fade to symmetric
+        t_anchor = self.locomotion_start_ms if self.locomotion_start_ms is not None else 0.0
+        if not self._bs_symmetric and (self.current_time_ms - t_anchor) >= self.priming_duration_ms:
+            self.fade_bs_to_symmetric()
+
         if "L" in self.legs:
             self.legs["L"].update_sensory_feedback(
                 cut_hz=cpg_in.cut_L,

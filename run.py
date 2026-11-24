@@ -28,9 +28,9 @@ DEFAULT_REF_HZ = 700.0
 DEFAULT_RESOLUTION_MS = 0.2
 
 PRESETS = {
-    "full": {},
-    "half": {"n_rg": 50, "n_mn": 50, "n_int": 25, "n_aff": 50, "n_bs": 50},
-    "fifth": {"n_rg": 20, "n_mn": 20, "n_int": 10, "n_aff": 20, "n_bs": 20},
+    "full": {"sim_time": 43200.0, "budget_s": 43200.0},
+    "half": {"n_rg": 50, "n_mn": 50, "n_int": 25, "n_aff": 50, "n_bs": 50, "sim_time": 600.0},
+    "fifth": {"n_rg": 20, "n_mn": 20, "n_int": 10, "n_aff": 20, "n_bs": 20, "sim_time": 30.0},
     "fast": {"n_rg": 6, "n_mn": 5, "n_int": 5, "n_aff": 3, "n_bs": 5,
              "sim_time": 4.0, "width": 480, "height": 270, "fps": 20},
 }
@@ -149,7 +149,7 @@ class _Snapshotter:
 def run(duration_s, view, width, height, fps, out_dir,
         w_scale, ref_hz, belt_mps, belt_start_s, belt_ramp_s,
         n_rg, n_mn, n_int, n_aff, n_bs, render=True, budget_s=None,
-        pose_max_s=1.0, belt_mode="dataset", snapshot_s=900.0,
+        pose_max_s=1.0, belt_mode="model", snapshot_s=900.0,
         tau_mem_s=2.0, realize_every_k=1,
         resolution_ms=DEFAULT_RESOLUTION_MS, cut_multisite=False,
         game=None, seed=0, lr_mode="constant", lr_start=0.03,
@@ -318,6 +318,18 @@ def run(duration_s, view, width, height, fps, out_dir,
     except Exception as exc:
         status["save_all"] = f"ERROR {exc}"
 
+    # Generate full server_24h plotting suite (10-panel report + family breakdown + context)
+    try:
+        from plots.make_plots import generate_run_plots
+        plots_out = os.path.join(out_dir, "plots")
+        h5_path = os.path.join(out_dir, "run.h5")
+        if os.path.exists(h5_path):
+            generate_run_plots(h5_path, plots_out)
+            status["server_plots"] = "ok"
+    except Exception as exc:
+        status["server_plots"] = f"ERROR {exc}"
+        print(f"[plots] failed to generate server_24h plots: {exc}", flush=True)
+
     print("---- output status ----")
     for key, value in status.items():
         print(f"  {key}: {value}")
@@ -357,7 +369,7 @@ def _build_parser():
     ap.add_argument("--belt-mps", type=float, default=0.2)
     ap.add_argument("--belt-start-s", type=float, default=0.5)
     ap.add_argument("--belt-ramp-s", type=float, default=0.5)
-    ap.add_argument("--belt", default="dataset", choices=("dataset", "model"))
+    ap.add_argument("--belt", default="model", choices=("dataset", "model"))
     ap.add_argument("--n-rg", type=int, default=None)
     ap.add_argument("--n-mn", type=int, default=None)
     ap.add_argument("--n-int", type=int, default=None)
@@ -424,6 +436,8 @@ def main():
     preset = PRESETS[args.preset]
     if args.sim_time is None:
         args.sim_time = preset.get("sim_time", 120.0)
+    if args.budget_s is None and "budget_s" in preset:
+        args.budget_s = preset["budget_s"]
     args.width = args.width or preset.get("width", 1920)
     args.height = args.height or preset.get("height", 1080)
     args.fps = args.fps or preset.get("fps", 40)

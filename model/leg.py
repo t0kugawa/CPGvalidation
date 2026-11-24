@@ -176,6 +176,9 @@ class Leg:
         self._phase_state = {s: "stance" for s in SIDES}  # Current phase
         self._phase_count = {s: 0 for s in SIDES}  # Steps in current phase
         self._phase_min_steps = 20  # Minimum steps before allowing phase change (200ms at 10ms dt, ~2.5Hz max)
+        self._last_stance_onset_ms = {s: 0.0 for s in SIDES}
+        self._cycle_period_ms = {s: 1000.0 for s in SIDES}
+        self._phase_confidence = {s: 0.0 for s in SIDES}
 
     def _jid(self, name: str) -> int:
         i = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name)
@@ -311,6 +314,9 @@ class Leg:
         # Reset phase tracking
         self._phase_state = {s: "stance" for s in SIDES}
         self._phase_count = {s: 0 for s in SIDES}
+        self._last_stance_onset_ms = {s: 0.0 for s in SIDES}
+        self._cycle_period_ms = {s: 1000.0 for s in SIDES}
+        self._phase_confidence = {s: 0.0 for s in SIDES}
         if pose is None:
             pose = {s: {"hip": PARAMS["default_pose_hip_rad"],
                         "knee": PARAMS["default_pose_knee_rad"],
@@ -559,9 +565,21 @@ class Leg:
             # 2. Minimum duration has elapsed
             if intent != current and self._phase_count[s] >= self._phase_min_steps:
                 self._phase_state[s] = intent
+                if intent == "stance":
+                    dur = self.time_ms - self._last_stance_onset_ms[s]
+                    if 200.0 <= dur <= 3000.0:
+                        self._cycle_period_ms[s] = 0.8 * self._cycle_period_ms[s] + 0.2 * dur
+                        self._phase_confidence[s] = min(1.0, self._phase_confidence[s] + 0.2)
+                    self._last_stance_onset_ms[s] = self.time_ms
                 self._phase_count[s] = 0
             
             cp_phase[s] = self._phase_state[s]
+
+        phase_clock = {}
+        for s in SIDES:
+            elapsed = max(0.0, self.time_ms - self._last_stance_onset_ms[s])
+            period = max(100.0, self._cycle_period_ms[s])
+            phase_clock[s] = (elapsed % period) / period * 2.0 * np.pi
 
         t_s = self.time_ms / 1000.0
         # Distinct left/right reference trajectories (R is phase-shifted).
@@ -685,6 +703,12 @@ class Leg:
             emg_E_R=R["emg_e"], emg_F_R=R["emg_f"],
             phase_L=L["phase"], phase_R=R["phase"],
             phase_ref_L=L["phase_ref"], phase_ref_R=R["phase_ref"],
+            phase_period_L=self._cycle_period_ms["L"] / 1000.0,
+            phase_period_R=self._cycle_period_ms["R"] / 1000.0,
+            phase_confidence_L=self._phase_confidence["L"],
+            phase_confidence_R=self._phase_confidence["R"],
+            phase_clock_L=phase_clock["L"],
+            phase_clock_R=phase_clock["R"],
             contact_m_L=L["contact"], contact_m_R=R["contact"],
             contact_ref_L=L["contact_ref"], contact_ref_R=R["contact_ref"],
             foot_x_m_L=L["foot_x_m"], foot_x_m_R=R["foot_x_m"],

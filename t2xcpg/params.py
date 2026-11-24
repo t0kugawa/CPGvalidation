@@ -129,7 +129,13 @@ PARAMS = {
     "stdp_default_alpha": 0.95,                 # [stdp] default alpha
     "stdp_default_mu_plus": 0.4,                # [stdp] default mu_plus
     "stdp_default_mu_minus": 0.4,               # [stdp] default mu_minus
-    "stdp_default_wmax": 120.0,                 # [stdp] default Wmax
+    "stdp_default_wmax": 30.0,                  # [stdp] default Wmax (capped to prevent runaway)
+    "stdp_cut_tau_plus": 20.0,                  # [stdp] CUT tau_plus
+    "stdp_cut_lambda": 0.001,                   # [stdp] CUT lambda
+    "stdp_cut_alpha": 0.95,                     # [stdp] CUT alpha
+    "stdp_cut_mu_plus": 0.4,                    # [stdp] CUT mu_plus
+    "stdp_cut_mu_minus": 0.4,                   # [stdp] CUT mu_minus
+    "stdp_cut_wmax": 30.0,                      # [stdp] CUT Wmax (capped from 120.0 to prevent runaway lock)
     "stdp_ia_tau_plus": 20.0,                   # [stdp] Ia tau_plus
     "stdp_ia_lambda": 0.001,                    # [stdp] Ia lambda
     "stdp_ia_alpha": 0.95,                      # [stdp] Ia alpha
@@ -179,8 +185,9 @@ PARAMS = {
     "p_con_base_rg": 0.10,                      # [p_con] BASE -> RG_E/RG_F
     "delay_base_rg": 1.0,                       # [delay] BASE -> RG_E/RG_F
     "leading_leg": "L",                         # [choice] first-stepping leg
-    "leading_gain": 1.2,                        # [gain] leading-leg BS gain (optimal L-R balance)
+    "leading_gain": 1.5,                        # [gain] leading-leg BS gain (transient priming)
     "leading_gain_other": 1.0,                  # [gain] non-leading-leg BS gain
+    "bs_priming_ms": 150.0,                     # [ms] duration of leading-leg priming window
     "p_comm": 0.40,                             # [p_con] commissural density
     "delay_comm": 3.0,                          # [delay] commissural delay
     "w_con_v0v_in1": 1.3,                       # [w_con] V0v -> In1

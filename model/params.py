@@ -32,7 +32,7 @@ PARAMS = {
     "render_fps": 40,                           # [fps] replay / render rate
     "render_width_px": 1920,                    # [px] render width
     "render_height_px": 1080,                   # [px] render height
-    "treadmill_penetration_m": 0.0005,          # [m] belt above foot rest
+    "treadmill_penetration_m": 0.0035,          # [m] belt above foot rest (3.5mm ensures bilateral contact)
     "contact_z_eps_m": 0.003,                   # [m] retired contact gate
     "ankle_range_lo_rad": 0.19,                 # [rad] ankle stop, lower
     "ankle_range_hi_rad": 1.10,                 # [rad] ankle stop, upper
